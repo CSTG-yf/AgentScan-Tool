@@ -10,7 +10,7 @@
 #
 # DefenseClaw bootstrap + per-connector setup/teardown helpers shared by the
 # contract-smoke and live drivers. Mirrors the init/setup/health/teardown flow
-# in .github/workflows/e2e.yml but parameterized per hook connector.
+# in the full-stack local E2E harness but parameterized per hook connector.
 
 # dc_setup_subcommand <connector> — map a registry connector name to its
 # `defenseclaw setup` subcommand. Only claude diverges (claude-code); every

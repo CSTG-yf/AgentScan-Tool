@@ -244,7 +244,7 @@ defenseclaw registry reject  corp-skills evil-skill --type skill
 
 ## Sync schedules
 
-Today, syncing is **on demand**. The `--auto-sync` and `--sync-interval-hours` flags on `add` / `edit` are persisted but the runtime does not poll. Run `registry sync --all` from a cron / systemd timer / GitHub Actions schedule until scheduled sync ships in a future release:
+Today, syncing is **on demand**. The `--auto-sync` and `--sync-interval-hours` flags on `add` / `edit` are persisted but the runtime does not poll. Run `registry sync --all` from a cron or systemd timer until scheduled sync ships in a future release:
 
 ```bash
 # /etc/cron.d/defenseclaw-registry

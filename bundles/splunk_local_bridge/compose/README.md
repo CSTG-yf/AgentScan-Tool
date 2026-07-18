@@ -1,6 +1,6 @@
 # compose
 
-This directory contains developer-local and CI compose profiles for the local Splunk bridge.
+This directory contains persistent developer and disposable local E2E profiles for the Splunk bridge.
 
 The preferred operational interface is [bin/splunk-claw-bridge](../bin/splunk-claw-bridge). Use the compose files directly only when debugging the bootstrap path or changing repo internals.
 
@@ -10,8 +10,8 @@ The preferred operational interface is [bin/splunk-claw-bridge](../bin/splunk-cl
   - persisted developer-local profile
   - binds `127.0.0.1:8000` and `127.0.0.1:8088`
   - uses named volumes for both `/opt/splunk/etc` and `/opt/splunk/var`
-- `docker-compose.ci.yml`
-  - disposable CI and harness profile
+- `docker-compose.e2e.yml`
+  - disposable local E2E profile
   - binds the same loopback ports
   - uses anonymous volumes and is expected to be torn down with `down -v`
 

@@ -103,12 +103,12 @@
     },
     {
       "title": "Developer Guide",
-      "purpose": "Development workflow: repo layout, build targets, local installs, generated data bundles, docs generation, code style, common scripts, release artifacts, and contribution conventions. Reference docs/CONTRIBUTING.md, docs/development/DEVELOPER_SPEC.md, Makefile, scripts/, pyproject.toml, .github/workflows/, and .goreleaser.yaml.",
+      "purpose": "Development workflow: repo layout, build targets, local installs, generated data bundles, docs generation, code style, common scripts, release artifacts, and contribution conventions. Reference docs/CONTRIBUTING.md, docs/development/DEVELOPER_SPEC.md, Makefile, scripts/, pyproject.toml, and .goreleaser.yaml.",
       "parent": "Home"
     },
     {
       "title": "Testing and CI",
-      "purpose": "Testing guide for Python CLI tests, Go race tests, TypeScript Vitest, Rego OPA tests, docs generation/dead-link checks, E2E harnesses, parity gates, and CI workflow responsibilities. Reference docs/TESTING.md, docs/E2E.md, Makefile, cli/tests/, internal/** tests, extensions/defenseclaw/src/__tests__/, policies/rego/*_test.rego, scripts/check_*.py, and .github/workflows/.",
+      "purpose": "Testing guide for Python CLI tests, Go race tests, TypeScript Vitest, Rego OPA tests, docs generation/dead-link checks, local E2E harnesses, and parity gates. Reference docs/TESTING.md, docs/E2E.md, Makefile, cli/tests/, internal/** tests, extensions/defenseclaw/src/__tests__/, policies/rego/*_test.rego, and scripts/check_*.py.",
       "parent": "Developer Guide"
     },
     {

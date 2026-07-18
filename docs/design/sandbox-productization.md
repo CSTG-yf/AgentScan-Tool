@@ -1819,32 +1819,20 @@ All unit tests run without privileged access. Policy generation,
 config merging, health tracking, and command building are all testable
 with mocks or temp directories.
 
-### 8.2 Integration tests (CI)
+### 8.2 Local integration tests
 
 Integration tests that exercise the full sandbox lifecycle require
-Linux namespaces (privileged). These are **excluded from the standard
-CI pipeline** and run only on a dedicated Linux host or manually.
+Linux namespaces (privileged). Run them manually on a dedicated Linux host.
 
-Standard CI runs all unit tests, Go/Python/TS linting, and non-sandbox
-integration tests:
+Run unit tests, linting, and non-sandbox integration checks locally:
 
-```yaml
-# .github/workflows/test.yml (existing, no changes needed)
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build
-        run: make build
-      - name: Test
-        run: make test          # unit tests only, no privileged ops
-      - name: Lint
-        run: make lint
+```bash
+make build
+make test          # unit tests only, no privileged ops
+make lint
 ```
 
-Sandbox-specific integration tests run on a self-hosted runner or
-manually on a Linux VM:
+Sandbox-specific integration tests run manually on a Linux VM:
 
 ```bash
 # Manual sandbox integration test (requires root on Linux)

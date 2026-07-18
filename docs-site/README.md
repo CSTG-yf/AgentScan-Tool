@@ -62,9 +62,9 @@ Authoring contract for new diagrams lives in [`components/diagram/AUTHORING.md`]
 | `app/docs-og/[...slug]/route.tsx` | Per-page OG images, 1200x630 PNG, pre-rendered at build time. |
 | `components/structured-data.tsx` | JSON-LD: Organization, WebSite, BreadcrumbList, TechArticle, SoftwareSourceCode, FAQPage. |
 
-## Deployment
+## Local build
 
-The `docs-site.yml` workflow at the repo root builds with `BASE_PATH=/defenseclaw` and deploys via `actions/deploy-pages` on every push to `main`. Custom domain? Set `BASE_PATH=` and update `SITE_URL` in the workflow.
+Build the static site locally with the package scripts in this directory. Publishing is intentionally handled outside this repository.
 
 ## Not maintained here
 

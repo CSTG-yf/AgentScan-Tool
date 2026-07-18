@@ -115,6 +115,9 @@ var commandRules = []PatternRule{
 	{ID: "CMD-PIPE-CURL", Pattern: regexp.MustCompile(`(?i)\bcurl\b\s+[^|]*\|\s*(?:[/\w]+/)?(?:bash|zsh|sh)\b`), Title: "curl piped to shell", Severity: "CRITICAL", Confidence: 0.95, Tags: []string{"execution", "download-exec"}},
 	{ID: "CMD-PIPE-WGET", Pattern: regexp.MustCompile(`(?i)\bwget\b\s+[^|]*\|\s*(?:[/\w]+/)?(?:bash|zsh|sh)\b`), Title: "wget piped to shell", Severity: "CRITICAL", Confidence: 0.95, Tags: []string{"execution", "download-exec"}},
 	{ID: "CMD-PIPE-BASE64", Pattern: regexp.MustCompile(`(?i)base64\s+(?:-[dD]|--decode)\s*\|\s*(?:[/\w]+/)?(?:bash|zsh|sh)\b`), Title: "base64 decode piped to shell", Severity: "CRITICAL", Confidence: 0.95, Tags: []string{"execution", "obfuscation"}},
+	// Dynamic Python supplied to validators/template engines is execution,
+	// even when it never contains a literal shell command at inspection time.
+	{ID: "CMD-PY-SUBPROCESS-SHELL", Pattern: regexp.MustCompile(`(?is)(?:__import__\s*\(\s*["']subprocess["']\s*\)|\bsubprocess)\s*\.\s*(?:run|Popen|call|check_output)\s*\([^)]*\bshell\s*=\s*True\b`), Title: "Python subprocess with shell=True", Severity: "CRITICAL", Confidence: 0.96, Tags: []string{"execution", "code-injection"}},
 	// Dynamic code execution
 	{ID: "CMD-EVAL", Pattern: regexp.MustCompile(`(?i)\beval\s+["'\$\(]`), Title: "Shell eval with dynamic input", Severity: "HIGH", Confidence: 0.85, Tags: []string{"execution"}},
 	{ID: "CMD-BASH-C", Pattern: regexp.MustCompile(`(?i)\b(?:ba)?sh\s+-c\s+`), Title: "Shell -c execution", Severity: "LOW", Confidence: 0.55, Tags: []string{"execution"}},
@@ -190,6 +193,7 @@ var sensitivePathRules = []PatternRule{
 	{ID: "PATH-ETC-SHADOW", Pattern: regexp.MustCompile(`(?i)(?:\betc[\s/\\]+(?:slash[\s]+)?shadow\b|\betc%2Fshadow\b)`), Title: "/etc/shadow access", Severity: "CRITICAL", Confidence: 0.90, Tags: []string{"system-file", "credential"}},
 	{ID: "PATH-ETC-SUDOERS", Pattern: regexp.MustCompile(`(?i)(?:\betc[\s/\\]+(?:slash[\s]+)?sudoers\b|\betc%2Fsudoers\b)`), Title: "/etc/sudoers access", Severity: "HIGH", Confidence: 0.85, Tags: []string{"system-file", "privilege"}},
 	{ID: "PATH-PROC-ENVIRON", Pattern: regexp.MustCompile(`/proc/(?:\d+|self)/environ`), Title: "/proc environ access", Severity: "CRITICAL", Confidence: 0.90, Tags: []string{"credential"}},
+	{ID: "PATH-CRON-PERSIST", Pattern: regexp.MustCompile(`(?i)(?:\.\.[/\\]){2,}[^\s"']*(?:[/\\])etc[/\\](?:cron\.d|cron\.(?:daily|hourly|weekly|monthly))(?:[/\\]|\b)|(?:^|[\s"'])/etc/(?:cron\.d|cron\.(?:daily|hourly|weekly|monthly))(?:/|\b)`), Title: "Cron persistence path access", Severity: "CRITICAL", Confidence: 0.95, Tags: []string{"persistence", "path-traversal", "system-file"}},
 	{ID: "PATH-HISTORY", Pattern: regexp.MustCompile(`(?:~|\$\{?HOME\}?|/home/\w+|/root|/Users/\w+)/\.(?:bash_history|zsh_history|python_history)`), Title: "Shell history file", Severity: "MEDIUM", Confidence: 0.80, Tags: []string{"credential", "file-sensitive"}},
 }
 

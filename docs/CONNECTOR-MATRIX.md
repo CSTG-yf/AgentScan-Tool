@@ -239,21 +239,20 @@ non-CodeGuard paths require `--replace`.
 
 ---
 
-## Live E2E coverage
+## Local live E2E coverage
 
-The [`.github/workflows/connector-live-e2e.yml`](../.github/workflows/connector-live-e2e.yml)
-workflow proves each hook connector end-to-end against real upstream agents
-and flags when an upstream release breaks a hook. It is intentionally
-separate from `e2e.yml` so it can go red on an upstream regression without
-blocking the OpenClaw stack gate. The harness lives under
-[`scripts/live-connector-e2e/`](../scripts/live-connector-e2e).
+The local harness under
+[`scripts/live-connector-e2e/`](../scripts/live-connector-e2e) proves each
+hook connector end-to-end against real upstream agents and exposes upstream
+hook regressions. Run the required connector and OS cells manually on hosts
+that have the corresponding agent and credentials installed.
 
 ### Two layers
 
 | Layer | What it proves | LLM? | Secrets? | OSes | When |
 | ----- | -------------- | ---- | -------- | ---- | ---- |
-| **A — Contract matrix** | Feeds golden stdin payloads into the *installed* hook entrypoint and asserts the gateway received the event, the verdict was shaped correctly, and teardown is clean. | no | no | linux, macos, windows | every run; fork-safe |
-| **B — Live agent matrix** | Installs the real agent at its latest version, runs `defenseclaw setup`, drives lifecycle + forced tool calls through the real harness, and asserts observe / block / OTLP / teardown. | yes (deterministic prompts) | yes | per the reality matrix below | nightly + manual dispatch |
+| **A — Contract matrix** | Feeds golden stdin payloads into the *installed* hook entrypoint and asserts the gateway received the event, the verdict was shaped correctly, and teardown is clean. | no | no | linux, macos, windows | manual local run |
+| **B — Live agent matrix** | Installs the real agent at its latest version, runs `defenseclaw setup`, drives lifecycle + forced tool calls through the real harness, and asserts observe / block / OTLP / teardown. | yes (deterministic prompts) | yes | per the reality matrix below | manual credentialed run |
 
 Layer A targets `~/.defenseclaw/hooks/<connector>-hook.sh` on Linux/macOS and
 the native `defenseclaw-gateway hook --connector <c> --event <e>` subcommand on
@@ -290,8 +289,8 @@ All Windows live cells and every Copilot cell start advisory; they are promoted
 to gating once stable. Contract-only connectors run Layer A on every OS and are
 intentionally absent from Layer B.
 
-> **Current rollout:** the nightly schedule runs **Layer A only**. Layer B is
-> manual-dispatch-only and presently scoped to the connectors we can
+> **Recommended local rollout:** run **Layer A** for all available connectors
+> before integration delivery. Run Layer B only for connectors that can
 > authenticate with Azure OpenAI / Amazon Bedrock — **Codex, Claude Code, and
 > OpenHands**. **Gemini CLI, Cursor, and Copilot live cells are deferred** until
 > their native keys (`GOOGLE_API_KEY`, `CURSOR_API_KEY`, `COPILOT_CLI_TOKEN`)

@@ -663,12 +663,11 @@ dist: dist-cli dist-gateway dist-plugin dist-sandbox dist-upgrade-manifest dist-
 	@echo "Test locally:"
 	@echo "  ./scripts/install.sh --local $(DIST_DIR)"
 	@echo ""
-	@echo "Cut a release (preferred — atomic tag + assets, runs in CI):"
-	@echo "  Actions UI -> 'Release' workflow -> Run workflow -> enter $(VERSION)"
-	@echo "  Or from the CLI: git tag $(VERSION) && git push origin $(VERSION)"
+	@echo "Publish the verified dist/ directory using your external release process."
+	@echo "If Git tags are used for versioning: git tag $(VERSION) && git push origin $(VERSION)"
 	@echo ""
 	@echo "  NOTE: tag must be bare X.Y.Z, no 'v' prefix — the release"
-	@echo "  workflow + scripts/install.sh + 'defenseclaw upgrade' all"
+	@echo "  scripts/install.sh + 'defenseclaw upgrade'"
 	@echo "  resolve artifacts under https://github.com/.../releases/tag/X.Y.Z"
 
 dist-cli: _bundle-data

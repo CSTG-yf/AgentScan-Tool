@@ -61,7 +61,7 @@ make upgrade-smoke ARGS="--from-version 0.7.2"
 # Full supported historical matrix.
 make upgrade-smoke-matrix
 
-# Reuse an existing release-style dist directory, such as in release CI.
+# Reuse an existing release-style dist directory.
 make upgrade-smoke-matrix ARGS="--release-dir dist --baseline-mode seed"
 
 # Custom subset, useful while debugging one old branch of the upgrade path.
@@ -76,19 +76,12 @@ scp -r /tmp/defenseclaw-upgrade-smoke.xxxxxx/candidate-release openclaw-vineeth:
 ssh openclaw-vineeth 'scripts/test-upgrade-release.sh --release-root /tmp/candidate-release --from-versions "0.8.1,0.8.0,0.7.2,0.7.1,0.6.6,0.6.5,0.6.4,0.6.3,0.6.2,0.6.1,0.6.0,0.5.0,0.4.0" --baseline-mode seed'
 ```
 
-The default matrix covers every published 0.4.0+ baseline that has both a Python wheel, platform gateway archives, and an upgrade command: `0.8.1`, `0.8.0`, `0.7.2`, `0.7.1`, `0.6.6`, `0.6.5`, `0.6.4`, `0.6.3`, `0.6.2`, `0.6.1`, `0.6.0`, `0.5.0`, and `0.4.0`. Baselines newer than the candidate target are skipped automatically so local CI does not accidentally test downgrades before a release workflow stamps the next version. Release `0.7.0` has no downloadable release assets, and `0.2.0` predates the upgrade command, so they are not live-upgradeable by this harness.
+The default matrix covers every published 0.4.0+ baseline that has both a Python wheel, platform gateway archives, and an upgrade command: `0.8.1`, `0.8.0`, `0.7.2`, `0.7.1`, `0.6.6`, `0.6.5`, `0.6.4`, `0.6.3`, `0.6.2`, `0.6.1`, `0.6.0`, `0.5.0`, and `0.4.0`. Baselines newer than the candidate target are skipped automatically so local verification does not accidentally test downgrades. Release `0.7.0` has no downloadable release assets, and `0.2.0` predates the upgrade command, so they are not live-upgradeable by this harness.
 
-The release workflow also runs `make upgrade-smoke-matrix ARGS="--release-dir dist --baseline-mode seed"` after artifacts/checksums are finalized and before `gh release create`, so a broken upgrade path aborts before assets are published.
+## Local verification
 
-## CI Workflows
-
-| Workflow | Purpose |
-|----------|---------|
-| `.github/workflows/ci.yml` | Go lint/test, Python test, TypeScript test, Rego test, upgrade smoke, and parity checks |
-| `.github/workflows/e2e.yml` | Self-hosted end-to-end suites and scheduled validation |
-| `.github/workflows/release.yaml` | Tagged release artifacts |
-
-## Before a PR
+This repository intentionally ships no hosted CI/CD workflows. Run the
+quality gates locally before sharing a change:
 
 ```bash
 make lint

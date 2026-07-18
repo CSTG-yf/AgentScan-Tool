@@ -197,7 +197,7 @@ wait_for_openclaw_gateway() {
     return 1
 }
 
-repair_ci_product_state() {
+repair_e2e_host_state() {
     local mode="${1:-state}"
     if [ "$mode" = "permissions-only" ]; then
         RUNNER_CLEANUP_PERMISSIONS_ONLY=1 bash "$REPO_ROOT/scripts/runner-cleanup.sh" || true
@@ -206,7 +206,7 @@ repair_ci_product_state() {
     fi
 }
 
-repair_ci_product_permissions() {
+repair_e2e_host_permissions() {
     RUNNER_CLEANUP_REPAIR_PERMISSIONS_ONLY=1 bash "$REPO_ROOT/scripts/runner-cleanup.sh" || true
 }
 
@@ -214,7 +214,7 @@ ensure_openclaw_config_readable() {
     local reason="${1:-OpenClaw config access}"
     if [ -e "$HOME/.openclaw/openclaw.json" ] && [ ! -r "$HOME/.openclaw/openclaw.json" ]; then
         echo "  [diag] repairing unreadable OpenClaw state before $reason..." >&2
-        repair_ci_product_permissions
+        repair_e2e_host_permissions
     fi
 }
 
@@ -228,13 +228,13 @@ ensure_directory_writable() {
 
     if ! mkdir -p "$dir" 2>/dev/null; then
         echo "  [diag] repairing OpenClaw state permissions before creating $dir..." >&2
-        repair_ci_product_permissions
+        repair_e2e_host_permissions
         mkdir -p "$dir"
     fi
 
     if ! probe=$(mktemp "$dir/.defenseclaw-write-test.XXXXXX" 2>/dev/null); then
         echo "  [diag] repairing OpenClaw state permissions before writing to $dir..." >&2
-        repair_ci_product_permissions
+        repair_e2e_host_permissions
         probe=$(mktemp "$dir/.defenseclaw-write-test.XXXXXX")
     fi
     rm -f "$probe" 2>/dev/null || true
@@ -248,9 +248,9 @@ restart_openclaw_gateway() {
 
 repair_openclaw_gateway_startup_state() {
     echo "  Repairing OpenClaw gateway startup state..."
-    repair_ci_product_state
+    repair_e2e_host_state
     openclaw doctor --fix >/tmp/openclaw-doctor-fix.log 2>&1 || true
-    repair_ci_product_state
+    repair_e2e_host_state
     prune_openclaw_config_for_prefix || true
 }
 
@@ -498,7 +498,7 @@ restart_sidecar_after_openclaw_token_repair() {
     defenseclaw-gateway restart 2>/dev/null || defenseclaw-gateway start 2>/dev/null || true
     wait_for_url "$SIDECAR_URL/health" 60 2 || true
     wait_for_sidecar_subsystems_running 60 || true
-    repair_ci_product_state permissions-only
+    repair_e2e_host_state permissions-only
     sync_gateway_token_env_from_dotenv
 }
 
@@ -775,7 +775,7 @@ skill_list_json() {
         printf '%s\n' "$out"
         return
     fi
-    repair_ci_product_permissions
+    repair_e2e_host_permissions
     if out=$(defenseclaw skill list --json 2>/dev/null) && echo "$out" | jq -e 'type == "array"' >/dev/null 2>&1; then
         printf '%s\n' "$out"
     else
@@ -1437,7 +1437,7 @@ phase_start() {
         restore_openclaw_model_backup
     fi
 
-    repair_ci_product_state
+    repair_e2e_host_state
     cleanup_current_run_artifacts
 
     local stale_skills stale_plugins stale_quarantine cfg_state
@@ -1570,7 +1570,7 @@ phase_start() {
         pass "sidecar health endpoint reachable"
         rm -f "$mem_trace_file"
         restart_sidecar_after_openclaw_token_repair
-        repair_ci_product_state permissions-only
+        repair_e2e_host_state permissions-only
         GATEWAY_TOKEN_CACHE="__unset__"
     else
         fail "sidecar health endpoint reachable" "unhealthy after 3 attempts (60s each)"

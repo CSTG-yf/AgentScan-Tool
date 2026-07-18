@@ -37,7 +37,7 @@ COMPOSE = OBS / "docker-compose.yml"
 OTEL = OBS / "otel-collector" / "config.yaml"
 
 BRIDGE_DIR = DATA / "splunk_local_bridge"
-CI_COMPOSE = BRIDGE_DIR / "compose" / "docker-compose.ci.yml"
+E2E_COMPOSE = BRIDGE_DIR / "compose" / "docker-compose.e2e.yml"
 BRIDGE = BRIDGE_DIR / "bin" / "splunk-claw-bridge"
 EXPORTER = BRIDGE_DIR / "s3_exporter" / "export_splunk_to_s3.py"
 SPLUNK_DEFAULTS = BRIDGE_DIR / "splunk" / "default.yml"
@@ -127,10 +127,10 @@ def test_f0563_otlp_receiver_accepts_docker_port_forwarding() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# F-0581 — Splunk CI ports bind loopback, private env file required
+# F-0581 — Splunk E2E ports bind loopback, private env file required
 # --------------------------------------------------------------------------- #
-def test_f0581_splunk_ci_ports_loopback_and_env_required() -> None:
-    text = _read(CI_COMPOSE)
+def test_f0581_splunk_e2e_ports_loopback_and_env_required() -> None:
+    text = _read(E2E_COMPOSE)
     assert "${SPLUNK_HOST_BIND:-127.0.0.1}:8000:8000" in text
     assert "${SPLUNK_HOST_BIND:-127.0.0.1}:8088:8088" in text
     assert "${SPLUNK_HOST_BIND:-127.0.0.1}:8089:8089" in text
@@ -160,9 +160,9 @@ def test_f0585_exporter_no_hardcoded_password_string() -> None:
     assert 'os.environ.get("SPLUNK_PASSWORD", "")' in text
     assert 'os.environ.get("SPLUNK_PASSWORD", "changeme")' not in text
     assert '"SPLUNK_PASSWORD", "password"' not in text
-    # and the CI compose passes the configured credential through
-    ci = _read(CI_COMPOSE)
-    assert 'SPLUNK_PASSWORD: "${SPLUNK_PASSWORD:?' in ci
+    # and the E2E compose passes the configured credential through
+    e2e = _read(E2E_COMPOSE)
+    assert 'SPLUNK_PASSWORD: "${SPLUNK_PASSWORD:?' in e2e
 
 
 # --------------------------------------------------------------------------- #

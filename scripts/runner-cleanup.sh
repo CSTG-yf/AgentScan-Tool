@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
-# Host-wide cleanup for the self-hosted E2E runner.
+# Host-wide cleanup for a reusable local E2E machine.
 #
 # Idempotent. Logs each section so we can correlate disk-fill regressions to
-# specific consumers when CI fails the FREE_GB headroom check below.
+# specific consumers when the FREE_GB headroom check below fails.
 #
-# Why a script instead of inlining in e2e.yml: the disk-fill bug surfaced as
-# "the self-hosted runner lost communication with the server" (looks like an
-# OOM but is actually exhausted root fs). The runner died mid-job before its
-# inline cleanup could run, so the next run inherited the same full disk.
-# Calling this script BEFORE the heavy E2E steps (and again unconditionally
-# in post-run cleanup) means a single run's worth of leaks can never wedge
-# the host across runs.
+# Keep cleanup in one reusable script so interrupted local runs cannot leave
+# enough leaked containers, images, or state to wedge later runs.
 #
 # Set RUNNER_CLEANUP_VERBOSE=1 to trace every command. Otherwise we just emit
 # section headers and leave individual rm/prune output on stdout.

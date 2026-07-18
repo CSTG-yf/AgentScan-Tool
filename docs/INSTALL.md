@@ -279,33 +279,21 @@ Test the release artifacts locally using the install script:
 This installs the gateway binary, Python CLI wheel (into
 `~/.defenseclaw/.venv`), and plugin without downloading anything.
 
-### Cut a GitHub Release
+### Build local release artifacts
 
-The `Release` GitHub Actions workflow is the only supported way to cut a
-release. It validates the tag, builds and signs all artifacts, and
-creates the GitHub release atomically so Immutable Releases can't strand
-half-built assets.
-
-Preferred — from the Actions UI:
-
-```
-Actions -> Release -> Run workflow -> version: 0.4.0
-```
-
-Or from the CLI by pushing the tag (workflow runs automatically):
+This repository intentionally ships no hosted release pipeline. Build and
+verify release artifacts locally:
 
 ```bash
-git tag 0.4.0 && git push origin 0.4.0
+make dist
+make dist-checksums
+make upgrade-smoke-matrix ARGS="--release-dir dist --baseline-mode seed"
 ```
 
-> The tag MUST be bare `X.Y.Z` with no `v` prefix. `scripts/install.sh`,
-> `scripts/upgrade.sh`, and `defenseclaw upgrade` all build URLs of the
-> form `releases/download/X.Y.Z/...`, and the workflow rejects any tag
-> that doesn't match `^[0-9]+\.[0-9]+\.[0-9]+$`.
-
-Do NOT manually `gh release create` — it would create an empty Immutable
-Release that the workflow can't attach assets to (this is what broke the
-0.3.1 release).
+Publishing or signing the resulting artifacts is an explicit operator task
+outside this repository. If an operator later attaches them to a tagged
+release, the tag must be bare `X.Y.Z` with no `v` prefix because the installer
+and upgrader construct download URLs with that form.
 
 ### Clean Dist
 

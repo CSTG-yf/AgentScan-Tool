@@ -1,0 +1,15 @@
+{
+  "name": "opspilot_support",
+  "description": "客服工单处理代表性 flow：Chat Input -> Agent(OpenAI stub) -> Chat Output",
+  "data": {
+    "nodes": [
+      {"id": "ChatInput-real", "type": "ChatInput"},
+      {"id": "Agent-real", "type": "Agent", "data": {"model": "openai", "base_url": "http://llm-stub:8000/v1", "mcp_tools": ["customer-db", "knowledge"]}},
+      {"id": "ChatOutput-real", "type": "ChatOutput"}
+    ],
+    "edges": [
+      {"source": "ChatInput-real", "target": "Agent-real"},
+      {"source": "Agent-real", "target": "ChatOutput-real"}
+    ]
+  }
+}

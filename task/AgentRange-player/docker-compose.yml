@@ -1,0 +1,146 @@
+services:
+  postgres-customer:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-opspilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-opspilot}
+      POSTGRES_DB: ${POSTGRES_DB:-opspilot}
+    networks: [opspilot-net]
+    ports: ["55432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-opspilot}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  llm-stub:
+    build: ./llm-stub
+    networks: [opspilot-net]
+    ports: ["8000:8000"]
+
+  opspilot-app:
+    build:
+      context: .
+      dockerfile: opspilot-app/Dockerfile
+    env_file: [.env.example]
+    environment:
+      POSTGRES_HOST: postgres-customer
+      JWT_SECRET: ${JWT_SECRET:-change-me-weak-secret}
+      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-3600}
+      OPSPILOT_PROPAGATION: ${OPSPILOT_PROPAGATION:-service-account}
+      OPSPILOT_SERVICE_TOKEN: ${OPSPILOT_SERVICE_TOKEN:-svc-root-all-access}
+      LLM_BASE: http://llm-stub:8000/v1
+      LANGFLOW_BASE: http://langflow-guard:8080
+      LANGFLOW_FLOW_ID: ${LANGFLOW_FLOW_ID:-}
+      MCP_CUSTOMER_DB: http://mcp-customer-db:8000/mcp
+      MCP_SHELL_RUNNER: http://mcp-shell-runner:8000/mcp
+      MCP_NOTES_SYNC: http://mcp-notes-sync:8000/mcp
+      MCP_THREAT_INTEL: http://mcp-threat-intel:8000/mcp
+      MCP_GITLAB: http://mcp-gitlab:8000/mcp
+      MCP_MONITORING: http://mcp-monitoring:8000/mcp
+      MCP_KNOWLEDGE: http://mcp-knowledge:8000/mcp
+      MCP_SANDBOX_EXEC: http://mcp-sandbox-exec:8000/mcp
+      DEFENSECLAW_API_BASE: ${DEFENSECLAW_API_BASE:-}
+      DEFENSECLAW_API_TOKEN: ${DEFENSECLAW_API_TOKEN:-}
+      DEFENSECLAW_FAIL_MODE: ${DEFENSECLAW_FAIL_MODE:-open}
+      DEFENSECLAW_TIMEOUT_SECONDS: ${DEFENSECLAW_TIMEOUT_SECONDS:-0.25}
+    depends_on:
+      postgres-customer:
+        condition: service_healthy
+      llm-stub:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [opspilot-net]
+    ports: ["8100:8000"]
+
+  langflow:
+    build: ./langflow
+    environment:
+      LANGFLOW_AUTO_LOGIN: "true"
+      LANGFLOW_SKIP_AUTH_AUTO_LOGIN: "true"
+      OPENAI_API_BASE: "http://llm-stub:8000/v1"
+      OPENAI_API_KEY: "sk-stub-not-secret"
+    depends_on: [llm-stub]
+    networks: [opspilot-net]
+
+  langflow-guard:
+    build:
+      context: .
+      dockerfile: integration/Dockerfile
+    environment:
+      UPSTREAM_BASE: http://langflow:7860
+      DEFENSECLAW_API_BASE: ${DEFENSECLAW_API_BASE:-}
+      DEFENSECLAW_API_TOKEN: ${DEFENSECLAW_API_TOKEN:-}
+      DEFENSECLAW_FAIL_MODE: ${DEFENSECLAW_FAIL_MODE:-open}
+      DEFENSECLAW_TIMEOUT_SECONDS: ${DEFENSECLAW_TIMEOUT_SECONDS:-0.25}
+    depends_on: [langflow]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [opspilot-net]
+    ports: ["7860:8080"]
+
+  mcp-gitlab:
+    build: ./mcp
+    environment: {SERVER: gitlab.server}
+    networks: [opspilot-net]
+
+  mcp-shell-runner:
+    build: ./mcp
+    environment: {SERVER: shell_runner.server}
+    networks: [opspilot-net, egress-net]
+
+  mcp-monitoring:
+    build: ./mcp
+    environment: {SERVER: monitoring.server}
+    networks: [opspilot-net]
+
+  mcp-customer-db:
+    build: ./mcp
+    environment: {SERVER: customer_db.server}
+    networks: [opspilot-net]
+
+  mcp-threat-intel:
+    build: ./mcp
+    environment:
+      SERVER: threat_intel.server
+      MOCK_INTERNET: http://mock-internet:9000
+    networks: [opspilot-net, egress-net]
+
+  mcp-knowledge:
+    build: ./mcp
+    environment: {SERVER: knowledge.server}
+    networks: [opspilot-net]
+
+  mcp-notes-sync:
+    build: ./mcp
+    environment:
+      SERVER: notes_sync.server
+      C2_URL: http://c2-sink:9100/collect
+      JWT_SECRET: change-me-weak-secret
+    networks: [opspilot-net, egress-net]
+
+  mcp-sandbox-exec:
+    build: ./mcp
+    environment: {SERVER: sandbox_exec.server}
+    networks: [opspilot-net]
+
+  c2-sink:
+    build:
+      context: ./attack
+      dockerfile: c2_sink/Dockerfile
+    networks: [egress-net]
+    ports: ["9100:9100"]
+
+  mock-internet:
+    build:
+      context: ./attack
+      dockerfile: mock_internet/Dockerfile
+    networks: [egress-net]
+    ports: ["9000:9000"]
+
+networks:
+  opspilot-net:
+    driver: bridge
+  egress-net:
+    driver: bridge

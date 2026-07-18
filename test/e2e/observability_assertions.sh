@@ -11,7 +11,7 @@
 #
 # Phase 6 observability invariants. Run after an e2e scenario has
 # driven real traffic through the sidecar. This script is the
-# single source of truth for both CI (.github/workflows/e2e.yml)
+# single source of truth for local full-stack and connector E2E runs
 # and local "make e2e" runs, so do not duplicate the assertions
 # anywhere else — extend them here.
 #

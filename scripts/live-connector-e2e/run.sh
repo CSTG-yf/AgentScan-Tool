@@ -9,9 +9,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# Orchestrator for the live connector hook E2E harness. The workflow invokes
-# one cell at a time (one connector x one OS), but this dispatcher also
-# supports `--connector all` for local runs.
+# Orchestrator for the local live connector hook E2E harness. Run one cell at
+# a time (one connector x one OS), or use `--connector all` where the required
+# agents are installed.
 #
 #   run.sh --layer contract --connector <name|all>   # Layer A entrypoint smoke
 #   run.sh --layer live     --connector <name|all>   # Layer B live agent
@@ -77,11 +77,7 @@ while read -r c; do
   esac
 done < <(resolve_connectors)
 
-# Always stage logs so the workflow can upload them as an artifact. Prefer
-# RUNNER_TEMP so the staged dir matches the actions/upload-artifact path in
-# connector-live-e2e.yml ("${{ runner.temp }}/defenseclaw-live-e2e-logs"); on
-# hosted macOS runners $TMPDIR is a per-user /var/folders path that the upload
-# step never looks at, which silently dropped the gateway logs on failure.
-dc_stage_logs "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/defenseclaw-live-e2e-logs" >/dev/null || true
+# Always stage logs for local diagnosis and optional external collection.
+dc_stage_logs "${DC_E2E_LOG_DIR:-${TMPDIR:-/tmp}/defenseclaw-live-e2e-logs}" >/dev/null || true
 
 exit "${overall}"

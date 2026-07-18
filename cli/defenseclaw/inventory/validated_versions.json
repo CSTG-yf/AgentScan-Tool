@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Human-reviewed highest validated upstream agent version per hook connector x OS. The live connector E2E workflow (.github/workflows/connector-live-e2e.yml) only REPORTS the version it ran against and opens a connector-regression issue on a live-cell failure — it never edits this file. A maintainer updates last_validated_version here (and, when raising/lowering a support floor/ceiling, hook_contracts.json + internal/gateway/connector/hook_contract.go) after reviewing a green run. 'os' keys are linux, macos, windows; an empty last_validated_version means 'not yet certified'.",
+  "description": "Human-reviewed highest validated upstream agent version per hook connector x OS. The local live connector E2E harness only reports the version it ran against and never edits this file. A maintainer updates last_validated_version here (and, when raising/lowering a support floor/ceiling, hook_contracts.json + internal/gateway/connector/hook_contract.go) after reviewing a green run. 'os' keys are linux, macos, windows; an empty last_validated_version means 'not yet certified'.",
   "policy": "alert-only",
   "connectors": {
     "codex": {

@@ -74,6 +74,11 @@ type ToolInspectRequest struct {
 	// set (single-connector installs and the generic inspect endpoint).
 	Connector     string `json:"connector,omitempty"`
 	MCPServerName string `json:"mcp_server_name,omitempty"`
+	// Context carries optional, connector-supplied authorization context for
+	// confused-deputy checks.  It is deliberately generic so application
+	// adapters can provide the authenticated principal without teaching the
+	// gateway about a specific agent framework.
+	Context json.RawMessage `json:"context,omitempty"`
 }
 
 // ToolInspectVerdict is the response from the inspect endpoint.
@@ -299,6 +304,21 @@ func (a *APIServer) inspectToolPolicy(req *ToolInspectRequest) *ToolInspectVerdi
 // short-circuits there exactly as the message lane does; native hook
 // callers reach this through inspectToolPolicy with context.Background().
 func (a *APIServer) inspectToolPolicyCtx(ctx context.Context, req *ToolInspectRequest) *ToolInspectVerdict {
+	// Authorization context is evaluated before static tool allows. An allow
+	// entry means the tool capability is trusted; it must not authorize a
+	// caller to escape the tenant/scope carried by the upstream application.
+	if scopeFindings := inspectToolAuthorizationContext(req); len(scopeFindings) > 0 {
+		severity := HighestSeverity(scopeFindings)
+		return &ToolInspectVerdict{
+			Action:           guardrailRuntimeActionForConnector(a.scannerCfg, req.Connector, severity, true),
+			Severity:         severity,
+			Confidence:       HighestConfidence(scopeFindings, severity),
+			Reason:           "tool arguments exceed authenticated principal scope",
+			Findings:         FindingStrings(scopeFindings),
+			DetailedFindings: scopeFindings,
+		}
+	}
+
 	// Static block/allow list takes priority — checked before any rule
 	// scanning. Connector-scoped (@C/T) entries resolve before the bare
 	// global entry, mirroring the sidecar lane and the PolicyEngine helpers:
@@ -451,6 +471,50 @@ func (a *APIServer) inspectToolPolicyCtx(ctx context.Context, req *ToolInspectRe
 		verdict = mergeWithJudgeVerdict(verdict, jv)
 	}
 	return verdict
+}
+
+// inspectToolAuthorizationContext performs deterministic confused-deputy
+// checks using optional context supplied by an application adapter. Unknown
+// context shapes are ignored for backward compatibility. The first supported
+// contract is a principal with a tenant scope and a tool argument containing
+// a requested tenant. It generalizes to any connector that uses those common
+// fields; no AgentRange scenario or fixture identifier is consulted.
+func inspectToolAuthorizationContext(req *ToolInspectRequest) []RuleFinding {
+	if req == nil || len(req.Context) == 0 {
+		return nil
+	}
+	var contextPayload struct {
+		Principal struct {
+			Subject string                 `json:"sub"`
+			Scope   map[string]interface{} `json:"scope"`
+		} `json:"principal"`
+	}
+	if err := json.Unmarshal(req.Context, &contextPayload); err != nil {
+		return nil
+	}
+	allowedTenant, _ := contextPayload.Principal.Scope["tenant"].(string)
+	if strings.TrimSpace(allowedTenant) == "" {
+		return nil
+	}
+	args, ok := unmarshalArgsObject(req.Args)
+	if !ok {
+		return nil
+	}
+	requestedTenant, _ := args["tenant"].(string)
+	requestedTenant = strings.TrimSpace(requestedTenant)
+	if requestedTenant == "" || requestedTenant == allowedTenant {
+		return nil
+	}
+	evidence := fmt.Sprintf("principal=%s allowed_tenant=%s requested_tenant=%s",
+		contextPayload.Principal.Subject, allowedTenant, requestedTenant)
+	return []RuleFinding{{
+		RuleID:     "AUTH-TENANT-SCOPE",
+		Title:      "Cross-tenant tool request exceeds principal scope",
+		Severity:   "HIGH",
+		Confidence: 0.99,
+		Evidence:   evidence,
+		Tags:       []string{"authorization", "tenant", "confused-deputy"},
+	}}
 }
 
 // unmarshalArgsObject decodes a tool-call args payload that may

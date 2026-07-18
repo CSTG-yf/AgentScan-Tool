@@ -15,9 +15,8 @@
 # bus. This script installs cursor-agent, wires DefenseClaw, drives a trivial
 # prompt, and checks whether any cursor-tagged event reached the gateway.
 #
-# Exit 0 + "CURSOR_HOOKS_FIRE=1" on $GITHUB_OUTPUT  -> live Cursor coverage is
-# valid; the workflow then runs drivers/cursor.sh.
-# Exit non-zero                                     -> Cursor stays Layer-A only.
+# Exit zero when headless Cursor fires the hook bus; otherwise keep Cursor at
+# contract-only coverage.
 
 set -euo pipefail
 export DC_E2E_CONNECTOR=cursor
@@ -57,9 +56,6 @@ else
   dc_record_result "validation:hooks-fire" fail "no cursor events reached gateway in -p mode"
 fi
 
-if [ -n "${GITHUB_OUTPUT:-}" ]; then
-  printf 'cursor_hooks_fire=%s\n' "${fired}" >> "${GITHUB_OUTPUT}"
-fi
 dc_teardown_connector cursor || true
 
 [ "${fired}" = "1" ]

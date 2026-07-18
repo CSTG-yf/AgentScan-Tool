@@ -88,7 +88,7 @@ dc_is_windows() { [ "$(dc_detect_os)" = "windows" ]; }
 # ---------------------------------------------------------------------------
 
 # dc_wait_for_gateway [timeout_seconds] — poll `defenseclaw-gateway status`
-# until healthy. Mirrors the 30s readiness poll in .github/workflows/e2e.yml
+# until healthy. Uses the same 30s readiness window as the full-stack harness.
 # so behavior is identical to the OpenClaw stack gate.
 dc_wait_for_gateway() {
   local timeout="${1:-30}" i
@@ -170,7 +170,7 @@ dc_clear_sentinels() { rm -rf "${DC_E2E_SENTINEL_DIR}" 2>/dev/null || true; }
 
 # dc_record_result <event> <status> [detail] — append one matrix cell outcome.
 # status is one of: pass | fail | skip. DC_E2E_CONNECTOR + version come from
-# the driver context. Also mirrors a human line to $GITHUB_STEP_SUMMARY.
+# the driver context and prints a human-readable line locally.
 dc_record_result() {
   local event="$1" status="$2" detail="${3:-}"
   local connector="${DC_E2E_CONNECTOR:-unknown}"
@@ -195,22 +195,16 @@ PY
     skip) glyph="SKIP" ;;
   esac
   dc_log "[${glyph}] ${connector}/${os}/${event} ${detail}"
-  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-    printf '| %s | %s | %s | %s | %s |\n' \
-      "${connector}" "${os}" "${event}" "${glyph}" "${detail//|/\\|}" \
-      >> "${GITHUB_STEP_SUMMARY}"
-  fi
 }
 
 # ---------------------------------------------------------------------------
-# Log staging (artifact upload on failure)
+# Local log staging
 # ---------------------------------------------------------------------------
 
-# dc_stage_logs <stage_dir> — copy gateway logs + the results JSONL into a
-# directory the workflow uploads with actions/upload-artifact. Mirrors the
-# "Stage DefenseClaw logs" step in e2e.yml.
+# dc_stage_logs <stage_dir> — copy gateway logs and the results JSONL into a
+# local diagnostic directory.
 dc_stage_logs() {
-  local stage="${1:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/defenseclaw-live-e2e-logs}"
+  local stage="${1:-${TMPDIR:-/tmp}/defenseclaw-live-e2e-logs}"
   rm -rf "${stage}"; mkdir -p "${stage}"
   if [ -d "${DEFENSECLAW_HOME}" ]; then
     local pat
