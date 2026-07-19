@@ -6,7 +6,7 @@ from cat2.trajectories import trajectory_for
 from events import Event
 
 BENIGN = {"B-RD", "B-OPS", "B-SEC", "B-SUP"}
-ATTACK = {"C1-A", "C1-B", "C2-A", "C2-B", "C2-C", "C2-D", "M-1"}
+ATTACK = {"C1-A", "C1-B", "C2-A", "C2-B", "C2-C", "C2-D"}
 
 actors = {
     "B-RD": {"sub": "rdev", "role": "rd-dev", "team": "rd", "scope": {"repo": "opspilot"}},
@@ -287,9 +287,8 @@ def render_attack(tmpl: str, rng: random.Random, index: int) -> Event:
             malicious=True,
             evidence={"outcome": "code-execution", "cve": cve, "endpoint": endpoint, "egress": "c2-sink"},
         )
-    key = "C2-B" if tmpl == "M-1" else tmpl
-    scenario_input = SCENARIO_INPUTS[key]
-    steps = trajectory_for(key)
+    scenario_input = SCENARIO_INPUTS[tmpl]
+    steps = trajectory_for(tmpl)
     tool_chain = [call["function"]["name"] for step in steps if step.get("tool_calls") for call in step["tool_calls"]]
     evidence = {
         "outcome": scenario_input["outcome"],
@@ -300,10 +299,10 @@ def render_attack(tmpl: str, rng: random.Random, index: int) -> Event:
     }
     if scenario_input.get("skill"):
         evidence["skill"] = scenario_input["skill"]
-    if key == "C2-A":
+    if tmpl == "C2-A":
         evidence["scope_mismatch"] = {"actor_tenant": "acme", "requested_tenant": "globex"}
 
-    # Cat-2 通过合法身份触发工具链，M-1 复用 C2-B 的横向外泄阶段。
+    # Cat-2 通过合法身份触发工具链。
     return Event(
         instance_id=f"{tmpl}-{index}",
         t=index,

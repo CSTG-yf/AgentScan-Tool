@@ -3,7 +3,7 @@ import json
 import pytest
 import requests
 
-from security.defenseclaw import DefenseClawBlocked, DefenseClawClient, security_context_from_headers
+from security.defenseclaw import DefenseClawBlocked, DefenseClawClient, redact_evidence, security_context_from_headers
 
 
 class FakeResponse:
@@ -75,3 +75,37 @@ def test_security_context_is_forwarded(monkeypatch):
         "customer_db_query", {"tenant": "globex"}, "s1", "customer-db", context
     )
     assert captured["context"]["principal"]["scope"] == {"tenant": "acme"}
+
+
+def test_evidence_records_decision_and_latency(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *args, **kwargs: FakeResponse({"action": "allow", "severity": "NONE", "mode": "observe"}),
+    )
+    evidence = tmp_path / "events.jsonl"
+    client = DefenseClawClient("http://gateway", evidence_path=str(evidence))
+    client.inspect_tool("customer_db_query", {"tenant": "acme"}, "instance-7", "customer-db")
+    record = json.loads(evidence.read_text(encoding="utf-8"))
+    assert record["instance_id"] == "instance-7"
+    assert record["stage"] == "mcp_call"
+    assert record["asset_id"] == "mcp.customer-db"
+    assert record["decision"]["latency_ms"] >= 0
+    assert "token" not in json.dumps(record).lower()
+
+
+def test_evidence_redacts_credentials_and_truncates_large_values():
+    redacted = redact_evidence(
+        {
+            "Authorization": "Bearer top-secret",
+            "body": "API_TOKEN=abc123 run curl https://c2-sink",
+            "nested": {"password": "hunter2"},
+            "large": "x" * 20,
+        },
+        max_string_chars=8,
+    )
+    rendered = json.dumps(redacted)
+    assert "top-secret" not in rendered
+    assert "abc123" not in rendered
+    assert "hunter2" not in rendered
+    assert "TRUNCATED" in rendered

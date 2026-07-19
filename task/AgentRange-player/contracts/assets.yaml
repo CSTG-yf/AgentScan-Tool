@@ -1,0 +1,49 @@
+version: 1
+denominator:
+  agents: 1
+  models: 1
+  supply_chain_frameworks: 1
+  databases: 1
+  mcp_servers: 8
+  skills: 7
+  networks: 2
+  host_ports: 6
+assets:
+  - {id: agent.opspilot, type: agent, name: OpsPilot, source: opspilot-app/api/app.py}
+  - {id: model.opspilot-stub, type: model, name: opspilot-stub, source: llm-stub/llm_stub/app.py}
+  - {id: framework.langflow, type: supply_chain_framework, name: Langflow, source: langflow/Dockerfile}
+  - {id: database.customer, type: database, name: postgres-customer, source: backends/customer-db/schema.sql}
+  - {id: mcp.customer-db, type: mcp_server, name: customer-db, source: mcp/customer_db/server.py}
+  - {id: mcp.shell-runner, type: mcp_server, name: shell-runner, source: mcp/shell_runner/server.py}
+  - {id: mcp.notes-sync, type: mcp_server, name: notes-sync, source: mcp/notes_sync/server.py}
+  - {id: mcp.threat-intel, type: mcp_server, name: threat-intel, source: mcp/threat_intel/server.py}
+  - {id: mcp.gitlab, type: mcp_server, name: gitlab, source: mcp/gitlab/server.py}
+  - {id: mcp.monitoring, type: mcp_server, name: monitoring, source: mcp/monitoring/server.py}
+  - {id: mcp.knowledge, type: mcp_server, name: knowledge, source: mcp/knowledge/server.py}
+  - {id: mcp.sandbox-exec, type: mcp_server, name: sandbox-exec, source: mcp/sandbox_exec/server.py}
+  - {id: skill.code-review, type: skill, name: code-review, source: skills/code-review/SKILL.md}
+  - {id: skill.incident-runbook, type: skill, name: incident-runbook, source: skills/incident-runbook/SKILL.md}
+  - {id: skill.meeting-summary, type: skill, name: meeting-summary, source: skills/meeting-summary/SKILL.md}
+  - {id: skill.password-policy-check, type: skill, name: password-policy-check, source: skills/password-policy-check/SKILL.md}
+  - {id: skill.pdf-export, type: skill, name: pdf-export, source: skills/pdf-export/SKILL.md}
+  - {id: skill.pii-redaction, type: skill, name: pii-redaction, source: skills/pii-redaction/SKILL.md}
+  - {id: skill.sql-report, type: skill, name: sql-report, source: skills/sql-report/SKILL.md}
+  - {id: network.opspilot, type: network, name: opspilot-net, source: docker-compose.yml}
+  - {id: network.egress, type: network, name: egress-net, source: docker-compose.yml}
+  - {id: port.opspilot, type: host_port, name: '8100', source: docker-compose.yml}
+  - {id: port.langflow, type: host_port, name: '7860', source: docker-compose.yml}
+  - {id: port.llm-stub, type: host_port, name: '8000', source: docker-compose.yml}
+  - {id: port.postgres, type: host_port, name: '55432', source: docker-compose.yml}
+  - {id: port.c2-sink, type: host_port, name: '9100', source: docker-compose.yml}
+  - {id: port.mock-internet, type: host_port, name: '9000', source: docker-compose.yml}
+edges:
+  - {from: agent.opspilot, relation: uses, to: model.opspilot-stub}
+  - {from: agent.opspilot, relation: loads, to: skill.meeting-summary}
+  - {from: agent.opspilot, relation: calls, to: mcp.customer-db}
+  - {from: agent.opspilot, relation: calls, to: mcp.shell-runner}
+  - {from: agent.opspilot, relation: calls, to: mcp.notes-sync}
+  - {from: agent.opspilot, relation: calls, to: mcp.threat-intel}
+  - {from: mcp.customer-db, relation: reads, to: database.customer}
+  - {from: mcp.notes-sync, relation: connects, to: network.egress}
+  - {from: mcp.threat-intel, relation: connects, to: network.egress}
+  - {from: framework.langflow, relation: uses, to: model.opspilot-stub}

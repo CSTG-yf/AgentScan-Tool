@@ -191,3 +191,21 @@ python .\scenario-runner\runner.py --report .\integration\reports\action.json
 - `/inspect/request` 对 Prompt 类风险可能只告警；真正副作用仍由工具调用前检查兜底。
 - C1 属于第三方框架漏洞，不经过 Agent 工具循环，因此必须保留 `langflow-guard`。
 - Docker 到宿主机网关必须使用认证 Token，并限制监听范围；不要为联调关闭 API 鉴权。
+
+## 8. M0-M7 一键交付入口
+
+DefenseClaw 核心与靶场适配的需求、接口、任务分配和验收基线见仓库级
+`task/DefenseClaw_AgentRange靶场改造实施计划书_v1.0.docx`；本目录通过
+`requirements.yaml` 将计划书 FR/NFR 映射到实现和证据。
+
+- Windows：`./integration/run.ps1 baseline|observe|action`
+- Linux：`bash integration/run.sh baseline|observe|action`
+- 契约：`make contracts`
+- 静态资产与风险：`make static-scan`
+- 行为规则夹具：`make rules`
+- 攻击链：`make attack-chain`
+- 三模式汇总：`make benchmark-summary`
+- 最终 JSON/Markdown 报告：`make report`
+
+详细步骤见 `docs/OPERATIONS.md`，固定演示见 `docs/DEMO.md`，交付证据索引见
+`docs/DELIVERY.md`。

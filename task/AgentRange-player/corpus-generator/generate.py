@@ -12,7 +12,7 @@ from events import Event
 from templates import render_attack, render_benign
 
 benign_templates = ["B-RD", "B-OPS", "B-SEC", "B-SUP"]
-attack_templates = ["C1-A", "C1-B", "C2-A", "C2-B", "C2-C", "C2-D", "M-1"]
+attack_templates = ["C1-A", "C1-B", "C2-A", "C2-B", "C2-C", "C2-D"]
 
 
 def generate(seed: int = 1337, total: int = 5200, malicious_target: int = 80) -> list[Event]:

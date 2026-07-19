@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agentrange:attack-chain:v1",
+  "title": "AttackChain",
+  "type": "object",
+  "required": ["chain_id", "instance_id", "trace_id", "nodes", "edges", "blocked", "evidence_summary"],
+  "properties": {
+    "chain_id": {"type": "string"},
+    "instance_id": {"type": "string"},
+    "trace_id": {"type": "string"},
+    "blocked": {"type": "boolean"},
+    "block_node_id": {"type": ["string", "null"]},
+    "pollution_source": {"type": ["string", "null"]},
+    "sequence_type": {"type": "string"},
+    "unexecuted_side_effects": {"type": "array", "items": {"type": "string"}},
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "stage", "asset_id", "evidence_level", "raw_ref"],
+        "properties": {
+          "id": {"type": "string"},
+          "stage": {"type": "string"},
+          "asset_id": {"type": "string"},
+          "summary": {"type": "string"},
+          "evidence_level": {"enum": ["direct", "time_window_inference"]},
+          "raw_ref": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to", "relation", "evidence_level"],
+        "properties": {
+          "from": {"type": "string"},
+          "to": {"type": "string"},
+          "relation": {"type": "string"},
+          "evidence_level": {"enum": ["direct", "time_window_inference"]}
+        }
+      }
+    },
+    "evidence_summary": {"type": "string"}
+  },
+  "additionalProperties": false
+}

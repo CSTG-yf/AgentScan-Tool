@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import threading
+import time
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -17,11 +23,61 @@ DEFENSECLAW_API_BASE = os.getenv("DEFENSECLAW_API_BASE", "").rstrip("/")
 DEFENSECLAW_API_TOKEN = os.getenv("DEFENSECLAW_API_TOKEN", "")
 FAIL_MODE = os.getenv("DEFENSECLAW_FAIL_MODE", "open").lower()
 TIMEOUT = float(os.getenv("DEFENSECLAW_TIMEOUT_SECONDS", "0.25"))
+EVIDENCE_PATH = os.getenv("RANGE_EVIDENCE_PATH", "")
+_EVIDENCE_LOCK = threading.Lock()
+_SENSITIVE_KEY = re.compile(r"(?:authorization|cookie|token|password|passwd|secret|api[_-]?key)", re.IGNORECASE)
+_SENSITIVE_VALUE = re.compile(
+    r"(?i)((?:authorization\s*:\s*bearer|api[_-]?key|token|password|passwd|secret)\s*[:=]\s*)[^\s,;&]+"
+)
+
+
+def redact_evidence(value: Any, max_string_chars: int = 16_384) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): "[REDACTED]" if _SENSITIVE_KEY.search(str(key)) else redact_evidence(item, max_string_chars)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_evidence(item, max_string_chars) for item in value]
+    if isinstance(value, str):
+        cleaned = _SENSITIVE_VALUE.sub(r"\1[REDACTED]", value)
+        if len(cleaned) > max_string_chars:
+            return cleaned[:max_string_chars] + "...[TRUNCATED]"
+        return cleaned
+    return value
+
+
+def write_evidence(request: Request, payload: dict[str, Any], verdict: dict[str, Any]) -> None:
+    if not EVIDENCE_PATH:
+        return
+    event_id = str(uuid.uuid4())
+    instance_id = request.headers.get("x-instance-id", "langflow-http")
+    record = {
+        "event_id": event_id,
+        "instance_id": instance_id,
+        "trace_id": request.headers.get("x-trace-id", instance_id),
+        "timestamp": datetime.now(UTC).isoformat(),
+        "stage": "langflow_ingress",
+        "asset_id": "framework.langflow",
+        "direction": "http_request",
+        "tool": "langflow_http",
+        "payload": redact_evidence(payload),
+        "decision": redact_evidence(verdict),
+        "raw_ref": f"runtime:{event_id}",
+    }
+    target = Path(EVIDENCE_PATH)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with _EVIDENCE_LOCK, target.open("a", encoding="utf-8", newline="\n") as stream:
+            stream.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+    except OSError:
+        return
 
 
 async def inspect_ingress(request: Request, body: bytes) -> dict[str, Any]:
     if not DEFENSECLAW_API_BASE:
         return {"action": "allow", "mode": "disabled"}
+    started = time.perf_counter()
     headers = {"Content-Type": "application/json"}
     if DEFENSECLAW_API_TOKEN:
         headers["Authorization"] = f"Bearer {DEFENSECLAW_API_TOKEN}"
@@ -31,6 +87,7 @@ async def inspect_ingress(request: Request, body: bytes) -> dict[str, Any]:
             "method": request.method,
             "path": request.url.path,
             "query": request.url.query,
+            "content_type": request.headers.get("content-type", ""),
             # Multipart filenames and exploit bodies remain visible to the
             # rule engine while invalid bytes are safely replaced.
             "body": body.decode("utf-8", errors="replace"),
@@ -48,10 +105,21 @@ async def inspect_ingress(request: Request, body: bytes) -> dict[str, Any]:
                 content=json.dumps(payload, ensure_ascii=False).encode(),
             )
             response.raise_for_status()
-            return response.json()
+            verdict = response.json()
     except (httpx.HTTPError, ValueError) as exc:
         action = "block" if FAIL_MODE == "closed" else "allow"
-        return {"action": action, "severity": "HIGH", "reason": f"inspection unavailable: {type(exc).__name__}"}
+        verdict = {
+            "action": action,
+            "severity": "HIGH" if action == "block" else "NONE",
+            "mode": f"integration-fail-{FAIL_MODE}",
+            "reason": f"inspection unavailable: {type(exc).__name__}",
+        }
+    verdict = dict(verdict)
+    verdict.setdefault("mode", "gateway")
+    verdict.setdefault("severity", "NONE")
+    verdict["latency_ms"] = round((time.perf_counter() - started) * 1000, 3)
+    write_evidence(request, payload, verdict)
+    return verdict
 
 
 @app.get("/guard/health")

@@ -48,6 +48,78 @@ DefenseClaw combines a Python operator CLI, a Go gateway sidecar, and an OpenCla
 
 ---
 
+## AgentRange Major Refactor v1.0（大重构版本）
+
+本分支包含面向 `task/AgentRange-player` 测试靶场的一次大规模重构。DefenseClaw
+从单纯复用既有 connector，扩展为可通过通用 inspect 合同保护 OpsPilot、Langflow、
+Skill、MCP、数据库和网络副作用的检测、决策、证据与评测中心。
+
+这次重构遵循“核心通用、靶场解耦”：DefenseClaw 核心只接收通用的
+`connector/session_id/tool/args/content/direction/context` 字段，不读取 AgentRange
+场景编号、固定实例或 Ground Truth；靶场格式转换、回放、证据落盘和指标计算全部
+位于 `task/AgentRange-player`。
+
+### 重构范围
+
+- Gateway Tool Inspect 增加通用身份上下文和 tenant scope 检查，在静态工具放行前
+  阻止跨租户 confused-deputy 请求。
+- OpsPilot 接入 Prompt、Tool Call、Tool Result、Final Response 四阶段同步检查。
+- Langflow 宿主端口由 `langflow-guard` 代理，支持方法、路径、查询串、JSON 与
+  Multipart 内容检查。
+- 运行证据统一为 RangeEvent JSONL，并包含 instance、trace、stage、asset、decision、
+  latency 和 raw reference；Token、密码和常见秘密字段会被脱敏。
+- 新增 27 项冻结资产清单、风险 taxonomy、六类通用行为规则、三模式策略合同、
+  AttackChain DAG、instance 级 benchmark 与最终报告。
+- 新增 FR/NFR 需求追踪矩阵，明确区分未实现、已实现待证据和证据齐全，禁止把
+  无效请求或未实测指标伪装成安全能力。
+- 已裁剪仓库 CI/CD 与 GitHub 测试流程；本靶场交付不依赖远端流水线。
+
+### 计划书与操作文档
+
+| 文档 | 用途 |
+|---|---|
+| [DefenseClaw AgentRange 改造计划书](task/DefenseClaw_AgentRange靶场改造实施计划书_v1.0.md) | 需求、接口、架构、任务分配、验收与风险基线 |
+| [AgentRange 联调方案](task/AgentRange-player/integration/README.md) | DefenseClaw 与靶场接入点、策略和逐场景联调 |
+| [运行手册](task/AgentRange-player/docs/OPERATIONS.md) | Windows/Linux 三模式运行与故障降级 |
+| [固定演示流程](task/AgentRange-player/docs/DEMO.md) | 资产、observe、action、攻击链和报告演示顺序 |
+| [交付证据索引](task/AgentRange-player/docs/DELIVERY.md) | M0-M7 交付物、验证入口和报告文件 |
+
+### 快速运行靶场
+
+```powershell
+cd task/AgentRange-player
+Copy-Item .env.example .env
+docker compose up -d --build
+python -m pytest -q contracts integration opspilot-app scenario-runner bench
+python integration/static_inventory.py
+python integration/rule_contract.py
+python bench/benchmark.py run --mode baseline --total 20 --malicious-target 6
+python integration/report.py
+```
+
+observe/action 需要先启动受认证、受限监听的 DefenseClaw Gateway，并在 `.env`
+设置 `DEFENSECLAW_API_BASE` 与 `DEFENSECLAW_API_TOKEN`：
+
+```powershell
+./integration/run.ps1 observe
+./integration/run.ps1 action
+python bench/benchmark.py summarize
+python integration/attack_chain.py
+python integration/report.py
+```
+
+### 当前验证状态
+
+- Python 合同与集成测试：27 项通过。
+- 静态资产：27/27；必要风险：7/7；六条行为规则攻击/良性合同全部通过。
+- baseline 烟雾：20/20 有效，正常业务成功率 100%，端到端 p95 约 164ms。
+- OpsPilot 与 Langflow Guard 镜像可构建并通过健康检查。
+- 需求追踪：12 项均有实现落点；8 项证据齐全，4 项等待真实 Gateway 与三模式全量结果。
+- 按项目约束未运行 Go 测试；Go 源码已格式化，容器构建在本地时限内未完成，
+  因此不宣称 Gateway 构建、observe/action、5200 全量指标或攻击链实测已经通过。
+
+---
+
 ## Scope and Limitations
 
 DefenseClaw is an enforcement and evidence layer for agentic AI deployments. It improves safety by combining scanner results, runtime inspection, policy decisions, sandbox controls, and audit trails, but it does not prove that an agent, skill, plugin, or model interaction is risk-free.

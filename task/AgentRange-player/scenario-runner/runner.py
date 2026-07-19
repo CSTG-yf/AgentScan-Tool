@@ -96,15 +96,19 @@ def percentile(values: list[float], quantile: float) -> float:
 
 
 def summarize_records(records: list[dict]) -> dict:
-    tp = sum(1 for item in records if item["attack"] and item["blocked"])
-    fn = sum(1 for item in records if item["attack"] and not item["blocked"])
-    fp = sum(1 for item in records if not item["attack"] and item["blocked"])
-    tn = sum(1 for item in records if not item["attack"] and not item["blocked"])
+    valid = [item for item in records if not item.get("error")]
+    invalid = [item for item in records if item.get("error")]
+    tp = sum(1 for item in valid if item["attack"] and item["blocked"])
+    fn = sum(1 for item in valid if item["attack"] and not item["blocked"])
+    fp = sum(1 for item in valid if not item["attack"] and item["blocked"])
+    tn = sum(1 for item in valid if not item["attack"] and not item["blocked"])
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     fpr = fp / (fp + tn) if fp + tn else 0.0
     fnr = fn / (fn + tp) if fn + tp else 0.0
-    latencies = [item["latency_ms"] for item in records]
+    latencies = [item["latency_ms"] for item in valid]
+    normal = [item for item in records if not item["attack"]]
+    normal_success = sum(1 for item in normal if not item["blocked"] and not item.get("error"))
     by_scenario = {}
     for item in records:
         bucket = by_scenario.setdefault(item["scenario"], {"total": 0, "blocked": 0, "errors": 0})
@@ -112,12 +116,13 @@ def summarize_records(records: list[dict]) -> dict:
         bucket["blocked"] += int(item["blocked"])
         bucket["errors"] += int(bool(item.get("error")))
     return {
-        "counts": {"total": len(records), "tp": tp, "fp": fp, "tn": tn, "fn": fn},
+        "counts": {"total": len(records), "valid": len(valid), "invalid": len(invalid), "tp": tp, "fp": fp, "tn": tn, "fn": fn},
         "metrics": {
             "precision": round(precision, 6),
             "recall": round(recall, 6),
             "fpr": round(fpr, 6),
             "fnr": round(fnr, 6),
+            "normal_success_rate": round(normal_success / len(normal), 6) if normal else 1.0,
             "latency_ms": {
                 "mean": round(statistics.fmean(latencies), 3) if latencies else 0.0,
                 "p50": round(percentile(latencies, 0.50), 3),
@@ -130,7 +135,7 @@ def summarize_records(records: list[dict]) -> dict:
     }
 
 
-def replay_events(events: list[dict], only: str | None = None) -> dict:
+def replay_events(events: list[dict], only: str | None = None, ground_truth: dict[str, dict] | None = None) -> dict:
     if only and only != "all":
         events = [event for event in events if event["scenario"] == only]
     # 网络执行只在人工 make replay 时发生，离线测试验证 plan_actions。
@@ -160,7 +165,8 @@ def replay_events(events: list[dict], only: str | None = None) -> dict:
                     "instance_id": action["instance_id"],
                     "scenario": action["scenario"],
                     "target": action["target"],
-                    "attack": is_attack_scenario(action["scenario"]),
+                    "attack": (ground_truth or {}).get(action["instance_id"], {}).get("label") == "malicious",
+                    "ground_truth": (ground_truth or {}).get(action["instance_id"], {}),
                     "blocked": blocked,
                     "status_code": response.status_code if response is not None else 0,
                     "latency_ms": round(latency_ms, 3),
@@ -177,22 +183,43 @@ def select_events(events: list, only: str | None = None) -> list:
     return events
 
 
+def ground_truth_for(events: list) -> dict[str, dict]:
+    return {
+        event.instance_id: {
+            "instance_id": event.instance_id,
+            "scenario_id": event.scenario if event.malicious else "normal",
+            "label": "malicious" if event.malicious else "benign",
+            "first_dangerous_action": event.evidence.get("outcome") if event.malicious else None,
+            "expected_target": event.evidence.get("endpoint") or event.evidence.get("tool_chain", [None])[-1],
+        }
+        for event in events
+    }
+
+
 def replay_generated(only: str | None = None, seed: int = 1337, total: int = 5200, malicious_target: int = 80) -> dict:
     generated = generate(seed, total, malicious_target)
     selected = select_events(generated, only)
     public_events = [public_record(event) for event in selected]
+    ground_truth = ground_truth_for(selected)
 
     # trajectories 只进入 llm-stub 内存，finally 保证回放失败时也清理。
     inject_trajectories(trajectory_map(selected))
     try:
-        return replay_events(public_events, only=None)
+        report = replay_events(public_events, only=None, ground_truth=ground_truth)
+        report["ground_truth"] = list(ground_truth.values())
+        report["config"] = {"seed": seed, "total": total, "malicious_target": malicious_target, "scenario": only or "all"}
+        return report
     finally:
         clear_trajectories()
 
 
-def replay(corpus_path: str, only: str | None = None):
+def replay(corpus_path: str, only: str | None = None, ground_truth_path: str | None = None):
     events = [json.loads(line) for line in pathlib.Path(corpus_path).read_text(encoding="utf-8").splitlines()]
-    return replay_events(events, only=only)
+    ground_truth = {}
+    if ground_truth_path:
+        rows = [json.loads(line) for line in pathlib.Path(ground_truth_path).read_text(encoding="utf-8").splitlines()]
+        ground_truth = {row["instance_id"]: row for row in rows}
+    return replay_events(events, only=only, ground_truth=ground_truth)
 
 
 def fire_cat1(client: httpx.Client, action: dict, langflow_token: str):
@@ -230,9 +257,12 @@ if __name__ == "__main__":
     parser.add_argument("--report", help="write the full JSON report to this path")
     parser.add_argument("--total", type=int, default=5200)
     parser.add_argument("--malicious-target", type=int, default=80)
+    parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument("--mode", choices=("baseline", "observe", "action"), default=os.getenv("RANGE_MODE", "baseline"))
     args = parser.parse_args()
-    report = replay_generated(only=args.scenario, total=args.total, malicious_target=args.malicious_target)
-    summary = {key: value for key, value in report.items() if key != "records"}
+    report = replay_generated(only=args.scenario, seed=args.seed, total=args.total, malicious_target=args.malicious_target)
+    report["mode"] = args.mode
+    summary = {key: value for key, value in report.items() if key not in {"records", "ground_truth"}}
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     if args.report:
         report_path = pathlib.Path(args.report)

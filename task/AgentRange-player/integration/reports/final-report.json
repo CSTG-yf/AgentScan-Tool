@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-19T02:36:47.358444+00:00",
+  "scope": "AgentRange OpsPilot MVP",
+  "plan_traceability": {
+    "plan": "task/DefenseClaw_AgentRange靶场改造实施计划书_v1.0.docx",
+    "requirements": [
+      {
+        "id": "FR-01",
+        "task": "DC-M1-01",
+        "title": "通用 inspect 接口与模式语义",
+        "status": "implemented-awaiting-evidence",
+        "missing_implementation": [],
+        "missing_verification": [
+          "task/AgentRange-player/integration/reports/gateway-smoke.json"
+        ]
+      },
+      {
+        "id": "FR-02",
+        "task": "DC-M1-01",
+        "title": "身份与租户授权",
+        "status": "implemented-awaiting-evidence",
+        "missing_implementation": [],
+        "missing_verification": [
+          "task/AgentRange-player/integration/reports/gateway-smoke.json"
+        ]
+      },
+      {
+        "id": "FR-03",
+        "task": "DC-M2-01",
+        "title": "OpsPilot 四阶段适配",
+        "status": "evidence-ready",
+        "missing_implementation": [],
+        "missing_verification": []
+      },
+      {
+        "id": "FR-04",
+        "task": "DC-M2-02",
+        "title": "Langflow 入站保护",
+        "status": "evidence-ready",
+        "missing_implementation": [],
+        "missing_verification": []
+      },
+      {
+        "id": "FR-05",
+        "task": "DC-M3-01",
+        "title": "运行时行为规则",
+        "status": "evidence-ready",
+        "missing_implementation": [],
+        "missing_verification": []
+      },
+      {
+        "id": "FR-06",
+        "task": "DC-M4-01",
+        "title": "模式、策略与故障处理",
+        "status": "evidence-ready",
+        "missing_implementation": [],
+        "missing_verification": []
+      },
+      {
+        "id": "FR-07",
+        "task": "DC-M0-01/DC-M2-01",
+        "title": "统一事件与证据",
+        "status": "evidence-ready",
+        "missing_implementation": [],
+        "missing_verification": []
+      },
+      {
+        "id": "FR-08",
+        "task": "DC-M0-01",
+        "title": "静态资产与风险盘点",
+        "status": "evidence-ready",
+        "missing_implementation": [],
+        "missing_verification": []
+      },
+      {
+        "id": "FR-09",
+        "task": "DC-M5-01",
+        "title": "攻击链还原",
+        "status": "evidence-ready",
+        "missing_implementation": [],
+        "missing_verification": []
+      },
+      {
+        "id": "FR-10",
+        "task": "DC-M6-01/DC-M7-01",
+        "title": "Benchmark 与报告",
+        "status": "implemented-awaiting-evidence",
+        "missing_implementation": [],
+        "missing_verification": [
+          "task/AgentRange-player/bench/results/baseline.json",
+          "task/AgentRange-player/bench/results/observe.json",
+          "task/AgentRange-player/bench/results/action.json",
+          "task/AgentRange-player/bench/results/summary.json"
+        ]
+      },
+      {
+        "id": "NFR-01",
+        "task": "DC-M8-01",
+        "title": "性能与可用性",
+        "status": "implemented-awaiting-evidence",
+        "missing_implementation": [],
+        "missing_verification": [
+          "task/AgentRange-player/bench/results/summary.json"
+        ]
+      },
+      {
+        "id": "NFR-02",
+        "task": "DC-M8-01",
+        "title": "可维护性与兼容性",
+        "status": "evidence-ready",
+        "missing_implementation": [],
+        "missing_verification": []
+      }
+    ],
+    "counts": {
+      "not-implemented": 0,
+      "implemented-awaiting-evidence": 4,
+      "evidence-ready": 8
+    }
+  },
+  "static": {
+    "metrics": {
+      "asset_expected": 27,
+      "asset_found": 27,
+      "asset_coverage": 1.0,
+      "required_risks": 7,
+      "required_risks_detected": 7,
+      "risk_recall": 1.0,
+      "high_risk_benign_findings": 0
+    },
+    "finding_count": 22,
+    "high_critical": 17,
+    "missing_required_risks": []
+  },
+  "runtime": {
+    "attack_chains": 0,
+    "blocked_chains": 0,
+    "sequence_types": []
+  },
+  "benchmark": {},
+  "evidence_index": [
+    "integration/reports/attack-chains.json",
+    "integration/reports/final-report.json",
+    "integration/reports/final-report.md",
+    "integration/reports/pytest-results.xml",
+    "integration/reports/rule-contract.json",
+    "integration/reports/static-scan.json"
+  ],
+  "degradation_notes": [
+    "Missing mode reports remain explicit in benchmark.missing_modes.",
+    "Inspection network failures are recorded as invalid instances and integration-fail-open/closed decisions.",
+    "No detection evidence is sourced from /admin/trajectories."
+  ]
+}

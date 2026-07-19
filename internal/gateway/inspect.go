@@ -486,13 +486,19 @@ func inspectToolAuthorizationContext(req *ToolInspectRequest) []RuleFinding {
 	var contextPayload struct {
 		Principal struct {
 			Subject string                 `json:"sub"`
+			Name    string                 `json:"subject"`
 			Scope   map[string]interface{} `json:"scope"`
 		} `json:"principal"`
+		Scope map[string]interface{} `json:"scope"`
 	}
 	if err := json.Unmarshal(req.Context, &contextPayload); err != nil {
 		return nil
 	}
-	allowedTenant, _ := contextPayload.Principal.Scope["tenant"].(string)
+	principalScope := contextPayload.Principal.Scope
+	if len(principalScope) == 0 {
+		principalScope = contextPayload.Scope
+	}
+	allowedTenant, _ := principalScope["tenant"].(string)
 	if strings.TrimSpace(allowedTenant) == "" {
 		return nil
 	}
@@ -501,12 +507,19 @@ func inspectToolAuthorizationContext(req *ToolInspectRequest) []RuleFinding {
 		return nil
 	}
 	requestedTenant, _ := args["tenant"].(string)
+	if strings.TrimSpace(requestedTenant) == "" {
+		requestedTenant, _ = args["tenant_id"].(string)
+	}
 	requestedTenant = strings.TrimSpace(requestedTenant)
 	if requestedTenant == "" || requestedTenant == allowedTenant {
 		return nil
 	}
+	principal := contextPayload.Principal.Subject
+	if principal == "" {
+		principal = contextPayload.Principal.Name
+	}
 	evidence := fmt.Sprintf("principal=%s allowed_tenant=%s requested_tenant=%s",
-		contextPayload.Principal.Subject, allowedTenant, requestedTenant)
+		principal, allowedTenant, requestedTenant)
 	return []RuleFinding{{
 		RuleID:     "AUTH-TENANT-SCOPE",
 		Title:      "Cross-tenant tool request exceeds principal scope",

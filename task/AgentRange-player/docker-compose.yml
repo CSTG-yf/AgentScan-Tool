@@ -44,6 +44,7 @@ services:
       DEFENSECLAW_API_TOKEN: ${DEFENSECLAW_API_TOKEN:-}
       DEFENSECLAW_FAIL_MODE: ${DEFENSECLAW_FAIL_MODE:-open}
       DEFENSECLAW_TIMEOUT_SECONDS: ${DEFENSECLAW_TIMEOUT_SECONDS:-0.25}
+      RANGE_EVIDENCE_PATH: /reports/opspilot-events.jsonl
     depends_on:
       postgres-customer:
         condition: service_healthy
@@ -53,6 +54,8 @@ services:
       - "host.docker.internal:host-gateway"
     networks: [opspilot-net]
     ports: ["8100:8000"]
+    volumes:
+      - ./integration/reports:/reports
 
   langflow:
     build: ./langflow
@@ -74,11 +77,14 @@ services:
       DEFENSECLAW_API_TOKEN: ${DEFENSECLAW_API_TOKEN:-}
       DEFENSECLAW_FAIL_MODE: ${DEFENSECLAW_FAIL_MODE:-open}
       DEFENSECLAW_TIMEOUT_SECONDS: ${DEFENSECLAW_TIMEOUT_SECONDS:-0.25}
+      RANGE_EVIDENCE_PATH: /reports/langflow-events.jsonl
     depends_on: [langflow]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks: [opspilot-net]
     ports: ["7860:8080"]
+    volumes:
+      - ./integration/reports:/reports
 
   mcp-gitlab:
     build: ./mcp
