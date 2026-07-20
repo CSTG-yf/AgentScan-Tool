@@ -1,4 +1,4 @@
-.PHONY: up down test seed smoke generate replay contracts static-scan rules attack-chain benchmark-summary report clean-reports
+.PHONY: up down test seed smoke generate replay contracts static-scan rules attack-chain benchmark-summary dashboard report clean-reports
 
 up:
 	docker compose up -d --build
@@ -38,6 +38,10 @@ benchmark-summary:
 
 report:
 	python integration/report.py
+	python dashboard/build_dashboard.py
+
+dashboard:
+	python dashboard/build_dashboard.py
 
 clean-reports:
 	python -c "import pathlib,shutil; [shutil.rmtree(p, ignore_errors=True) for p in (pathlib.Path('integration/reports'), pathlib.Path('bench/results'))]"

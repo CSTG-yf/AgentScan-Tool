@@ -83,34 +83,144 @@ Skill、MCP、数据库和网络副作用的检测、决策、证据与评测中
 | [运行手册](task/AgentRange-player/docs/OPERATIONS.md) | Windows/Linux 三模式运行与故障降级 |
 | [固定演示流程](task/AgentRange-player/docs/DEMO.md) | 资产、observe、action、攻击链和报告演示顺序 |
 | [交付证据索引](task/AgentRange-player/docs/DELIVERY.md) | M0-M7 交付物、验证入口和报告文件 |
+| [最终测试结果展示页](task/AgentRange-player/dashboard/index.html) | 面向评委的赛题指标、场景覆盖、闭环与证据看板 |
 
-### 快速运行靶场
+### 运行真实靶场测试（Windows PowerShell）
+
+以下流程会真实启动 Docker 靶场、调用 DefenseClaw Inspect API、回放攻击场景、
+采集延迟与容器资源数据，并生成面向评委的静态结果页。项目不要求运行 Go 测试，
+也不依赖 CI/CD 或 GitHub 测试。
+
+#### 1. 检查环境并安装靶场依赖
 
 ```powershell
-cd task/AgentRange-player
-Copy-Item .env.example .env
-docker compose up -d --build
-python -m pytest -q contracts integration opspilot-app scenario-runner bench
-python integration/static_inventory.py
-python integration/rule_contract.py
-python bench/benchmark.py run --mode baseline --total 20 --malicious-target 6
-python integration/report.py
+cd F:\agentscan2
+docker version
+docker compose version
+python --version
+defenseclaw --help
+defenseclaw-gateway --help
+
+cd F:\agentscan2\task\AgentRange-player
+python -m pip install -r requirements-dev.txt
 ```
 
-observe/action 需要先启动受认证、受限监听的 DefenseClaw Gateway，并在 `.env`
-设置 `DEFENSECLAW_API_BASE` 与 `DEFENSECLAW_API_TOKEN`：
+#### 2. 初始化并启动 DefenseClaw
+
+首次运行：
 
 ```powershell
-./integration/run.ps1 observe
-./integration/run.ps1 action
-python bench/benchmark.py summarize
-python integration/attack_chain.py
-python integration/report.py
+cd F:\agentscan2
+defenseclaw init --enable-guardrail
+defenseclaw setup gateway --host 127.0.0.1 --api-port 18970 --non-interactive --no-verify
+defenseclaw setup guardrail --mode observe --scanner-mode local --non-interactive
+defenseclaw-gateway start
+defenseclaw-gateway status
+Invoke-RestMethod http://127.0.0.1:18970/health
+```
+
+如果 Gateway 未加入 `PATH`，可将上述生命周期命令替换为
+`.\defenseclaw-gateway.exe start/status/restart`。
+
+AgentRange 运行在 Docker 中，因此 Gateway REST API 必须监听容器可达的宿主机地址。
+编辑 `$HOME\.defenseclaw\config.yaml`，在已有 `gateway` 节点下确认：
+
+```yaml
+gateway:
+  api_port: 18970
+  api_bind: 0.0.0.0
+```
+
+随后运行：
+
+```powershell
+defenseclaw-gateway restart
+defenseclaw-gateway status
+```
+
+`0.0.0.0` 仅适用于受控比赛主机；必须配置 Gateway Token 并用防火墙限制
+18970 端口，禁止把无鉴权 Inspect API 暴露到局域网或公网。
+
+#### 3. 配置并启动 AgentRange
+
+```powershell
+cd F:\agentscan2\task\AgentRange-player
+Copy-Item .env.example .env -Force
+
+$env:DEFENSECLAW_API_BASE = "http://host.docker.internal:18970"
+$env:DEFENSECLAW_API_TOKEN = "<DefenseClaw Gateway Token>"
+$env:DEFENSECLAW_FAIL_MODE = "open"
+$env:DEFENSECLAW_TIMEOUT_SECONDS = "0.25"
+
+docker compose up -d --build
+docker compose ps
+Invoke-RestMethod http://localhost:8100/health
+Invoke-RestMethod http://localhost:7860/guard/health
+```
+
+同时把以上四个 `DEFENSECLAW_*` 值写入靶场 `.env`，确保新开 PowerShell 后仍然
+生效。`/guard/health` 返回的 `protected` 应为 `true`。
+
+#### 4. 快速真实冒烟测试
+
+observe 只检测和留证，不阻断业务：
+
+```powershell
+defenseclaw setup guardrail --mode observe --scanner-mode local --non-interactive --restart
+docker compose up -d --build --force-recreate
+python .\scenario-runner\runner.py C2-D --mode observe --report .\integration\reports\observe-smoke.json
+```
+
+action 会在危险动作执行前阻断：
+
+```powershell
+defenseclaw setup guardrail --mode action --scanner-mode local --non-interactive --restart
+docker compose up -d --build --force-recreate
+python .\scenario-runner\runner.py C2-D --mode action --report .\integration\reports\action-smoke.json
+```
+
+action 模式预期出现 HTTP 403、`DEFENSECLAW_BLOCKED` 或对应阻断判定。可以把
+`C2-D` 依次替换为 `C1-A`、`C1-B`、`C2-A`、`C2-B`、`C2-C`，验证全部攻击链。
+
+#### 5. 正式三阶段全量测试
+
+下面三个命令会分别重建对应模式的靶场。每个阶段默认使用固定随机种子 `1337`，
+执行 5200 条回放且包含至少 80 条恶意样本：
+
+```powershell
+cd F:\agentscan2\task\AgentRange-player
+.\integration\run.ps1 baseline
+.\integration\run.ps1 observe
+.\integration\run.ps1 action
+```
+
+- `baseline`：不接入 DefenseClaw，作为攻击成功率和性能对照组。
+- `observe`：真实检测和记录风险，但不改变业务结果。
+- `action`：真实阻断高风险动作，计算 Recall、FPR 和正常业务成功率。
+
+汇总三阶段指标、攻击链和最终报告：
+
+```powershell
+python .\bench\benchmark.py summarize
+python .\integration\attack_chain.py --output .\integration\reports\attack-chains.json
+python .\integration\report.py
+python .\dashboard\build_dashboard.py
+Start-Process .\dashboard\index.html
+```
+
+主要结果位于 `bench/results/`、`integration/reports/`，评委展示入口为
+[`dashboard/index.html`](task/AgentRange-player/dashboard/index.html)。最终验收重点检查：
+Recall ≥ 95%、FPR < 5%、Inspect p95 < 1000ms、正常场景成功率 100%、CPU 增量 ≤ 5%。
+
+测试结束后清理容器和数据卷：
+
+```powershell
+docker compose down -v
 ```
 
 ### 当前验证状态
 
-- Python 合同与集成测试：27 项通过。
+- Python 合同、集成与静态展示页测试：30 项通过。
 - 静态资产：27/27；必要风险：7/7；六条行为规则攻击/良性合同全部通过。
 - baseline 烟雾：20/20 有效，正常业务成功率 100%，端到端 p95 约 164ms。
 - OpsPilot 与 Langflow Guard 镜像可构建并通过健康检查。

@@ -17,6 +17,10 @@ benchmark 原始结果为准。
 | M6 | 三模式 benchmark 与原始 JSON | `make benchmark-summary` |
 | M7 | Windows/Linux 脚本、Demo、最终报告 | `make report` |
 
+最终答辩页面位于 `dashboard/index.html`，执行 `make dashboard` 或 `make report`
+会根据最新 JSON/XML/YAML 证据刷新 `dashboard/data.js`。页面可以直接离线打开，
+也可以使用任意静态服务器托管。
+
 正式提交前应保留以下生成物：
 
 - `integration/reports/static-scan.json`
