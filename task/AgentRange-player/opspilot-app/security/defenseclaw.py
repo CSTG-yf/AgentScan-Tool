@@ -130,6 +130,7 @@ class DefenseClawClient:
         headers = {"Content-Type": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
+        headers["X-DefenseClaw-Client"] = self.connector
         try:
             response = requests.post(
                 f"{self.base_url}{path}",
