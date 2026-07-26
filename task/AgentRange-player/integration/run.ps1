@@ -16,7 +16,7 @@ if ($Mode -eq "baseline") {
     $previous = $env:DEFENSECLAW_API_BASE
     $env:DEFENSECLAW_API_BASE = ""
     docker compose up -d --build --force-recreate
-    $env:DEFENSECLAW_API_BASE = $previous
+    if ($previous) { $env:DEFENSECLAW_API_BASE = $previous } else { Remove-Item Env:DEFENSECLAW_API_BASE -ErrorAction SilentlyContinue }
 } else {
     if (-not $env:DEFENSECLAW_API_BASE -and -not (Select-String -Path .env -Pattern '^DEFENSECLAW_API_BASE=.+$' -Quiet -ErrorAction SilentlyContinue)) {
         throw "set DEFENSECLAW_API_BASE in the environment or .env"
