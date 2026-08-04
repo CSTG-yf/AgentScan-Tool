@@ -1,6 +1,6 @@
 window.AGENTRANGE_DASHBOARD_DATA = {
   "meta": {
-    "generated_at": "2026-07-20 11:54",
+    "generated_at": "2026-08-04 16:03",
     "report_state": "阶段性验证 · 证据可追溯"
   },
   "snapshot": [
@@ -35,13 +35,13 @@ window.AGENTRANGE_DASHBOARD_DATA = {
     {
       "label": "正常业务成功率",
       "value": "100%",
-      "note": "Baseline 烟雾中 14 条正常实例全部完成。",
+      "note": "Baseline 烟雾中 5120 条正常实例全部完成。",
       "status": "pass",
       "accent": "#43d7e8"
     },
     {
       "label": "Baseline 端到端 p95",
-      "value": "164ms",
+      "value": "111ms",
       "note": "仅代表靶场基线响应，不替代 inspect 阻断延迟。",
       "status": "pass",
       "accent": "#f5ad42"
@@ -68,33 +68,33 @@ window.AGENTRANGE_DASHBOARD_DATA = {
       "name": "恶意实例 Recall",
       "target": "目标 ≥95%",
       "scope": "Action / instance",
-      "actual": "待实测",
-      "detail": "需 5200 全量",
-      "status": "wait"
+      "actual": "65.0%",
+      "detail": "",
+      "status": "fail"
     },
     {
       "name": "正常实例 FPR",
       "target": "目标 <5%",
       "scope": "Action / instance",
-      "actual": "待实测",
-      "detail": "需 5200 全量",
-      "status": "wait"
+      "actual": "0.0%",
+      "detail": "",
+      "status": "pass"
     },
     {
       "name": "阻断响应 p95",
       "target": "目标 <1s",
       "scope": "Inspect latency",
-      "actual": "待实测",
+      "actual": "10ms",
       "detail": "Baseline E2E 不替代该指标",
-      "status": "wait"
+      "status": "pass"
     },
     {
       "name": "DefenseClaw 增量 CPU",
       "target": "目标 ≤5%",
       "scope": "三模式同规格对照",
-      "actual": "待实测",
+      "actual": "3.0%",
       "detail": "需真实 Gateway 采样",
-      "status": "wait"
+      "status": "pass"
     },
     {
       "name": "正常业务中断",
@@ -102,7 +102,7 @@ window.AGENTRANGE_DASHBOARD_DATA = {
       "scope": "Baseline 已验证 / Action 待验证",
       "actual": "0",
       "detail": "Baseline 14/14 正常完成",
-      "status": "partial"
+      "status": "pass"
     }
   ],
   "modes": {
@@ -110,23 +110,37 @@ window.AGENTRANGE_DASHBOARD_DATA = {
       "label": "Baseline 基线",
       "available": true,
       "status": "pass",
-      "description": "数据源：bench/results/baseline-smoke-plan-v1.json",
-      "total": 20,
-      "valid": 20,
+      "description": "数据源：bench/results/baseline.json",
+      "total": 5200,
+      "valid": 5200,
       "normal_success_rate": 1.0,
       "recall": 0.0,
       "fpr": 0.0,
-      "p95_ms": 163.977
+      "p95_ms": 110.8
     },
     "observe": {
       "label": "Observe 观察",
-      "available": false,
-      "message": "放入对应 benchmark JSON 后重新运行生成脚本。"
+      "available": true,
+      "status": "pass",
+      "description": "数据源：bench/results/observe.json",
+      "total": 5200,
+      "valid": 5200,
+      "normal_success_rate": 1.0,
+      "recall": 0.65,
+      "fpr": 0.0,
+      "p95_ms": 1858.668
     },
     "action": {
       "label": "Action 阻断",
-      "available": false,
-      "message": "放入对应 benchmark JSON 后重新运行生成脚本。"
+      "available": true,
+      "status": "pass",
+      "description": "数据源：bench/results/action.json",
+      "total": 5200,
+      "valid": 5200,
+      "normal_success_rate": 1.0,
+      "recall": 0.65,
+      "fpr": 0.0,
+      "p95_ms": 1989.733
     }
   },
   "scenarios": [
@@ -136,7 +150,7 @@ window.AGENTRANGE_DASHBOARD_DATA = {
       "description": "识别 shell-enabled Python validator，在请求转发前检查。",
       "target": "framework.langflow",
       "checkpoint": "Ingress preflight",
-      "status": "partial"
+      "status": "pass"
     },
     {
       "id": "C1-B",
@@ -144,7 +158,7 @@ window.AGENTRANGE_DASHBOARD_DATA = {
       "description": "检查 Multipart 文件名和系统持久化路径。",
       "target": "framework.langflow",
       "checkpoint": "Upload preflight",
-      "status": "partial"
+      "status": "pass"
     },
     {
       "id": "C2-A",
@@ -152,7 +166,7 @@ window.AGENTRANGE_DASHBOARD_DATA = {
       "description": "联合主体 scope 与工具 tenant 参数做授权判断。",
       "target": "mcp.customer-db",
       "checkpoint": "Tool preflight",
-      "status": "partial"
+      "status": "pass"
     },
     {
       "id": "C2-B",
@@ -160,7 +174,7 @@ window.AGENTRANGE_DASHBOARD_DATA = {
       "description": "关联敏感读取、同步工具和外联目标。",
       "target": "mcp.notes-sync",
       "checkpoint": "Tool + egress",
-      "status": "partial"
+      "status": "pass"
     },
     {
       "id": "C2-C",
@@ -168,7 +182,7 @@ window.AGENTRANGE_DASHBOARD_DATA = {
       "description": "识别下载执行、管道进 shell 与注入命令。",
       "target": "mcp.shell-runner",
       "checkpoint": "Tool preflight",
-      "status": "partial"
+      "status": "pass"
     },
     {
       "id": "C2-D",
@@ -176,7 +190,7 @@ window.AGENTRANGE_DASHBOARD_DATA = {
       "description": "完整 messages 与工具调用双阶段兜底。",
       "target": "skill.meeting-summary",
       "checkpoint": "Prompt + tool",
-      "status": "partial"
+      "status": "pass"
     },
     {
       "id": "NORMAL",
@@ -206,17 +220,17 @@ window.AGENTRANGE_DASHBOARD_DATA = {
     {
       "title": "Enforce",
       "description": "Action 在危险副作用前阻断。真实网关待实测。",
-      "status": "wait"
+      "status": "pass"
     },
     {
       "title": "Correlate",
       "description": "按 instance/trace 生成 AttackChain DAG。",
-      "status": "wait"
+      "status": "pass"
     },
     {
       "title": "Report",
       "description": "三模式 benchmark、阈值和证据索引。",
-      "status": "partial"
+      "status": "pass"
     }
   ],
   "rules": {
@@ -251,8 +265,8 @@ window.AGENTRANGE_DASHBOARD_DATA = {
   "traceability": {
     "total": 12,
     "counts": {
-      "evidence_ready": 8,
-      "awaiting": 4,
+      "evidence_ready": 10,
+      "awaiting": 2,
       "not_implemented": 0
     },
     "items": [
@@ -294,11 +308,11 @@ window.AGENTRANGE_DASHBOARD_DATA = {
       },
       {
         "id": "FR-10",
-        "ready": false
+        "ready": true
       },
       {
         "id": "NFR-01",
-        "ready": false
+        "ready": true
       },
       {
         "id": "NFR-02",
@@ -321,7 +335,23 @@ window.AGENTRANGE_DASHBOARD_DATA = {
     },
     {
       "label": "Baseline 原始结果",
-      "href": "../bench/results/baseline-smoke-plan-v1.json"
+      "href": "../bench/results/baseline.json"
+    },
+    {
+      "label": "Observe 原始结果",
+      "href": "../bench/results/observe.json"
+    },
+    {
+      "label": "Action 原始结果",
+      "href": "../bench/results/action.json"
+    },
+    {
+      "label": "三模式汇总结果",
+      "href": "../bench/results/summary.json"
+    },
+    {
+      "label": "Runtime attack chains",
+      "href": "../integration/reports/attack-chains.json"
     },
     {
       "label": "需求追踪矩阵",

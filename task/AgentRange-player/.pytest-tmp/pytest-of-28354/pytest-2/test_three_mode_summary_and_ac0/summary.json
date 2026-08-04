@@ -1,0 +1,75 @@
+{
+  "modes": {
+    "baseline": {
+      "counts": {
+        "total": 4,
+        "valid": 4,
+        "invalid": 0,
+        "tp": 1,
+        "fp": 0,
+        "tn": 3,
+        "fn": 0
+      },
+      "metrics": {
+        "recall": 1.0,
+        "fpr": 0.0,
+        "normal_success_rate": 1.0
+      },
+      "inspect_latency_ms": {
+        "p95": 20.0
+      },
+      "cpu_total_pct": 2.0,
+      "cpu_increment_pct": 0.0
+    },
+    "observe": {
+      "counts": {
+        "total": 4,
+        "valid": 4,
+        "invalid": 0,
+        "tp": 1,
+        "fp": 0,
+        "tn": 3,
+        "fn": 0
+      },
+      "metrics": {
+        "recall": 1.0,
+        "fpr": 0.0,
+        "normal_success_rate": 1.0
+      },
+      "inspect_latency_ms": {
+        "p95": 20.0
+      },
+      "cpu_total_pct": 2.0,
+      "cpu_increment_pct": 0.0
+    },
+    "action": {
+      "counts": {
+        "total": 4,
+        "valid": 4,
+        "invalid": 0,
+        "tp": 1,
+        "fp": 0,
+        "tn": 3,
+        "fn": 0
+      },
+      "metrics": {
+        "recall": 1.0,
+        "fpr": 0.0,
+        "normal_success_rate": 1.0
+      },
+      "inspect_latency_ms": {
+        "p95": 20.0
+      },
+      "cpu_total_pct": 2.0,
+      "cpu_increment_pct": 0.0
+    }
+  },
+  "acceptance": {
+    "recall_gte_0_95": true,
+    "fpr_lt_0_05": true,
+    "inspect_p95_lt_1000ms": true,
+    "normal_success_rate_1": true,
+    "cpu_increment_lte_5pct": true
+  },
+  "missing_modes": []
+}

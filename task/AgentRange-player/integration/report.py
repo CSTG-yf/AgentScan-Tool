@@ -23,7 +23,25 @@ def build(root: Path) -> dict:
     benchmark = read_json(root / "bench" / "results" / "summary.json", {})
     chain_rows = chains.get("chains", [])
     requirements = evaluate_requirements(root.parents[1])
-    evidence_files = sorted(path.relative_to(root).as_posix() for path in reports.glob("*") if path.is_file())
+    benchmark_files = [
+        root / "bench" / "results" / name
+        for name in ("baseline.json", "observe.json", "action.json", "summary.json")
+    ]
+    evidence_files = sorted(
+        [path.relative_to(root).as_posix() for path in reports.glob("*") if path.is_file()]
+        + [path.relative_to(root).as_posix() for path in benchmark_files if path.exists()]
+    )
+    degradation_notes = [
+        "Missing mode reports remain explicit in benchmark.missing_modes.",
+        "Inspection network failures are recorded as invalid instances and integration-fail-open/closed decisions.",
+        "No detection evidence is sourced from /admin/trajectories.",
+    ]
+    action_metrics = (((benchmark.get("modes") or {}).get("action") or {}).get("metrics") or {})
+    action_recall = action_metrics.get("recall")
+    if action_recall is not None and action_recall < 0.95:
+        degradation_notes.append(
+            f"Full benchmark action recall is {action_recall:.2%}; C1 Langflow scenarios remain outside the current OpsPilot runtime closure."
+        )
     return {
         "schema_version": 1,
         "generated_at": datetime.now(UTC).isoformat(),
@@ -42,11 +60,7 @@ def build(root: Path) -> dict:
         },
         "benchmark": benchmark,
         "evidence_index": evidence_files,
-        "degradation_notes": [
-            "Missing mode reports remain explicit in benchmark.missing_modes.",
-            "Inspection network failures are recorded as invalid instances and integration-fail-open/closed decisions.",
-            "No detection evidence is sourced from /admin/trajectories.",
-        ],
+        "degradation_notes": degradation_notes,
     }
 
 

@@ -1,0 +1,2 @@
+cisco-ai-mcp-scanner==4.7.2
+litellm==1.83.7

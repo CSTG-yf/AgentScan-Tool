@@ -102,8 +102,9 @@ def build() -> dict:
     action_metrics = (action or {}).get("metrics", {})
     action_latency = action_metrics.get("latency_ms", {})
     summary = read_json(ROOT / "bench" / "results" / "summary.json", {}) or {}
-    cpu_value = (summary.get("resource_delta") or {}).get("cpu_percent")
-    inspect_p95 = ((summary.get("inspect_latency_ms") or {}).get("p95"))
+    action_summary = (summary.get("modes") or {}).get("action") or {}
+    cpu_value = action_summary.get("cpu_increment_pct")
+    inspect_p95 = ((action_summary.get("inspect_latency_ms") or {}).get("p95"))
 
     snapshot = [
         {"label": "资产盘点覆盖", "value": f"{static_metrics.get('asset_found', 0)}/{static_metrics.get('asset_expected', 0)}", "note": "冻结分母 27 项，覆盖 Agent、Model、Framework、DB、MCP、Skill、Network 与 Port。", "status": "pass", "accent": "#13b89a"},
@@ -157,6 +158,10 @@ def build() -> dict:
             {"label": "静态资产与风险报告", "href": "../integration/reports/static-scan.json"},
             {"label": "规则合同报告", "href": "../integration/reports/rule-contract.json"},
             {"label": "Baseline 原始结果", "href": f"../{baseline_source}" if baseline_source else "#"},
+            {"label": "Observe 原始结果", "href": f"../{observe_source}" if observe_source else "#"},
+            {"label": "Action 原始结果", "href": f"../{action_source}" if action_source else "#"},
+            {"label": "三模式汇总结果", "href": "../bench/results/summary.json"},
+            {"label": "Runtime attack chains", "href": "../integration/reports/attack-chains.json"},
             {"label": "需求追踪矩阵", "href": "../integration/requirements.yaml"},
             {"label": "DefenseClaw 改造计划书", "href": "../../DefenseClaw_AgentRange靶场改造实施计划书_v1.0.md"},
         ],

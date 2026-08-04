@@ -39,6 +39,10 @@ def classify_sequence(events: list[dict]) -> str:
     return "runtime_risk_sequence"
 
 
+def is_block_decision(verdict: dict) -> bool:
+    return verdict.get("action") == "block" or verdict.get("would_block") is True or verdict.get("raw_action") == "block"
+
+
 def build_chain(instance_id: str, events: list[dict]) -> dict:
     nodes = []
     edges = []
@@ -58,7 +62,7 @@ def build_chain(instance_id: str, events: list[dict]) -> dict:
                 "decision": verdict,
             }
         )
-        if verdict.get("action") == "block" and block_node_id is None:
+        if is_block_decision(verdict) and block_node_id is None:
             block_node_id = node_id
         if index > 1:
             edges.append({"from": f"n{index - 1}", "to": node_id, "relation": "observed_before", "evidence_level": "direct"})

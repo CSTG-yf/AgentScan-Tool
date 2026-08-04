@@ -3956,6 +3956,31 @@ func TestInspectToolSecretInArgs(t *testing.T) {
 	}
 }
 
+func TestInspectToolUsesConnectorModeOverride(t *testing.T) {
+	store, logger := testStoreAndLogger(t)
+	cfg := &config.Config{}
+	cfg.Guardrail.Mode = "action"
+	cfg.Guardrail.Connectors = map[string]config.PerConnectorGuardrailConfig{
+		"opspilot": {Mode: "observe", RulePackDir: "/policies/strict"},
+	}
+	api := NewAPIServer("127.0.0.1:0", NewSidecarHealth(), nil, store, logger, cfg)
+
+	_, verdict := postInspect(t, api,
+		`{"tool":"read_file","args":{"path":"/app/.env"},"connector":"opspilot"}`)
+
+	if verdict.Action != "allow" {
+		t.Errorf("action = %q, want allow from connector observe mode", verdict.Action)
+	}
+	if verdict.RawAction != "block" {
+		t.Errorf("raw_action = %q, want block from connector strict policy", verdict.RawAction)
+	}
+	if !verdict.WouldBlock {
+		t.Errorf("would_block = false, want true from connector observe mode")
+	}
+	if verdict.Mode != "observe" {
+		t.Errorf("mode = %q, want observe from connector override", verdict.Mode)
+	}
+}
 func TestInspectToolMessageOutbound(t *testing.T) {
 	api := testAPIServerWithConfig(t, "action")
 	_, verdict := postInspect(t, api,

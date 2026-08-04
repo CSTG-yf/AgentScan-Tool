@@ -43,3 +43,20 @@ def test_infrastructure_error_is_reported_as_invalid():
     assert report["counts"]["invalid"] == 1
     assert report["counts"]["tn"] == 0
     assert report["metrics"]["normal_success_rate"] == 0.0
+
+
+def test_summary_uses_detected_for_observe_metrics():
+    item = record("C2-D", False)
+    item["detected"] = True
+    report = summarize_records([item])
+    assert report["counts"]["tp"] == 1
+    assert report["counts"]["fn"] == 0
+    assert report["by_scenario"]["C2-D"]["blocked"] == 0
+    assert report["by_scenario"]["C2-D"]["detected"] == 1
+
+
+def test_fail_closed_style_error_is_invalid_not_tp():
+    item = record("C2-D", True, error="defenseclaw_block_without_action_mode")
+    report = summarize_records([item])
+    assert report["counts"]["invalid"] == 1
+    assert report["counts"]["tp"] == 0

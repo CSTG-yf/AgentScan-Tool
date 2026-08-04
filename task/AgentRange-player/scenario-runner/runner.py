@@ -87,6 +87,63 @@ def is_attack_scenario(scenario: str) -> bool:
     return scenario.startswith(("C1-", "C2-", "M-"))
 
 
+EVIDENCE_PATHS = {
+    "opspilot-app": pathlib.Path(os.getenv("OPSPILOT_EVIDENCE_PATH", str(root / "integration" / "reports" / "opspilot-events.jsonl"))),
+    "langflow": pathlib.Path(os.getenv("LANGFLOW_EVIDENCE_PATH", str(root / "integration" / "reports" / "langflow-events.jsonl"))),
+}
+
+
+def evidence_line_count(path: pathlib.Path) -> int:
+    if not path.exists():
+        return 0
+    return len(path.read_text(encoding="utf-8").splitlines())
+
+
+def evidence_decisions(path: pathlib.Path, start_line: int, instance_id: str) -> list[dict]:
+    if not path.exists():
+        return []
+    decisions = []
+    for line in path.read_text(encoding="utf-8").splitlines()[start_line:]:
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("instance_id") != instance_id:
+            continue
+        decision = event.get("decision") or {}
+        if decision:
+            decisions.append(decision)
+    return decisions
+
+
+def observed_detection(decisions: list[dict]) -> bool:
+    for decision in decisions:
+        mode = decision.get("mode")
+        if mode in {"integration-fail-open", "integration-fail-closed"}:
+            continue
+        if mode == "observe" and (decision.get("would_block") or decision.get("raw_action") == "block"):
+            return True
+    return False
+
+
+def action_block_status(response) -> tuple[bool, str]:
+    if response is None or response.status_code != 403:
+        return False, ""
+    try:
+        body = response.json()
+    except ValueError:
+        return False, "http_403_without_json"
+    detail = body.get("detail") if isinstance(body, dict) else {}
+    if not isinstance(detail, dict) or detail.get("code") != "DEFENSECLAW_BLOCKED":
+        return False, "http_403_without_defenseclaw_blocked"
+    verdict = detail.get("verdict") or {}
+    if verdict.get("mode") != "action" or verdict.get("action") != "block":
+        return False, "defenseclaw_block_without_action_mode"
+    return True, ""
+
+
 def percentile(values: list[float], quantile: float) -> float:
     if not values:
         return 0.0
@@ -98,10 +155,10 @@ def percentile(values: list[float], quantile: float) -> float:
 def summarize_records(records: list[dict]) -> dict:
     valid = [item for item in records if not item.get("error")]
     invalid = [item for item in records if item.get("error")]
-    tp = sum(1 for item in valid if item["attack"] and item["blocked"])
-    fn = sum(1 for item in valid if item["attack"] and not item["blocked"])
-    fp = sum(1 for item in valid if not item["attack"] and item["blocked"])
-    tn = sum(1 for item in valid if not item["attack"] and not item["blocked"])
+    tp = sum(1 for item in valid if item["attack"] and item.get("detected", item["blocked"]))
+    fn = sum(1 for item in valid if item["attack"] and not item.get("detected", item["blocked"]))
+    fp = sum(1 for item in valid if not item["attack"] and item.get("detected", item["blocked"]))
+    tn = sum(1 for item in valid if not item["attack"] and not item.get("detected", item["blocked"]))
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     fpr = fp / (fp + tn) if fp + tn else 0.0
@@ -111,9 +168,10 @@ def summarize_records(records: list[dict]) -> dict:
     normal_success = sum(1 for item in normal if not item["blocked"] and not item.get("error"))
     by_scenario = {}
     for item in records:
-        bucket = by_scenario.setdefault(item["scenario"], {"total": 0, "blocked": 0, "errors": 0})
+        bucket = by_scenario.setdefault(item["scenario"], {"total": 0, "blocked": 0, "detected": 0, "errors": 0})
         bucket["total"] += 1
         bucket["blocked"] += int(item["blocked"])
+        bucket["detected"] += int(item.get("detected", item["blocked"]))
         bucket["errors"] += int(bool(item.get("error")))
     return {
         "counts": {"total": len(records), "valid": len(valid), "invalid": len(invalid), "tp": tp, "fp": fp, "tn": tn, "fn": fn},
@@ -135,9 +193,10 @@ def summarize_records(records: list[dict]) -> dict:
     }
 
 
-def replay_events(events: list[dict], only: str | None = None, ground_truth: dict[str, dict] | None = None) -> dict:
+def replay_events(events: list[dict], only: str | None = None, ground_truth: dict[str, dict] | None = None, mode: str = "baseline") -> dict:
     if only and only != "all":
         events = [event for event in events if event["scenario"] == only]
+    evidence_offsets = {target: evidence_line_count(path) for target, path in EVIDENCE_PATHS.items()}
     # 网络执行只在人工 make replay 时发生，离线测试验证 plan_actions。
     with httpx.Client(timeout=15) as client:
         tokens = {}
@@ -159,7 +218,12 @@ def replay_events(events: list[dict], only: str | None = None, ground_truth: dic
             except Exception as exc:
                 error = f"{type(exc).__name__}: {exc}"
             latency_ms = (time.perf_counter() - started) * 1000
-            blocked = response is not None and response.status_code == 403
+            blocked, block_error = action_block_status(response)
+            if block_error and not error:
+                error = block_error
+            path = EVIDENCE_PATHS.get(action["target"])
+            decisions = evidence_decisions(path, evidence_offsets.get(action["target"], 0), action["instance_id"]) if path else []
+            detected = observed_detection(decisions) if mode == "observe" else blocked
             records.append(
                 {
                     "instance_id": action["instance_id"],
@@ -168,7 +232,9 @@ def replay_events(events: list[dict], only: str | None = None, ground_truth: dic
                     "attack": (ground_truth or {}).get(action["instance_id"], {}).get("label") == "malicious",
                     "ground_truth": (ground_truth or {}).get(action["instance_id"], {}),
                     "blocked": blocked,
+                    "detected": detected,
                     "status_code": response.status_code if response is not None else 0,
+                    "decision_count": len(decisions),
                     "latency_ms": round(latency_ms, 3),
                     "error": error,
                 }
@@ -196,7 +262,7 @@ def ground_truth_for(events: list) -> dict[str, dict]:
     }
 
 
-def replay_generated(only: str | None = None, seed: int = 1337, total: int = 5200, malicious_target: int = 80) -> dict:
+def replay_generated(only: str | None = None, seed: int = 1337, total: int = 5200, malicious_target: int = 80, mode: str = "baseline") -> dict:
     generated = generate(seed, total, malicious_target)
     selected = select_events(generated, only)
     public_events = [public_record(event) for event in selected]
@@ -205,7 +271,7 @@ def replay_generated(only: str | None = None, seed: int = 1337, total: int = 520
     # trajectories 只进入 llm-stub 内存，finally 保证回放失败时也清理。
     inject_trajectories(trajectory_map(selected))
     try:
-        report = replay_events(public_events, only=None, ground_truth=ground_truth)
+        report = replay_events(public_events, only=None, ground_truth=ground_truth, mode=mode)
         report["ground_truth"] = list(ground_truth.values())
         report["config"] = {"seed": seed, "total": total, "malicious_target": malicious_target, "scenario": only or "all"}
         return report
@@ -246,6 +312,10 @@ def fire_opspilot(client: httpx.Client, action: dict, tokens: dict):
     headers["Authorization"] = f"Bearer {tokens[username]}"
     body = action["body"]
     response = client.post(f"{OPSPILOT}/run", headers=headers, json=body)
+    if response.status_code == 401:
+        tokens[username] = login_token(client, username)
+        headers["Authorization"] = f"Bearer {tokens[username]}"
+        response = client.post(f"{OPSPILOT}/run", headers=headers, json=body)
     return response
 
 
@@ -260,7 +330,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--mode", choices=("baseline", "observe", "action"), default=os.getenv("RANGE_MODE", "baseline"))
     args = parser.parse_args()
-    report = replay_generated(only=args.scenario, seed=args.seed, total=args.total, malicious_target=args.malicious_target)
+    report = replay_generated(only=args.scenario, seed=args.seed, total=args.total, malicious_target=args.malicious_target, mode=args.mode)
     report["mode"] = args.mode
     summary = {key: value for key, value in report.items() if key not in {"records", "ground_truth"}}
     print(json.dumps(summary, ensure_ascii=False, indent=2))

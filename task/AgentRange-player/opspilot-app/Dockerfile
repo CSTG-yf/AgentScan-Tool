@@ -1,7 +1,8 @@
 FROM python:3.12-slim
 WORKDIR /app
+ENV HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= NO_PROXY=* no_proxy=*
 COPY opspilot-app/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 COPY opspilot-app/auth ./auth
 COPY opspilot-app/policy ./policy
 COPY opspilot-app/security ./security

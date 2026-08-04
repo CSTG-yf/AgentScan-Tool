@@ -65,7 +65,7 @@ func (r *Registry) RegisterPlugin(c Connector) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.builtins[c.Name()]; exists {
-		return fmt.Errorf("plugin %q collides with built-in connector name — refusing registration", c.Name())
+		return fmt.Errorf("plugin %q collides with built-in connector name 閳?refusing registration", c.Name())
 	}
 	r.plugins[c.Name()] = c
 	return nil
@@ -99,7 +99,7 @@ func (r *Registry) GetAll(names []string) ([]Connector, error) {
 			out = append(out, c)
 			continue
 		}
-		return nil, fmt.Errorf("unknown connector %q — run 'defenseclaw setup' first", name)
+		return nil, fmt.Errorf("unknown connector %q 閳?run 'defenseclaw setup' first", name)
 	}
 	return out, nil
 }
@@ -186,6 +186,7 @@ func newBuiltinConnectors() []Connector {
 		NewAntigravityConnector(),
 		NewOpenCodeConnector(),
 		NewOmnigentConnector(),
+		NewAgentRangeOpsPilotConnector(),
 	}
 }
 
@@ -224,7 +225,7 @@ func (r *Registry) DiscoverPlugins(dir string) error {
 		if err := r.RegisterPlugin(c); err != nil {
 			// Builtin-collision is logged-and-skipped, not fatal:
 			// a single malicious .so must not gate the whole boot
-			// path — the other plugins in the directory can still
+			// path 閳?the other plugins in the directory can still
 			// load. The error is surfaced via stderr (and would
 			// also be picked up by an audit-log forwarder) so
 			// operators see exactly which name was rejected.

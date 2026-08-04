@@ -912,7 +912,7 @@ func (a *APIServer) handleInspectTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	verdict.applyMode(inspectMode(a.scannerCfg))
+	verdict.applyMode(inspectModeForConnector(a.scannerCfg, req.Connector))
 	a.resolveOpenClawInspectConfirm(r.Context(), &req, verdict)
 
 	elapsed := time.Since(t0)

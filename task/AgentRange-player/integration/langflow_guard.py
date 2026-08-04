@@ -21,6 +21,8 @@ app = FastAPI(title="agent-range-langflow-guard")
 UPSTREAM_BASE = os.getenv("UPSTREAM_BASE", "http://langflow:7860").rstrip("/")
 DEFENSECLAW_API_BASE = os.getenv("DEFENSECLAW_API_BASE", "").rstrip("/")
 DEFENSECLAW_API_TOKEN = os.getenv("DEFENSECLAW_API_TOKEN", "")
+DEFENSECLAW_CLIENT_NAME = os.getenv("DEFENSECLAW_CLIENT_NAME", "agentrange-langflow-guard")
+DEFENSECLAW_CONNECTOR = os.getenv("DEFENSECLAW_CONNECTOR", "opspilot")
 FAIL_MODE = os.getenv("DEFENSECLAW_FAIL_MODE", "open").lower()
 TIMEOUT = float(os.getenv("DEFENSECLAW_TIMEOUT_SECONDS", "0.25"))
 EVIDENCE_PATH = os.getenv("RANGE_EVIDENCE_PATH", "")
@@ -78,7 +80,7 @@ async def inspect_ingress(request: Request, body: bytes) -> dict[str, Any]:
     if not DEFENSECLAW_API_BASE:
         return {"action": "allow", "mode": "disabled"}
     started = time.perf_counter()
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json", "X-DefenseClaw-Client": DEFENSECLAW_CLIENT_NAME}
     if DEFENSECLAW_API_TOKEN:
         headers["Authorization"] = f"Bearer {DEFENSECLAW_API_TOKEN}"
     payload = {
@@ -94,7 +96,7 @@ async def inspect_ingress(request: Request, body: bytes) -> dict[str, Any]:
         },
         "direction": "tool_call",
         "session_id": request.headers.get("x-instance-id", "langflow-http"),
-        "connector": "opspilot",
+        "connector": DEFENSECLAW_CONNECTOR,
         "mcp_server_name": "langflow",
     }
     try:

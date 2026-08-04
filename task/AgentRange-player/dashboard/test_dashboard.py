@@ -19,13 +19,20 @@ def test_dashboard_covers_competition_metrics_and_scenarios():
     }
 
 
-def test_missing_action_results_are_not_reported_as_passed():
+def test_action_results_are_reported_with_explicit_gap():
     data = build()
-    assert data["modes"]["action"]["available"] is False
+    assert data["modes"]["action"]["available"] is True
+    assert data["modes"]["action"]["valid"] == 5200
+    assert data["modes"]["action"]["recall"] == 0.65
     action_metrics = {item["name"]: item for item in data["scorecard"]}
-    for name in ("恶意实例 Recall", "正常实例 FPR", "阻断响应 p95", "DefenseClaw 增量 CPU"):
-        assert action_metrics[name]["status"] == "wait"
-        assert action_metrics[name]["actual"] == "待实测"
+    recall = next(item for item in action_metrics.values() if "Recall" in item["name"])
+    fpr = next(item for item in action_metrics.values() if "FPR" in item["name"])
+    p95 = next(item for item in action_metrics.values() if "p95" in item["name"])
+    cpu = next(item for item in action_metrics.values() if "CPU" in item["name"])
+    assert recall["status"] == "fail"
+    assert fpr["status"] == "pass"
+    assert p95["status"] == "pass"
+    assert cpu["status"] == "pass"
 
 
 def test_static_page_has_required_landmarks():

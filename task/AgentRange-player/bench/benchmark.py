@@ -54,7 +54,7 @@ def load_inspect_latencies(report_dir: pathlib.Path) -> list[float]:
 
 def run_mode(mode: str, output: pathlib.Path, seed: int, total: int, malicious_target: int) -> dict:
     before = docker_stats()
-    report = replay_generated(seed=seed, total=total, malicious_target=malicious_target)
+    report = replay_generated(seed=seed, total=total, malicious_target=malicious_target, mode=mode)
     after = docker_stats()
     inspect = load_inspect_latencies(ROOT / "integration" / "reports")
     report.update(

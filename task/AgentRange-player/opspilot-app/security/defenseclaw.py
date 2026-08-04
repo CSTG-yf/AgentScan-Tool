@@ -62,6 +62,7 @@ class DefenseClawClient:
     timeout_seconds: float = 0.25
     fail_mode: str = "open"
     connector: str = "opspilot"
+    client_name: str = "agentrange-opspilot"
     evidence_path: str = ""
 
     @classmethod
@@ -72,6 +73,7 @@ class DefenseClawClient:
             timeout_seconds=float(os.getenv("DEFENSECLAW_TIMEOUT_SECONDS", "0.25")),
             fail_mode=os.getenv("DEFENSECLAW_FAIL_MODE", "open").strip().lower(),
             connector=os.getenv("DEFENSECLAW_CONNECTOR", "opspilot"),
+            client_name=os.getenv("DEFENSECLAW_CLIENT_NAME", "agentrange-opspilot"),
             evidence_path=os.getenv("RANGE_EVIDENCE_PATH", ""),
         )
 
@@ -83,14 +85,14 @@ class DefenseClawClient:
         return self._inspect(
             "request",
             "/api/v1/inspect/request",
-            {"content": content, "model": model, "session_id": session_id},
+            {"content": content, "model": model, "session_id": session_id, "connector": self.connector},
         )
 
     def inspect_response(self, content: str, model: str, session_id: str) -> dict[str, Any]:
         return self._inspect(
             "response",
             "/api/v1/inspect/response",
-            {"content": content, "model": model, "session_id": session_id},
+            {"content": content, "model": model, "session_id": session_id, "connector": self.connector},
         )
 
     def inspect_tool(
@@ -119,7 +121,7 @@ class DefenseClawClient:
         return self._inspect(
             "tool-response",
             "/api/v1/inspect/tool-response",
-            {"tool": tool, "output": output, "session_id": session_id},
+            {"tool": tool, "output": output, "session_id": session_id, "connector": self.connector},
         )
 
     def _inspect(self, stage: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -127,7 +129,7 @@ class DefenseClawClient:
             return {"action": "allow", "mode": "disabled", "severity": "NONE"}
 
         started = time.perf_counter()
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "X-DefenseClaw-Client": self.client_name}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         try:

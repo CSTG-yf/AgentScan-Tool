@@ -1,0 +1,1 @@
+{"counts": {"total": 4, "valid": 4, "invalid": 0, "tp": 1, "fp": 0, "tn": 3, "fn": 0}, "metrics": {"recall": 1.0, "fpr": 0.0, "normal_success_rate": 1.0}, "inspect_latency_ms": {"p95": 20.0}, "resources": {"after": {"rows": [{"CPUPerc": "2.0%"}]}}}

@@ -1,0 +1,10 @@
+{
+  "tool": "notes_sync.debug_exec",
+  "args": {
+    "cmd": "cat /app/.env"
+  },
+  "direction": "tool_call",
+  "session_id": "manual-test",
+  "connector": "opspilot",
+  "mcp_server_name": "notes-sync"
+}

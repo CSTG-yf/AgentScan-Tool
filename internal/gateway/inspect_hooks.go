@@ -38,10 +38,15 @@ import (
 //   - explicit "" or whitespace → "observe"
 //   - any value other than "action" → "observe" so the only path
 //     that actually blocks the agent is the explicit operator opt-in.
+
 func inspectMode(cfg *config.Config) string {
+	return inspectModeForConnector(cfg, "")
+}
+
+func inspectModeForConnector(cfg *config.Config, connector string) string {
 	mode := ""
 	if cfg != nil {
-		mode = strings.TrimSpace(cfg.Guardrail.Mode)
+		mode = strings.TrimSpace(cfg.Guardrail.EffectiveMode(connector))
 	}
 	if mode != "action" {
 		return "observe"
@@ -93,6 +98,7 @@ type RequestInspectRequest struct {
 	Content   string `json:"content"`
 	Model     string `json:"model,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
+	Connector string `json:"connector,omitempty"`
 }
 
 // ResponseInspectRequest is the payload for POST /api/v1/inspect/response.
@@ -101,6 +107,7 @@ type ResponseInspectRequest struct {
 	Content   string `json:"content"`
 	Model     string `json:"model,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
+	Connector string `json:"connector,omitempty"`
 }
 
 // ToolResponseInspectRequest is the payload for POST /api/v1/inspect/tool-response.
@@ -110,6 +117,7 @@ type ToolResponseInspectRequest struct {
 	Output    json.RawMessage `json:"output,omitempty"`
 	ExitCode  int             `json:"exit_code,omitempty"`
 	SessionID string          `json:"session_id,omitempty"`
+	Connector string          `json:"connector,omitempty"`
 }
 
 // handleInspectRequest inspects user query content before it is sent to the LLM.
@@ -146,7 +154,7 @@ func (a *APIServer) handleInspectRequest(w http.ResponseWriter, r *http.Request)
 	// "action" mode operators see alert (instead of block) and "observe"
 	// mode operators see the same audit reason explaining the demotion.
 	clampPromptDirectionToolVerdict(verdict, "prompt")
-	verdict.applyMode(inspectMode(a.scannerCfg))
+	verdict.applyMode(inspectModeForConnector(a.scannerCfg, req.Connector))
 
 	elapsed := time.Since(t0)
 
@@ -216,7 +224,7 @@ func (a *APIServer) handleInspectResponse(w http.ResponseWriter, r *http.Request
 		return
 	}
 	verdict := a.buildVerdict(ruleFindings, "completion", false)
-	verdict.applyMode(inspectMode(a.scannerCfg))
+	verdict.applyMode(inspectModeForConnector(a.scannerCfg, req.Connector))
 
 	elapsed := time.Since(t0)
 
@@ -304,7 +312,7 @@ func (a *APIServer) handleInspectToolResponse(w http.ResponseWriter, r *http.Req
 		verdict = mergeWithJudgeVerdict(verdict, jv)
 	}
 
-	verdict.applyMode(inspectMode(a.scannerCfg))
+	verdict.applyMode(inspectModeForConnector(a.scannerCfg, req.Connector))
 
 	elapsed := time.Since(t0)
 
