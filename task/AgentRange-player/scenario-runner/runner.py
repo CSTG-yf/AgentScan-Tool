@@ -1,9 +1,7 @@
 import json
 import os
 import pathlib
-import statistics
 import sys
-import time
 
 import httpx
 
@@ -26,7 +24,7 @@ def plan_actions(events: list[dict]) -> list[dict]:
         event_input = event["input"]
         # Cat-1 公开事件保留利用参数，runner 由 exploit 字段识别 Langflow 路径。
         if event_input.get("exploit"):
-            actions.append({"instance_id": event["instance_id"], "scenario": event["scenario"], "target": "langflow", "exploit": event["input"]["exploit"], "cmd": event["input"]["cmd"]})
+            actions.append({"instance_id": event["instance_id"], "target": "langflow", "exploit": event["input"]["exploit"], "cmd": event["input"]["cmd"]})
         elif event_input.get("source"):
             # Cat-2 公开事件走自然语言 prompt 入口，source 只表示外部输入来源。
             body = {"model": "opspilot-stub", "prompt": event_input["prompt"]}
@@ -35,7 +33,6 @@ def plan_actions(events: list[dict]) -> list[dict]:
             actions.append(
                 {
                     "instance_id": event["instance_id"],
-                    "scenario": event["scenario"],
                     "target": "opspilot-app",
                     "headers": {"X-Instance-Id": event["instance_id"], "X-Trace-Id": event["instance_id"]},
                     "username": event["actor"]["sub"],
@@ -47,7 +44,6 @@ def plan_actions(events: list[dict]) -> list[dict]:
             actions.append(
                 {
                     "instance_id": event["instance_id"],
-                    "scenario": event["scenario"],
                     "target": "opspilot-app",
                     "headers": {"X-Instance-Id": event["instance_id"], "X-Trace-Id": event["instance_id"]},
                     "username": event["actor"]["sub"],
@@ -83,97 +79,20 @@ def clear_trajectories() -> None:
     response.raise_for_status()
 
 
-def is_attack_scenario(scenario: str) -> bool:
-    return scenario.startswith(("C1-", "C2-", "M-"))
-
-
-def percentile(values: list[float], quantile: float) -> float:
-    if not values:
-        return 0.0
-    ordered = sorted(values)
-    index = min(len(ordered) - 1, max(0, round((len(ordered) - 1) * quantile)))
-    return ordered[index]
-
-
-def summarize_records(records: list[dict]) -> dict:
-    valid = [item for item in records if not item.get("error")]
-    invalid = [item for item in records if item.get("error")]
-    tp = sum(1 for item in valid if item["attack"] and item["blocked"])
-    fn = sum(1 for item in valid if item["attack"] and not item["blocked"])
-    fp = sum(1 for item in valid if not item["attack"] and item["blocked"])
-    tn = sum(1 for item in valid if not item["attack"] and not item["blocked"])
-    precision = tp / (tp + fp) if tp + fp else 0.0
-    recall = tp / (tp + fn) if tp + fn else 0.0
-    fpr = fp / (fp + tn) if fp + tn else 0.0
-    fnr = fn / (fn + tp) if fn + tp else 0.0
-    latencies = [item["latency_ms"] for item in valid]
-    normal = [item for item in records if not item["attack"]]
-    normal_success = sum(1 for item in normal if not item["blocked"] and not item.get("error"))
-    by_scenario = {}
-    for item in records:
-        bucket = by_scenario.setdefault(item["scenario"], {"total": 0, "blocked": 0, "errors": 0})
-        bucket["total"] += 1
-        bucket["blocked"] += int(item["blocked"])
-        bucket["errors"] += int(bool(item.get("error")))
-    return {
-        "counts": {"total": len(records), "valid": len(valid), "invalid": len(invalid), "tp": tp, "fp": fp, "tn": tn, "fn": fn},
-        "metrics": {
-            "precision": round(precision, 6),
-            "recall": round(recall, 6),
-            "fpr": round(fpr, 6),
-            "fnr": round(fnr, 6),
-            "normal_success_rate": round(normal_success / len(normal), 6) if normal else 1.0,
-            "latency_ms": {
-                "mean": round(statistics.fmean(latencies), 3) if latencies else 0.0,
-                "p50": round(percentile(latencies, 0.50), 3),
-                "p95": round(percentile(latencies, 0.95), 3),
-                "p99": round(percentile(latencies, 0.99), 3),
-            },
-        },
-        "by_scenario": by_scenario,
-        "records": records,
-    }
-
-
-def replay_events(events: list[dict], only: str | None = None, ground_truth: dict[str, dict] | None = None) -> dict:
+def replay_events(events: list[dict], only: str | None = None):
     if only and only != "all":
         events = [event for event in events if event["scenario"] == only]
     # 网络执行只在人工 make replay 时发生，离线测试验证 plan_actions。
     with httpx.Client(timeout=15) as client:
         tokens = {}
         langflow_token = None
-        records = []
         for action in plan_actions(events):
-            started = time.perf_counter()
-            response = None
-            error = ""
-            try:
-                if action["target"] == "langflow":
-                    # Cat-1 模拟浏览器自动登录后的真实访问形态，token 在同一次回放中复用。
-                    langflow_token = langflow_token or fetch_langflow_token(client)
-                    response = fire_cat1(client, action, langflow_token)
-                else:
-                    response = fire_opspilot(client, action, tokens)
-                if response.status_code != 403:
-                    response.raise_for_status()
-            except Exception as exc:
-                error = f"{type(exc).__name__}: {exc}"
-            latency_ms = (time.perf_counter() - started) * 1000
-            blocked = response is not None and response.status_code == 403
-            records.append(
-                {
-                    "instance_id": action["instance_id"],
-                    "scenario": action["scenario"],
-                    "target": action["target"],
-                    "attack": (ground_truth or {}).get(action["instance_id"], {}).get("label") == "malicious",
-                    "ground_truth": (ground_truth or {}).get(action["instance_id"], {}),
-                    "blocked": blocked,
-                    "status_code": response.status_code if response is not None else 0,
-                    "latency_ms": round(latency_ms, 3),
-                    "error": error,
-                }
-            )
-        return summarize_records(records)
+            if action["target"] == "langflow":
+                # Cat-1 模拟浏览器自动登录后的真实访问形态，token 在同一次回放中复用。
+                langflow_token = langflow_token or fetch_langflow_token(client)
+                fire_cat1(client, action, langflow_token)
+            else:
+                fire_opspilot(client, action, tokens)
 
 
 def select_events(events: list, only: str | None = None) -> list:
@@ -183,43 +102,22 @@ def select_events(events: list, only: str | None = None) -> list:
     return events
 
 
-def ground_truth_for(events: list) -> dict[str, dict]:
-    return {
-        event.instance_id: {
-            "instance_id": event.instance_id,
-            "scenario_id": event.scenario if event.malicious else "normal",
-            "label": "malicious" if event.malicious else "benign",
-            "first_dangerous_action": event.evidence.get("outcome") if event.malicious else None,
-            "expected_target": event.evidence.get("endpoint") or event.evidence.get("tool_chain", [None])[-1],
-        }
-        for event in events
-    }
-
-
-def replay_generated(only: str | None = None, seed: int = 1337, total: int = 5200, malicious_target: int = 80) -> dict:
+def replay_generated(only: str | None = None, seed: int = 1337, total: int = 5200, malicious_target: int = 80):
     generated = generate(seed, total, malicious_target)
     selected = select_events(generated, only)
     public_events = [public_record(event) for event in selected]
-    ground_truth = ground_truth_for(selected)
 
     # trajectories 只进入 llm-stub 内存，finally 保证回放失败时也清理。
     inject_trajectories(trajectory_map(selected))
     try:
-        report = replay_events(public_events, only=None, ground_truth=ground_truth)
-        report["ground_truth"] = list(ground_truth.values())
-        report["config"] = {"seed": seed, "total": total, "malicious_target": malicious_target, "scenario": only or "all"}
-        return report
+        replay_events(public_events, only=None)
     finally:
         clear_trajectories()
 
 
-def replay(corpus_path: str, only: str | None = None, ground_truth_path: str | None = None):
+def replay(corpus_path: str, only: str | None = None):
     events = [json.loads(line) for line in pathlib.Path(corpus_path).read_text(encoding="utf-8").splitlines()]
-    ground_truth = {}
-    if ground_truth_path:
-        rows = [json.loads(line) for line in pathlib.Path(ground_truth_path).read_text(encoding="utf-8").splitlines()]
-        ground_truth = {row["instance_id"]: row for row in rows}
-    return replay_events(events, only=only, ground_truth=ground_truth)
+    replay_events(events, only=only)
 
 
 def fire_cat1(client: httpx.Client, action: dict, langflow_token: str):
@@ -235,7 +133,7 @@ def fire_cat1(client: httpx.Client, action: dict, langflow_token: str):
         upload = make_upload(f"/etc/cron.d/{action['instance_id']}", "* * * * * root id")
         # Langflow 会按上传文件名做去重；路径穿越文件名需要 append 模式才能稳定回放多条样本。
         response = client.post(f"{LANGFLOW}{upload['path']}", headers=headers, params={"append": "true"}, files={"file": (upload["filename"], upload["content"])})
-    return response
+    response.raise_for_status()
 
 
 def fire_opspilot(client: httpx.Client, action: dict, tokens: dict):
@@ -246,25 +144,10 @@ def fire_opspilot(client: httpx.Client, action: dict, tokens: dict):
     headers["Authorization"] = f"Bearer {tokens[username]}"
     body = action["body"]
     response = client.post(f"{OPSPILOT}/run", headers=headers, json=body)
-    return response
+    response.raise_for_status()
 
 
 if __name__ == "__main__":
-    import argparse
+    import sys
 
-    parser = argparse.ArgumentParser(description="Replay AgentRange traffic and calculate instance-level metrics")
-    parser.add_argument("scenario", nargs="?", default=None, help="optional scenario such as C2-D")
-    parser.add_argument("--report", help="write the full JSON report to this path")
-    parser.add_argument("--total", type=int, default=5200)
-    parser.add_argument("--malicious-target", type=int, default=80)
-    parser.add_argument("--seed", type=int, default=1337)
-    parser.add_argument("--mode", choices=("baseline", "observe", "action"), default=os.getenv("RANGE_MODE", "baseline"))
-    args = parser.parse_args()
-    report = replay_generated(only=args.scenario, seed=args.seed, total=args.total, malicious_target=args.malicious_target)
-    report["mode"] = args.mode
-    summary = {key: value for key, value in report.items() if key not in {"records", "ground_truth"}}
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
-    if args.report:
-        report_path = pathlib.Path(args.report)
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    replay_generated(only=sys.argv[1] if len(sys.argv) > 1 else None)

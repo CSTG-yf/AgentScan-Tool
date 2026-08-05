@@ -1,0 +1,622 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""HTTP sidecar used by the generated AgentRange Compose overlay.
+
+The script intentionally depends only on the Python standard library so it can
+run inside ``python:3.12-slim`` without baking a custom range image.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+from uuid import uuid4
+
+HOP_BY_HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
+}
+
+MAX_FORWARD_BODY_BYTES = int(os.getenv("DC_MAX_FORWARD_BODY_BYTES", str(10 * 1024 * 1024)))
+MAX_INSPECT_TEXT_BYTES = int(os.getenv("DC_MAX_INSPECT_TEXT_BYTES", str(256 * 1024)))
+UPSTREAM_TIMEOUT_SECONDS = float(os.getenv("DC_UPSTREAM_TIMEOUT_SECONDS", "30"))
+
+
+def getenv(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip()
+
+
+def gateway_base() -> str:
+    return getenv("DC_GATEWAY_BASE", "http://host.docker.internal:18970").rstrip("/")
+
+
+def fail_mode() -> str:
+    mode = getenv("DC_FAIL_MODE", "open").lower()
+    return "closed" if mode in {"closed", "fail-closed", "fail_closed"} else "open"
+
+
+def inspect_timeout() -> float:
+    raw = getenv("DC_INSPECT_TIMEOUT_MS", "250")
+    try:
+        return max(1, int(raw)) / 1000.0
+    except ValueError:
+        return 0.25
+
+
+def connector_name() -> str:
+    return getenv("DC_CONNECTOR", "agentrange") or "agentrange"
+
+
+def json_loads_maybe(data: bytes) -> Any:
+    if not data:
+        return None
+    try:
+        return json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+
+def text_snippet(data: bytes) -> str:
+    if not data:
+        return ""
+    data = data[:MAX_INSPECT_TEXT_BYTES]
+    return data.decode("utf-8", errors="replace")
+
+
+def dumps_compact(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def extract_session(headers: Any) -> str:
+    for key in ("X-Instance-Id", "X-DC-Session-Id", "X-DefenseClaw-Session-Id", "X-Request-Id"):
+        value = headers.get(key)
+        if value:
+            return value
+    return f"agentrange-{uuid4()}"
+
+
+def extract_trace(headers: Any) -> str:
+    for key in ("X-DefenseClaw-Trace-Id", "X-DC-Trace-Id", "traceparent", "X-Request-Id"):
+        value = headers.get(key)
+        if value:
+            return value
+    return f"trace-{uuid4()}"
+
+
+def authed_request(url: str, payload: dict[str, Any], *, timeout: float) -> Request:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = Request(url, data=body, method="POST")
+    request.add_header("Content-Type", "application/json")
+    request.add_header("X-DefenseClaw-Client", "agentrange-sidecar")
+    token = getenv("DC_GATEWAY_TOKEN") or getenv("DEFENSECLAW_GATEWAY_TOKEN")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+        request.add_header("X-DefenseClaw-Token", token)
+        request.add_header("X-DC-Auth", f"Bearer {token}")
+        request.add_header("X-DefenseClaw-Connector", connector_name())
+    return request
+
+
+def inspect_call(endpoint: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    url = f"{gateway_base()}{endpoint}"
+    request = authed_request(url, payload, timeout=inspect_timeout())
+    try:
+        with urlopen(request, timeout=inspect_timeout()) as response:
+            raw = response.read()
+    except (HTTPError, URLError, TimeoutError, OSError) as exc:
+        return None, str(exc)
+    parsed = json_loads_maybe(raw)
+    if isinstance(parsed, dict):
+        return parsed, None
+    return None, "inspect response was not JSON"
+
+
+def should_block(verdict: dict[str, Any] | None, error: str | None) -> bool:
+    if error:
+        return fail_mode() == "closed"
+    if not verdict:
+        return False
+    return str(verdict.get("action", "")).lower() == "block"
+
+
+def verdict_action(verdict: dict[str, Any] | None, error: str | None) -> str:
+    if error:
+        return "inspect_unavailable"
+    if not verdict:
+        return "allow"
+    return str(verdict.get("action") or "allow")
+
+
+def verdict_severity(verdict: dict[str, Any] | None, error: str | None) -> str:
+    if error:
+        return "HIGH" if fail_mode() == "closed" else "WARN"
+    if not verdict:
+        return "INFO"
+    return str(verdict.get("severity") or "INFO")
+
+
+def verdict_reason(verdict: dict[str, Any] | None, error: str | None) -> str:
+    if error:
+        return error
+    if not verdict:
+        return ""
+    return str(verdict.get("reason") or "")
+
+
+def emit_audit_event(
+    *,
+    stage: str,
+    session_id: str,
+    trace_id: str,
+    meta: dict[str, Any],
+    verdict: dict[str, Any] | None,
+    error: str | None,
+    latency_ms: int,
+    response_body: bytes = b"",
+) -> None:
+    decision = verdict_action(verdict, error)
+    severity = verdict_severity(verdict, error)
+    structured = {
+        "session_id": session_id,
+        "trace_id": trace_id,
+        "stage": stage,
+        "source": meta.get("source", ""),
+        "destination": meta.get("destination", ""),
+        "actor": "defenseclaw-agentrange-sidecar",
+        "tenant": meta.get("tenant", ""),
+        "prompt": meta.get("prompt", ""),
+        "model": meta.get("model", ""),
+        "tool_name": meta.get("tool_name", ""),
+        "mcp_server": meta.get("mcp_server", ""),
+        "request_body": meta.get("request_body", ""),
+        "response_body": text_snippet(response_body),
+        "decision": decision,
+        "severity": severity,
+        "reason": verdict_reason(verdict, error),
+        "latency_ms": latency_ms,
+        "raw_ref": meta.get("raw_ref", ""),
+        "proxy_kind": getenv("DC_PROXY_KIND"),
+        "http_method": meta.get("method", ""),
+        "http_path": meta.get("path", ""),
+    }
+    payload = {
+        "action": f"agentrange-runtime-{stage}",
+        "target": str(meta.get("target") or meta.get("destination") or getenv("DC_PROXY_KIND") or "agentrange"),
+        "actor": "defenseclaw-agentrange-sidecar",
+        "details": f"stage={stage} decision={decision} destination={structured['destination']}",
+        "severity": severity,
+        "trace_id": trace_id,
+        "session_id": session_id,
+        "agent_name": "AgentRange",
+        "connector": connector_name(),
+        "destination_app": structured["destination"],
+        "tool_name": structured["tool_name"],
+        "structured": structured,
+    }
+    try:
+        request = authed_request(f"{gateway_base()}/audit/event", payload, timeout=inspect_timeout())
+        with urlopen(request, timeout=inspect_timeout()):
+            pass
+    except (HTTPError, URLError, TimeoutError, OSError):
+        return
+
+
+def inspect_request(content: str, session_id: str, model: str = "") -> tuple[dict[str, Any] | None, str | None]:
+    return inspect_call(
+        "/api/v1/inspect/request",
+        {"content": content[:MAX_INSPECT_TEXT_BYTES], "session_id": session_id, "model": model},
+    )
+
+
+def inspect_response(content: str, session_id: str, model: str = "") -> tuple[dict[str, Any] | None, str | None]:
+    return inspect_call(
+        "/api/v1/inspect/response",
+        {"content": content[:MAX_INSPECT_TEXT_BYTES], "session_id": session_id, "model": model},
+    )
+
+
+def inspect_tool(
+    tool: str,
+    args: Any,
+    session_id: str,
+    *,
+    mcp_server: str = "",
+    content: str = "",
+) -> tuple[dict[str, Any] | None, str | None]:
+    payload: dict[str, Any] = {
+        "tool": tool,
+        "args": args,
+        "content": content[:MAX_INSPECT_TEXT_BYTES],
+        "session_id": session_id,
+        "connector": connector_name(),
+    }
+    if mcp_server:
+        payload["mcp_server_name"] = mcp_server
+    return inspect_call("/api/v1/inspect/tool", payload)
+
+
+def inspect_tool_response(tool: str, output: Any, session_id: str) -> tuple[dict[str, Any] | None, str | None]:
+    return inspect_call(
+        "/api/v1/inspect/tool-response",
+        {"tool": tool, "output": output, "session_id": session_id},
+    )
+
+
+def extract_opspilot_prompt(data: bytes) -> str:
+    parsed = json_loads_maybe(data)
+    if isinstance(parsed, dict):
+        for key in ("prompt", "query", "question", "input", "user_input"):
+            value = parsed.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        messages = parsed.get("messages")
+        if isinstance(messages, list):
+            return dumps_compact(messages)
+    return text_snippet(data)
+
+
+def extract_llm_messages(data: bytes) -> tuple[str, str]:
+    parsed = json_loads_maybe(data)
+    if not isinstance(parsed, dict):
+        return text_snippet(data), ""
+    model = str(parsed.get("model") or "")
+    messages = parsed.get("messages")
+    if isinstance(messages, list):
+        return dumps_compact(messages), model
+    return dumps_compact(parsed), model
+
+
+def iter_openai_tool_calls(data: bytes) -> list[tuple[str, Any]]:
+    parsed = json_loads_maybe(data)
+    if not isinstance(parsed, dict):
+        return []
+    out: list[tuple[str, Any]] = []
+    for choice in parsed.get("choices") or []:
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            continue
+        for call in message.get("tool_calls") or []:
+            if not isinstance(call, dict):
+                continue
+            function = call.get("function")
+            if not isinstance(function, dict):
+                continue
+            name = str(function.get("name") or "tool_call")
+            args_raw = function.get("arguments")
+            args = args_raw
+            if isinstance(args_raw, str):
+                try:
+                    args = json.loads(args_raw)
+                except json.JSONDecodeError:
+                    args = args_raw
+            out.append((name, args))
+    return out
+
+
+def parse_mcp_request(data: bytes) -> tuple[str, str, Any]:
+    parsed = json_loads_maybe(data)
+    if not isinstance(parsed, dict):
+        return "", "", None
+    method = str(parsed.get("method") or "")
+    params = parsed.get("params")
+    tool = ""
+    args: Any = params
+    if isinstance(params, dict):
+        tool = str(params.get("name") or params.get("tool") or "")
+        args = params.get("arguments", params.get("args", params))
+    return method, tool, args
+
+
+def mcp_target_for_path(path: str, targets: dict[str, str]) -> tuple[str, str, str] | None:
+    clean = path.split("?", 1)[0].strip("/")
+    if not clean:
+        return None
+    service, _, rest = clean.partition("/")
+    if service not in targets:
+        return None
+    downstream = f"/{rest}" if rest else "/mcp"
+    return service, targets[service].rstrip("/"), downstream
+
+
+def request_event_meta(handler: BaseHTTPRequestHandler, body: bytes, target_url: str) -> dict[str, Any]:
+    kind = getenv("DC_PROXY_KIND")
+    meta = {
+        "source": "opspilot-app",
+        "destination": getenv("DC_TARGET_BASE") or target_url,
+        "target": kind or "agentrange",
+        "method": getattr(handler, "command", ""),
+        "path": getattr(handler, "path", ""),
+        "request_body": text_snippet(body),
+        "raw_ref": target_url,
+    }
+    if kind in {"opspilot", "langflow"}:
+        meta["source"] = "host"
+    if kind == "opspilot":
+        meta["prompt"] = extract_opspilot_prompt(body)
+        meta["destination"] = "opspilot-app"
+        meta["target"] = "opspilot-app"
+    elif kind == "langflow":
+        meta["prompt"] = text_snippet(body)
+        meta["destination"] = "langflow"
+        meta["target"] = "langflow"
+    elif kind == "llm":
+        content, model = extract_llm_messages(body)
+        meta["prompt"] = content
+        meta["model"] = model
+        meta["destination"] = "llm-stub"
+        meta["target"] = "llm-stub"
+    elif kind == "mcp":
+        service = handler.path.strip("/").split("/", 1)[0]
+        _method, tool, _args = parse_mcp_request(body)
+        meta["destination"] = service
+        meta["target"] = service
+        meta["mcp_server"] = service
+        meta["tool_name"] = tool
+    return meta
+
+
+def build_target_url(handler: BaseHTTPRequestHandler) -> tuple[str | None, str]:
+    kind = getenv("DC_PROXY_KIND")
+    if kind == "mcp":
+        targets = json.loads(getenv("DC_MCP_TARGETS", "{}") or "{}")
+        match = mcp_target_for_path(handler.path, targets)
+        if not match:
+            return None, "unknown MCP target"
+        _service, base, downstream = match
+        query = ""
+        if "?" in handler.path:
+            query = "?" + handler.path.split("?", 1)[1]
+        return f"{base}{downstream}{query}", ""
+
+    base = getenv("DC_TARGET_BASE").rstrip("/")
+    if not base:
+        return None, "DC_TARGET_BASE is not configured"
+    return f"{base}{handler.path}", ""
+
+
+def response_json(status: int, payload: dict[str, Any]) -> tuple[int, list[tuple[str, str]], bytes]:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    return status, [("Content-Type", "application/json")], body
+
+
+class AgentRangeProxyHandler(BaseHTTPRequestHandler):
+    server_version = "DefenseClawAgentRangeSidecar/1.0"
+    protocol_version = "HTTP/1.1"
+
+    def do_GET(self) -> None:
+        self.handle_proxy()
+
+    def do_POST(self) -> None:
+        self.handle_proxy()
+
+    def do_PUT(self) -> None:
+        self.handle_proxy()
+
+    def do_PATCH(self) -> None:
+        self.handle_proxy()
+
+    def do_DELETE(self) -> None:
+        self.handle_proxy()
+
+    def do_OPTIONS(self) -> None:
+        self.handle_proxy()
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        sys.stderr.write(f"[{timestamp}] {fmt % args}\n")
+
+    def handle_proxy(self) -> None:
+        session_id = extract_session(self.headers)
+        trace_id = extract_trace(self.headers)
+        self._trace_id = trace_id
+        body = self._read_body()
+        if body is None:
+            self._send(*response_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "request body too large"}))
+            return
+
+        target_url, error = build_target_url(self)
+        if error or not target_url:
+            self._send(*response_json(HTTPStatus.BAD_GATEWAY, {"error": error or "no target URL"}))
+            return
+
+        meta = request_event_meta(self, body, target_url)
+        started = time.monotonic()
+        verdict, inspect_error = self._pre_inspect(session_id, body)
+        emit_audit_event(
+            stage="pre",
+            session_id=session_id,
+            trace_id=trace_id,
+            meta=meta,
+            verdict=verdict,
+            error=inspect_error,
+            latency_ms=int((time.monotonic() - started) * 1000),
+        )
+        if should_block(verdict, inspect_error):
+            emit_audit_event(
+                stage="block",
+                session_id=session_id,
+                trace_id=trace_id,
+                meta=meta,
+                verdict=verdict,
+                error=inspect_error,
+                latency_ms=int((time.monotonic() - started) * 1000),
+            )
+            self._send_block(verdict, inspect_error, phase="pre")
+            return
+
+        status, headers, response_body = self._forward(target_url, body)
+        post_started = time.monotonic()
+        post_verdict, post_error = self._post_inspect(session_id, response_body, status)
+        emit_audit_event(
+            stage="post",
+            session_id=session_id,
+            trace_id=trace_id,
+            meta=meta,
+            verdict=post_verdict,
+            error=post_error,
+            latency_ms=int((time.monotonic() - post_started) * 1000),
+            response_body=response_body,
+        )
+        if should_block(post_verdict, post_error):
+            emit_audit_event(
+                stage="block",
+                session_id=session_id,
+                trace_id=trace_id,
+                meta=meta,
+                verdict=post_verdict,
+                error=post_error,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                response_body=response_body,
+            )
+            self._send_block(post_verdict, post_error, phase="post")
+            return
+
+        self._send(status, headers, response_body)
+
+    def _read_body(self) -> bytes | None:
+        length_raw = self.headers.get("Content-Length") or "0"
+        try:
+            length = int(length_raw)
+        except ValueError:
+            length = 0
+        if length > MAX_FORWARD_BODY_BYTES:
+            return None
+        return self.rfile.read(length) if length > 0 else b""
+
+    def _pre_inspect(self, session_id: str, body: bytes) -> tuple[dict[str, Any] | None, str | None]:
+        kind = getenv("DC_PROXY_KIND")
+        if kind == "opspilot" and self.path.split("?", 1)[0] == "/run":
+            return inspect_request(extract_opspilot_prompt(body), session_id)
+        if kind == "langflow":
+            content = f"{self.command} {self.path}\n{text_snippet(body)}"
+            return inspect_request(content, session_id)
+        if kind == "llm" and self.path.split("?", 1)[0].endswith("/chat/completions"):
+            content, model = extract_llm_messages(body)
+            return inspect_request(content, session_id, model=model)
+        if kind == "mcp":
+            service = self.path.strip("/").split("/", 1)[0]
+            method, tool, args = parse_mcp_request(body)
+            if method == "tools/call":
+                return inspect_tool(tool or "mcp.tools/call", args, session_id, mcp_server=service)
+            if method in {"tools/list", "initialize"}:
+                return inspect_tool(f"mcp.{method}", args, session_id, mcp_server=service, content=text_snippet(body))
+        return None, None
+
+    def _post_inspect(
+        self,
+        session_id: str,
+        response_body: bytes,
+        status: int,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        kind = getenv("DC_PROXY_KIND")
+        if kind == "opspilot" and self.path.split("?", 1)[0] == "/run":
+            return inspect_response(text_snippet(response_body), session_id)
+        if kind == "langflow":
+            return inspect_response(f"HTTP {status}\n{text_snippet(response_body)}", session_id)
+        if kind == "llm" and self.path.split("?", 1)[0].endswith("/chat/completions"):
+            for tool, args in iter_openai_tool_calls(response_body):
+                verdict, error = inspect_tool(tool, args, session_id)
+                if should_block(verdict, error):
+                    return verdict, error
+            return inspect_response(text_snippet(response_body), session_id)
+        if kind == "mcp":
+            method, tool, _args = parse_mcp_request(getattr(self, "_last_request_body", b""))
+            if method == "tools/call":
+                output = json_loads_maybe(response_body)
+                return inspect_tool_response(
+                    tool or "mcp.tools/call",
+                    output if output is not None else text_snippet(response_body),
+                    session_id,
+                )
+        return None, None
+
+    def _forward(self, target_url: str, body: bytes) -> tuple[int, list[tuple[str, str]], bytes]:
+        self._last_request_body = body
+        request_body = body if body or self.command not in {"GET", "HEAD"} else None
+        request = Request(target_url, data=request_body, method=self.command)
+        for key, value in self.headers.items():
+            if key.lower() in HOP_BY_HOP_HEADERS or key.lower() == "host":
+                continue
+            request.add_header(key, value)
+        request.add_header("X-DefenseClaw-Trace-Id", getattr(self, "_trace_id", extract_trace(self.headers)))
+        try:
+            with urlopen(request, timeout=UPSTREAM_TIMEOUT_SECONDS) as response:
+                headers = [(key, value) for key, value in response.headers.items()]
+                return response.status, headers, response.read()
+        except HTTPError as exc:
+            headers = [(key, value) for key, value in exc.headers.items()]
+            return exc.code, headers, exc.read()
+        except (URLError, TimeoutError, OSError) as exc:
+            return response_json(HTTPStatus.BAD_GATEWAY, {"error": f"upstream unavailable: {exc}"})
+
+    def _send_block(self, verdict: dict[str, Any] | None, error: str | None, *, phase: str) -> None:
+        payload = {
+            "error": "blocked by DefenseClaw",
+            "phase": phase,
+            "verdict": verdict or {"action": "block", "reason": error or "inspect unavailable"},
+        }
+        self._send(*response_json(HTTPStatus.FORBIDDEN, payload))
+
+    def _send(self, status: int, headers: list[tuple[str, str]], body: bytes) -> None:
+        self.send_response(status)
+        sent_content_type = False
+        for key, value in headers:
+            lower = key.lower()
+            if lower in HOP_BY_HOP_HEADERS or lower in {"content-length", "content-encoding"}:
+                continue
+            if lower == "content-type":
+                sent_content_type = True
+            self.send_header(key, value)
+        if not sent_content_type:
+            self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+
+def main() -> None:
+    port_raw = getenv("DC_LISTEN_PORT", "8000")
+    try:
+        port = int(port_raw)
+    except ValueError:
+        port = 8000
+    server = ThreadingHTTPServer(("0.0.0.0", port), AgentRangeProxyHandler)
+    kind = getenv("DC_PROXY_KIND", "proxy")
+    target = getenv("DC_TARGET_BASE") or getenv("DC_MCP_TARGETS")
+    sys.stderr.write(f"[defenseclaw-agentrange] kind={kind} listen=0.0.0.0:{port} target={quote(target[:160])}\n")
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

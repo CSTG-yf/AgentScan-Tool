@@ -9,12 +9,6 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from auth.jwt_auth import Identity, issue_token, verify_token
 from auth.roles import in_scope
 from policy.propagation import trace_headers
-from security.defenseclaw import (
-    DefenseClawBlocked,
-    DefenseClawClient,
-    security_context_from_headers,
-    session_id_from_headers,
-)
 from skills.loader import load_skill
 
 # 预置用户代表靶场里的固定身份，登录阶段只根据用户名发放对应 JWT。
@@ -58,7 +52,6 @@ OPENAI_TOOL_ROUTES = {
 }
 SYSTEM_PROMPT = "你是 OpsPilot，只能根据用户身份、业务上下文和可用工具完成企业协同任务。"
 DEFAULT_MODEL = "opspilot-stub"
-DEFENSECLAW = DefenseClawClient.from_env()
 
 
 def prompt_from_body(body: dict) -> str:
@@ -305,30 +298,10 @@ def run_agent(
     messages = agent_messages(prompt, skill_name)
     headers = trace_headers(trace_id)
     headers["X-Instance-Id"] = x_instance_id or "manual"
-    # The authenticated end-user context travels only as policy metadata. It
-    # lets DefenseClaw detect confused-deputy cross-tenant tool calls even
-    # when the downstream MCP is reached with a service credential.
-    headers["X-Acting-User"] = identity.sub
-    headers["X-Acting-Role"] = identity.role
-    headers["X-Acting-Scope"] = json.dumps(identity.scope, ensure_ascii=False)
 
     # 离线路径模拟最小 agent executor，返回体保持 ChatCompletion 形态。
-    try:
-        # Inspect the complete model context, not just the user text.  This is
-        # required to expose poisoned Skill bodies such as meeting-summary.
-        DEFENSECLAW.inspect_request(json.dumps(messages, ensure_ascii=False), model, headers["X-Instance-Id"])
-        llm_response = run_stub_agent(messages, headers, model)
-        DEFENSECLAW.inspect_response(
-            json.dumps(first_message(llm_response), ensure_ascii=False),
-            model,
-            headers["X-Instance-Id"],
-        )
-        return llm_response
-    except DefenseClawBlocked as exc:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "DEFENSECLAW_BLOCKED", "stage": exc.stage, "verdict": exc.verdict},
-        ) from exc
+    llm_response = run_stub_agent(messages, headers, model)
+    return llm_response
 
 
 def run_stub_agent(messages: list[dict], headers: dict, model: str = DEFAULT_MODEL) -> dict:
@@ -388,11 +361,7 @@ def run_tool_calls(llm_response: dict, headers: dict) -> list[dict]:
             results.append({"tool": name, "error": "unknown MCP server"})
             continue
         args = json.loads(function.get("arguments") or "{}")
-        session_id = session_id_from_headers(headers)
-        DEFENSECLAW.inspect_tool(name, args, session_id, server, security_context_from_headers(headers))
-        result = call_mcp(endpoint, tool, args, headers)
-        DEFENSECLAW.inspect_tool_response(name, result, session_id)
-        results.append({"tool": name, "tool_call_id": call.get("id"), "result": result})
+        results.append({"tool": name, "tool_call_id": call.get("id"), "result": call_mcp(endpoint, tool, args, headers)})
     return results
 
 

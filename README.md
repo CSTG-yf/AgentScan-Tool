@@ -188,7 +188,8 @@ action 模式预期出现 HTTP 403、`DEFENSECLAW_BLOCKED` 或对应阻断判定
 执行 5200 条回放且包含至少 80 条恶意样本：
 
 ```powershell
-cd F:\agentscan2\task\AgentRange-player
+# from repository root
+cd .\task\AgentRange-player
 .\integration\run.ps1 baseline
 .\integration\run.ps1 observe
 .\integration\run.ps1 action

@@ -17,3 +17,4 @@ def load_skill(skill_dir: str) -> dict:
         "allowed_tools": meta.get("allowed-tools", []),
         "body": match.group(2),
     }
+
