@@ -28,6 +28,7 @@ import click
 
 from defenseclaw import __version__
 from defenseclaw.commands.cmd_agent import agent
+from defenseclaw.commands.cmd_agentrange import agentrange
 from defenseclaw.commands.cmd_aibom import aibom
 from defenseclaw.commands.cmd_alerts import alerts
 from defenseclaw.commands.cmd_audit import audit
@@ -56,7 +57,7 @@ from defenseclaw.commands.cmd_version import version_cmd
 from defenseclaw.context import AppContext
 
 SKIP_LOAD_COMMANDS = {
-    "agent", "init", "migrations", "quickstart", "sandbox", "tui",
+    "agent", "agentrange", "init", "migrations", "quickstart", "sandbox", "tui",
     "uninstall", "reset", "version",
 }
 
@@ -158,6 +159,7 @@ def cleanup(ctx: click.Context, *_args, **_kwargs) -> None:
 # Register all commands
 cli.add_command(init_cmd, "init")
 cli.add_command(agent)
+cli.add_command(agentrange)
 cli.add_command(quickstart_cmd)
 cli.add_command(setup)
 cli.add_command(skill)

@@ -1,0 +1,193 @@
+{
+  "adapter": "agentrange",
+  "non_invasive": true,
+  "source": {
+    "range_root": "../AgentRange-player",
+    "compose_path": "../AgentRange-player/docker-compose.yml",
+    "sidecar_source": "../../cli/defenseclaw/agentrange_sidecar.py"
+  },
+  "gateway": {
+    "base_url": "http://host.docker.internal:18970",
+    "token_env": "DEFENSECLAW_GATEWAY_TOKEN",
+    "mode": "observe",
+    "fail_mode": "open",
+    "inspect_timeout_ms": 250
+  },
+  "services": {
+    "opspilot": "opspilot-app",
+    "langflow": "langflow",
+    "llm_target_base": "http://llm-stub:8000",
+    "mcp_targets": {
+      "mcp-customer-db": "http://mcp-customer-db:8000",
+      "mcp-gitlab": "http://mcp-gitlab:8000",
+      "mcp-knowledge": "http://mcp-knowledge:8000",
+      "mcp-monitoring": "http://mcp-monitoring:8000",
+      "mcp-notes-sync": "http://mcp-notes-sync:8000",
+      "mcp-sandbox-exec": "http://mcp-sandbox-exec:8000",
+      "mcp-shell-runner": "http://mcp-shell-runner:8000",
+      "mcp-threat-intel": "http://mcp-threat-intel:8000"
+    },
+    "egress_services": [
+      "c2-sink",
+      "mcp-notes-sync",
+      "mcp-shell-runner",
+      "mcp-threat-intel",
+      "mock-internet"
+    ]
+  },
+  "rewrites": {
+    "opspilot_environment": {
+      "DEFENSECLAW_CONNECTOR": "agentrange",
+      "DEFENSECLAW_ADAPTER": "external-sidecar",
+      "LLM_BASE": "http://defenseclaw-llm-proxy:8000/v1",
+      "LANGFLOW_BASE": "http://defenseclaw-langflow-ingress:7860",
+      "MCP_CUSTOMER_DB": "http://defenseclaw-mcp-proxy:8000/mcp-customer-db/mcp",
+      "MCP_GITLAB": "http://defenseclaw-mcp-proxy:8000/mcp-gitlab/mcp",
+      "MCP_KNOWLEDGE": "http://defenseclaw-mcp-proxy:8000/mcp-knowledge/mcp",
+      "MCP_MONITORING": "http://defenseclaw-mcp-proxy:8000/mcp-monitoring/mcp",
+      "MCP_NOTES_SYNC": "http://defenseclaw-mcp-proxy:8000/mcp-notes-sync/mcp",
+      "MCP_SANDBOX_EXEC": "http://defenseclaw-mcp-proxy:8000/mcp-sandbox-exec/mcp",
+      "MCP_SHELL_RUNNER": "http://defenseclaw-mcp-proxy:8000/mcp-shell-runner/mcp",
+      "MCP_THREAT_INTEL": "http://defenseclaw-mcp-proxy:8000/mcp-threat-intel/mcp"
+    },
+    "langflow_environment": {
+      "OPENAI_API_BASE": "http://defenseclaw-llm-proxy:8000/v1"
+    }
+  },
+  "ingress": {
+    "opspilot": {
+      "service": "defenseclaw-opspilot-ingress",
+      "target": "http://opspilot-app:8000",
+      "ports": [
+        {
+          "published": "8100",
+          "target": "8000",
+          "protocol": "tcp",
+          "host_ip": ""
+        }
+      ]
+    },
+    "langflow": {
+      "service": "defenseclaw-langflow-ingress",
+      "target": "http://langflow:7860",
+      "ports": [
+        {
+          "published": "7860",
+          "target": "7860",
+          "protocol": "tcp",
+          "host_ip": ""
+        }
+      ]
+    }
+  },
+  "routes": [
+    {
+      "kind": "app",
+      "from": "host",
+      "via": "defenseclaw-opspilot-ingress",
+      "to": "opspilot-app"
+    },
+    {
+      "kind": "llm",
+      "from": "opspilot-app",
+      "via": "defenseclaw-llm-proxy",
+      "to": "http://llm-stub:8000"
+    },
+    {
+      "kind": "mcp",
+      "env": "MCP_CUSTOMER_DB",
+      "from": "opspilot-app",
+      "via": "defenseclaw-mcp-proxy",
+      "to": "mcp-customer-db",
+      "path": "/mcp"
+    },
+    {
+      "kind": "mcp",
+      "env": "MCP_GITLAB",
+      "from": "opspilot-app",
+      "via": "defenseclaw-mcp-proxy",
+      "to": "mcp-gitlab",
+      "path": "/mcp"
+    },
+    {
+      "kind": "mcp",
+      "env": "MCP_KNOWLEDGE",
+      "from": "opspilot-app",
+      "via": "defenseclaw-mcp-proxy",
+      "to": "mcp-knowledge",
+      "path": "/mcp"
+    },
+    {
+      "kind": "mcp",
+      "env": "MCP_MONITORING",
+      "from": "opspilot-app",
+      "via": "defenseclaw-mcp-proxy",
+      "to": "mcp-monitoring",
+      "path": "/mcp"
+    },
+    {
+      "kind": "mcp",
+      "env": "MCP_NOTES_SYNC",
+      "from": "opspilot-app",
+      "via": "defenseclaw-mcp-proxy",
+      "to": "mcp-notes-sync",
+      "path": "/mcp"
+    },
+    {
+      "kind": "mcp",
+      "env": "MCP_SANDBOX_EXEC",
+      "from": "opspilot-app",
+      "via": "defenseclaw-mcp-proxy",
+      "to": "mcp-sandbox-exec",
+      "path": "/mcp"
+    },
+    {
+      "kind": "mcp",
+      "env": "MCP_SHELL_RUNNER",
+      "from": "opspilot-app",
+      "via": "defenseclaw-mcp-proxy",
+      "to": "mcp-shell-runner",
+      "path": "/mcp"
+    },
+    {
+      "kind": "mcp",
+      "env": "MCP_THREAT_INTEL",
+      "from": "opspilot-app",
+      "via": "defenseclaw-mcp-proxy",
+      "to": "mcp-threat-intel",
+      "path": "/mcp"
+    },
+    {
+      "kind": "langflow",
+      "from": "host",
+      "via": "defenseclaw-langflow-ingress",
+      "to": "langflow"
+    }
+  ],
+  "event_model": [
+    "session_id",
+    "trace_id",
+    "stage",
+    "source",
+    "destination",
+    "actor",
+    "tenant",
+    "prompt",
+    "model",
+    "tool_name",
+    "mcp_server",
+    "request_body",
+    "response_body",
+    "decision",
+    "severity",
+    "reason",
+    "latency_ms",
+    "raw_ref"
+  ],
+  "notes": [
+    "Original AgentRange source files are not modified.",
+    "Compose !reset removes direct host port exposure from the original app/langflow services.",
+    "Sidecars call /api/v1/inspect/* on the DefenseClaw gateway and fail open by default.",
+    "Sidecars emit agentrange-runtime-* audit events with the unified event model for chain reconstruction."
+  ]
+}

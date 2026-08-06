@@ -44,6 +44,10 @@ cli/defenseclaw/_data/
 
 # Python venv
 .venv/
+.defenseclaw-home/
+bench/results/
+integration/reports/
+dashboard/index.html
 
 # Local binaries
 /defenseclaw

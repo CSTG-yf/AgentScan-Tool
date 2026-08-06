@@ -25,12 +25,8 @@ services:
     env_file: [.env.example]
     environment:
       POSTGRES_HOST: postgres-customer
-      JWT_SECRET: ${JWT_SECRET:-change-me-weak-secret}
-      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-3600}
-      OPSPILOT_PROPAGATION: ${OPSPILOT_PROPAGATION:-service-account}
-      OPSPILOT_SERVICE_TOKEN: ${OPSPILOT_SERVICE_TOKEN:-svc-root-all-access}
       LLM_BASE: http://llm-stub:8000/v1
-      LANGFLOW_BASE: http://langflow-guard:8080
+      LANGFLOW_BASE: http://langflow:7860
       LANGFLOW_FLOW_ID: ${LANGFLOW_FLOW_ID:-}
       MCP_CUSTOMER_DB: http://mcp-customer-db:8000/mcp
       MCP_SHELL_RUNNER: http://mcp-shell-runner:8000/mcp
@@ -40,22 +36,13 @@ services:
       MCP_MONITORING: http://mcp-monitoring:8000/mcp
       MCP_KNOWLEDGE: http://mcp-knowledge:8000/mcp
       MCP_SANDBOX_EXEC: http://mcp-sandbox-exec:8000/mcp
-      DEFENSECLAW_API_BASE: ${DEFENSECLAW_API_BASE:-}
-      DEFENSECLAW_API_TOKEN: ${DEFENSECLAW_API_TOKEN:-}
-      DEFENSECLAW_FAIL_MODE: ${DEFENSECLAW_FAIL_MODE:-open}
-      DEFENSECLAW_TIMEOUT_SECONDS: ${DEFENSECLAW_TIMEOUT_SECONDS:-0.25}
-      RANGE_EVIDENCE_PATH: /reports/opspilot-events.jsonl
     depends_on:
       postgres-customer:
         condition: service_healthy
       llm-stub:
         condition: service_started
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     networks: [opspilot-net]
     ports: ["8100:8000"]
-    volumes:
-      - ./integration/reports:/reports
 
   langflow:
     build: ./langflow
@@ -66,25 +53,7 @@ services:
       OPENAI_API_KEY: "sk-stub-not-secret"
     depends_on: [llm-stub]
     networks: [opspilot-net]
-
-  langflow-guard:
-    build:
-      context: .
-      dockerfile: integration/Dockerfile
-    environment:
-      UPSTREAM_BASE: http://langflow:7860
-      DEFENSECLAW_API_BASE: ${DEFENSECLAW_API_BASE:-}
-      DEFENSECLAW_API_TOKEN: ${DEFENSECLAW_API_TOKEN:-}
-      DEFENSECLAW_FAIL_MODE: ${DEFENSECLAW_FAIL_MODE:-open}
-      DEFENSECLAW_TIMEOUT_SECONDS: ${DEFENSECLAW_TIMEOUT_SECONDS:-0.25}
-      RANGE_EVIDENCE_PATH: /reports/langflow-events.jsonl
-    depends_on: [langflow]
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks: [opspilot-net]
-    ports: ["7860:8080"]
-    volumes:
-      - ./integration/reports:/reports
+    ports: ["7860:7860"]
 
   mcp-gitlab:
     build: ./mcp

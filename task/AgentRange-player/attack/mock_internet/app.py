@@ -13,3 +13,4 @@ def advisory(cve: str):
     if cve == "CVE-2026-0001":
         return (pages / "poisoned_cve.html").read_text(encoding="utf-8")
     return f"<html><body>Advisory for {cve}: no known issues.</body></html>"
+

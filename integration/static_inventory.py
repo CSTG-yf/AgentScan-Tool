@@ -11,6 +11,12 @@ from pathlib import Path
 import yaml
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_RANGE_ROOT = PROJECT_ROOT / "task" / "AgentRange-player"
+DEFAULT_CONTRACTS_DIR = PROJECT_ROOT / "integration" / "agentrange_contracts"
+DEFAULT_TAXONOMY = PROJECT_ROOT / "integration" / "risk_taxonomy.yaml"
+DEFAULT_OUTPUT = PROJECT_ROOT / "integration" / "reports" / "static-scan.json"
+
 TEXT_SUFFIXES = {".py", ".md", ".yaml", ".yml", ".env", ".example", ".json", ".toml"}
 SCAN_ROOTS = ("skills", "mcp", "opspilot-app", "langflow", "docker-compose.yml", ".env.example")
 
@@ -44,14 +50,18 @@ def asset_for_source(source: str, assets: list[dict]) -> str:
     return "unmapped." + normalized.replace("/", ".")
 
 
-def scan(root: Path) -> dict:
-    contract = load_yaml(root / "contracts" / "assets.yaml")
-    taxonomy = load_yaml(root / "integration" / "risk_taxonomy.yaml")
+def scan(
+    range_root: Path,
+    contracts_dir: Path = DEFAULT_CONTRACTS_DIR,
+    taxonomy_path: Path = DEFAULT_TAXONOMY,
+) -> dict:
+    contract = load_yaml(contracts_dir / "assets.yaml")
+    taxonomy = load_yaml(taxonomy_path)
     assets = contract["assets"]
     findings = []
     seen = set()
-    for path in iter_sources(root):
-        relative = path.relative_to(root).as_posix()
+    for path in iter_sources(range_root):
+        relative = path.relative_to(range_root).as_posix()
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         for rule in taxonomy["rules"]:
             for pattern in rule["patterns"]:
@@ -78,7 +88,7 @@ def scan(root: Path) -> dict:
                         }
                     )
 
-    existing_assets = [asset for asset in assets if (root / asset["source"]).exists()]
+    existing_assets = [asset for asset in assets if (range_root / asset["source"]).exists()]
     required = {tuple(item) for item in taxonomy["acceptance"]["required_rule_assets"]}
     detected = {(item["rule_id"], item["asset_id"]) for item in findings}
     benign = set(taxonomy["acceptance"]["benign_controls"])
@@ -86,6 +96,8 @@ def scan(root: Path) -> dict:
     return {
         "schema_version": 1,
         "generated_at": datetime.now(UTC).isoformat(),
+        "range_root": str(range_root),
+        "contracts_dir": str(contracts_dir),
         "assets": existing_assets,
         "asset_edges": contract["edges"],
         "findings": findings,
@@ -105,14 +117,15 @@ def scan(root: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--output", type=Path)
+    parser.add_argument("--range-root", type=Path, default=DEFAULT_RANGE_ROOT)
+    parser.add_argument("--contracts-dir", type=Path, default=DEFAULT_CONTRACTS_DIR)
+    parser.add_argument("--taxonomy", type=Path, default=DEFAULT_TAXONOMY)
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
-    report = scan(args.root.resolve())
-    output = args.output or args.root / "integration" / "reports" / "static-scan.json"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"output": str(output), **report["metrics"]}, ensure_ascii=False, indent=2))
+    report = scan(args.range_root.resolve(), args.contracts_dir.resolve(), args.taxonomy.resolve())
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps({"output": str(args.output), **report["metrics"]}, ensure_ascii=False, indent=2))
     return 0 if not report["missing_required_risks"] and not report["benign_control_violations"] else 2
 
 

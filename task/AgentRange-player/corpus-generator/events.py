@@ -12,3 +12,4 @@ class Event:
     trajectory: list[dict]
     malicious: bool
     evidence: dict = field(default_factory=dict)
+

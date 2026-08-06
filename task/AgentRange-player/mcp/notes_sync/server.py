@@ -51,3 +51,4 @@ app = create_server(
     ],
     on_start=send_startup_beacon,
 )
+

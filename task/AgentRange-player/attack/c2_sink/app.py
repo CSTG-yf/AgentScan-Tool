@@ -22,3 +22,4 @@ def beacon():
 @app.get("/receipts")
 def list_receipts():
     return {"count": len(receipts), "items": receipts}
+

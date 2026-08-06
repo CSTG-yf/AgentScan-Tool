@@ -31,9 +31,8 @@
     Node.js, or git. Connector-specific wiring (Codex, Claude Code, ...) is done
     by the cross-platform CLI via `defenseclaw init` / `quickstart`.
 
-    Layout matches scripts/install.sh and `defenseclaw upgrade`: binaries land in
-    %USERPROFILE%\.local\bin and the CLI venv lives in
-    %USERPROFILE%\.defenseclaw\.venv, so an installed setup upgrades in place.
+    Binaries land in DEFENSECLAW_HOME\bin and the CLI venv lives in
+    DEFENSECLAW_HOME\.venv, so a custom home keeps the install together.
 
 .EXAMPLE
     $Version = "0.8.3"
@@ -76,13 +75,19 @@ try {
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
+$EnvFile = Join-Path (Split-Path -Parent $PSScriptRoot) ".env"
+if (Test-Path -LiteralPath $EnvFile) {
+    Get-Content -LiteralPath $EnvFile | ForEach-Object {
+        if ($_ -match "^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$") {
+            Set-Item -Path "Env:\$($Matches[1])" -Value $Matches[2].Trim('"').Trim("'")
+        }
+    }
+}
+
 $Repo = "cisco-ai-defense/defenseclaw"
 $DefenseClawHome = if ($env:DEFENSECLAW_HOME) { $env:DEFENSECLAW_HOME } else { Join-Path $env:USERPROFILE ".defenseclaw" }
 $Venv = Join-Path $DefenseClawHome ".venv"
-# Binaries go to %USERPROFILE%\.local\bin to match scripts/install.sh and
-# `defenseclaw upgrade` (which replaces the gateway there). The venv stays under
-# DEFENSECLAW_HOME so a custom home still relocates the heavy CLI environment.
-$InstallDir = Join-Path $env:USERPROFILE ".local\bin"
+$InstallDir = Join-Path $DefenseClawHome "bin"
 
 # Keep in sync with cli/defenseclaw/connector_paths.py KNOWN_CONNECTORS.
 # PowerShell runs on Windows, where OpenClaw/ZeptoClaw proxy connectors are
@@ -184,9 +189,14 @@ function Install-Uv {
 
 function Ensure-Python {
     Write-Step "Checking Python"
-    # uv manages an interpreter for us; ask it for 3.12 and install on demand.
-    # This avoids depending on a system Python being present or new enough.
-    & uv python install 3.12 *> $null
+    # uv writes "already installed" status messages to stderr on Windows
+    # PowerShell 5.1, which this script treats as a terminating error. Probe
+    # first so reruns remain idempotent.
+    $existing = & uv python find 3.12 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $existing) {
+        & uv python install 3.12 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Die "Failed to install Python 3.12 via uv." }
+    }
     Write-Ok "Python 3.12 (managed by uv)"
 }
 
@@ -307,12 +317,14 @@ function Install-Gateway {
 function Install-Cli {
     Write-Step "Installing DefenseClaw CLI"
     Write-Info "Creating Python environment..."
-    & uv venv $Venv --python 3.12 --quiet 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        & uv venv $Venv --quiet
-        if ($LASTEXITCODE -ne 0) { Die "Failed to create Python virtual environment" }
-    }
     $venvPython = Join-Path $Venv "Scripts\python.exe"
+    if (-not (Test-Path $venvPython)) {
+        & uv venv $Venv --python 3.12 --quiet 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            & uv venv $Venv --quiet
+            if ($LASTEXITCODE -ne 0) { Die "Failed to create Python virtual environment" }
+        }
+    }
 
     Write-Info "Installing from wheel..."
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("dc-cli-" + [guid]::NewGuid())
@@ -339,7 +351,7 @@ function Install-Cli {
     # `defenseclaw` and shutil.which("defenseclaw") both resolve to it.
     $cliExe = Join-Path $Venv "Scripts\defenseclaw.exe"
     $shim = Join-Path $InstallDir "defenseclaw.cmd"
-    "@echo off`r`n`"$cliExe`" %*`r`n" | Set-Content -Path $shim -Encoding Ascii -NoNewline
+    "@echo off`r`nset `"DEFENSECLAW_HOME=$DefenseClawHome`"`r`n`"$cliExe`" %*`r`n" | Set-Content -Path $shim -Encoding Ascii -NoNewline
 
     if (Test-Path $cliExe) {
         Write-Ok "CLI installed -> $shim"
@@ -418,11 +430,13 @@ function Invoke-Quickstart {
 function Add-ToPath {
     # Persist InstallDir on the user PATH (idempotent) and add it to this
     # process so quickstart and `defenseclaw-gateway` resolve immediately.
+    [Environment]::SetEnvironmentVariable("DEFENSECLAW_HOME", $DefenseClawHome, "User")
+    $env:DEFENSECLAW_HOME = $DefenseClawHome
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if (-not $userPath) { $userPath = "" }
-    $entries = $userPath -split ';' | Where-Object { $_ -ne "" }
-    if ($entries -notcontains $InstallDir) {
-        $newPath = if ($userPath) { "$userPath;$InstallDir" } else { $InstallDir }
+    $entries = $userPath -split ';' | Where-Object { $_ -ne "" -and $_ -ne $InstallDir }
+    $newPath = @($InstallDir) + $entries -join ';'
+    if ($userPath -ne $newPath) {
         [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
         Write-Step "PATH updated"
         Write-Info "Added $InstallDir to your user PATH."

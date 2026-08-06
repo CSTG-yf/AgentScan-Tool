@@ -48,185 +48,106 @@ DefenseClaw combines a Python operator CLI, a Go gateway sidecar, and an OpenCla
 
 ---
 
-## AgentRange Major Refactor v1.0（大重构版本）
+## AgentRange DefenseClaw 集成与评测升级
 
-本分支包含面向 `task/AgentRange-player` 测试靶场的一次大规模重构。DefenseClaw
-从单纯复用既有 connector，扩展为可通过通用 inspect 合同保护 OpsPilot、Langflow、
-Skill、MCP、数据库和网络副作用的检测、决策、证据与评测中心。
+本项目保留 `task/AgentRange-player` 作为未侵入的原始靶场目录；DefenseClaw 适配、
+运行时证据、静态资产合同、攻击链、benchmark、最终报告和 dashboard 均放在目标项目侧。
+这样可以吸收升级版项目的验证与展示能力，同时避免把靶场源码改动误当成 DefenseClaw 升级。
 
-这次重构遵循“核心通用、靶场解耦”：DefenseClaw 核心只接收通用的
-`connector/session_id/tool/args/content/direction/context` 字段，不读取 AgentRange
-场景编号、固定实例或 Ground Truth；靶场格式转换、回放、证据落盘和指标计算全部
-位于 `task/AgentRange-player`。
+### 升级范围
 
-### 重构范围
+- `cli/defenseclaw/agentrange_adapter.py` 与 `cli/defenseclaw/agentrange_sidecar.py`
+  生成项目侧 Compose overlay，通过 sidecar 接入 OpsPilot、Langflow 和 MCP/Skill 相关流量。
+- `integration/agentrange_contracts/` 固化资产、场景矩阵、RangeEvent、Decision、AttackChain
+  与 Ground Truth 合同。
+- `integration/static_inventory.py` 扫描未改动的 `task/AgentRange-player`，并把结果写入
+  `integration/reports/static-scan.json`。
+- `integration/runtime_rules.yaml`、`integration/rule_contract.py`、`integration/policy.yaml`
+  与 `integration/policy_contract.py` 提供规则和策略合同验证。
+- `integration/attack_chain.py`、`bench/benchmark.py`、`integration/report.py`
+  与 `dashboard/build_dashboard.py` 汇总运行时审计证据、指标、需求追踪和展示页。
+- `integration/requirements.yaml` 记录项目侧实现与证据路径，避免引用靶场内迁移脚本作为交付能力。
 
-- Gateway Tool Inspect 增加通用身份上下文和 tenant scope 检查，在静态工具放行前
-  阻止跨租户 confused-deputy 请求。
-- OpsPilot 接入 Prompt、Tool Call、Tool Result、Final Response 四阶段同步检查。
-- Langflow 宿主端口由 `langflow-guard` 代理，支持方法、路径、查询串、JSON 与
-  Multipart 内容检查。
-- 运行证据统一为 RangeEvent JSONL，并包含 instance、trace、stage、asset、decision、
-  latency 和 raw reference；Token、密码和常见秘密字段会被脱敏。
-- 新增 27 项冻结资产清单、风险 taxonomy、六类通用行为规则、三模式策略合同、
-  AttackChain DAG、instance 级 benchmark 与最终报告。
-- 新增 FR/NFR 需求追踪矩阵，明确区分未实现、已实现待证据和证据齐全，禁止把
-  无效请求或未实测指标伪装成安全能力。
-- 已裁剪仓库 CI/CD 与 GitHub 测试流程；本靶场交付不依赖远端流水线。
-
-### 计划书与操作文档
+### 关键文档
 
 | 文档 | 用途 |
 |---|---|
 | [DefenseClaw AgentRange 改造计划书](task/DefenseClaw_AgentRange靶场改造实施计划书_v1.0.md) | 需求、接口、架构、任务分配、验收与风险基线 |
-| [AgentRange 联调方案](task/AgentRange-player/integration/README.md) | DefenseClaw 与靶场接入点、策略和逐场景联调 |
-| [运行手册](task/AgentRange-player/docs/OPERATIONS.md) | Windows/Linux 三模式运行与故障降级 |
-| [固定演示流程](task/AgentRange-player/docs/DEMO.md) | 资产、observe、action、攻击链和报告演示顺序 |
-| [交付证据索引](task/AgentRange-player/docs/DELIVERY.md) | M0-M7 交付物、验证入口和报告文件 |
-| [最终测试结果展示页](task/AgentRange-player/dashboard/index.html) | 面向评委的赛题指标、场景覆盖、闭环与证据看板 |
+| [非侵入 AgentRange 适配说明](task/agentrange-adapter/README.md) | 项目侧 Compose overlay、sidecar 代理和启动方式 |
+| [AgentRange contracts](integration/agentrange_contracts/README.md) | 资产、场景、事件、决策和攻击链数据合同 |
+| [需求追踪矩阵](integration/requirements.yaml) | FR/NFR 实现点和证据文件 |
+| [最终报告脚本](integration/report.py) | 汇总静态、运行时、benchmark、攻击链和需求证据 |
+| [Dashboard 生成脚本](dashboard/build_dashboard.py) | 生成面向评审的静态展示页 |
 
-### 运行真实靶场测试（Windows PowerShell）
+### 运行方式（Windows PowerShell）
 
-以下流程会真实启动 Docker 靶场、调用 DefenseClaw Inspect API、回放攻击场景、
-采集延迟与容器资源数据，并生成面向评委的静态结果页。项目不要求运行 Go 测试，
-也不依赖 CI/CD 或 GitHub 测试。
-
-#### 1. 检查环境并安装靶场依赖
+以下命令均从项目根目录运行：
 
 ```powershell
-cd F:\agentscan2
-docker version
-docker compose version
-python --version
-defenseclaw --help
-defenseclaw-gateway --help
-
-cd F:\agentscan2\task\AgentRange-player
-python -m pip install -r requirements-dev.txt
+cd C:\Users\11388\Desktop\AgentScan-Tool
 ```
 
-#### 2. 初始化并启动 DefenseClaw
-
-首次运行：
+生成或刷新非侵入式靶场适配 overlay：
 
 ```powershell
-cd F:\agentscan2
+defenseclaw agentrange adapt `
+  --range-root .\task\AgentRange-player `
+  --output-dir .\task\agentrange-adapter `
+  --gateway-base http://host.docker.internal:18970 `
+  --force
+```
+
+启动 DefenseClaw Gateway 后，用原始靶场 Compose 加项目侧 overlay 启动 AgentRange：
+
+```powershell
 defenseclaw init --enable-guardrail
-defenseclaw setup gateway --host 127.0.0.1 --api-port 18970 --non-interactive --no-verify
+defenseclaw setup gateway --host 0.0.0.0 --api-port 18970 --non-interactive --no-verify
 defenseclaw setup guardrail --mode observe --scanner-mode local --non-interactive
 defenseclaw-gateway start
-defenseclaw-gateway status
-Invoke-RestMethod http://127.0.0.1:18970/health
+
+docker compose `
+  -f .\task\AgentRange-player\docker-compose.yml `
+  -f .\task\agentrange-adapter\docker-compose.defenseclaw.override.yml `
+  up -d --build
 ```
 
-如果 Gateway 未加入 `PATH`，可将上述生命周期命令替换为
-`.\defenseclaw-gateway.exe start/status/restart`。
-
-AgentRange 运行在 Docker 中，因此 Gateway REST API 必须监听容器可达的宿主机地址。
-编辑 `$HOME\.defenseclaw\config.yaml`，在已有 `gateway` 节点下确认：
-
-```yaml
-gateway:
-  api_port: 18970
-  api_bind: 0.0.0.0
-```
-
-随后运行：
-
-```powershell
-defenseclaw-gateway restart
-defenseclaw-gateway status
-```
-
-`0.0.0.0` 仅适用于受控比赛主机；必须配置 Gateway Token 并用防火墙限制
-18970 端口，禁止把无鉴权 Inspect API 暴露到局域网或公网。
-
-#### 3. 配置并启动 AgentRange
-
-```powershell
-cd F:\agentscan2\task\AgentRange-player
-Copy-Item .env.example .env -Force
-
-$env:DEFENSECLAW_API_BASE = "http://host.docker.internal:18970"
-$env:DEFENSECLAW_API_TOKEN = "<DefenseClaw Gateway Token>"
-$env:DEFENSECLAW_FAIL_MODE = "open"
-$env:DEFENSECLAW_TIMEOUT_SECONDS = "0.25"
-
-docker compose up -d --build
-docker compose ps
-Invoke-RestMethod http://localhost:8100/health
-Invoke-RestMethod http://localhost:7860/guard/health
-```
-
-同时把以上四个 `DEFENSECLAW_*` 值写入靶场 `.env`，确保新开 PowerShell 后仍然
-生效。`/guard/health` 返回的 `protected` 应为 `true`。
-
-#### 4. 快速真实冒烟测试
-
-observe 只检测和留证，不阻断业务：
+切换 observe/action 模式时，仍由 DefenseClaw Gateway 的 guardrail 配置决定：
 
 ```powershell
 defenseclaw setup guardrail --mode observe --scanner-mode local --non-interactive --restart
-docker compose up -d --build --force-recreate
-python .\scenario-runner\runner.py C2-D --mode observe --report .\integration\reports\observe-smoke.json
-```
-
-action 会在危险动作执行前阻断：
-
-```powershell
 defenseclaw setup guardrail --mode action --scanner-mode local --non-interactive --restart
-docker compose up -d --build --force-recreate
-python .\scenario-runner\runner.py C2-D --mode action --report .\integration\reports\action-smoke.json
 ```
 
-action 模式预期出现 HTTP 403、`DEFENSECLAW_BLOCKED` 或对应阻断判定。可以把
-`C2-D` 依次替换为 `C1-A`、`C1-B`、`C2-A`、`C2-B`、`C2-C`，验证全部攻击链。
-
-#### 5. 正式三阶段全量测试
-
-下面三个命令会分别重建对应模式的靶场。每个阶段默认使用固定随机种子 `1337`，
-执行 5200 条回放且包含至少 80 条恶意样本：
+生成静态扫描、规则合同、攻击链、benchmark、最终报告和 dashboard：
 
 ```powershell
-cd F:\agentscan2\task\AgentRange-player
-.\integration\run.ps1 baseline
-.\integration\run.ps1 observe
-.\integration\run.ps1 action
-```
-
-- `baseline`：不接入 DefenseClaw，作为攻击成功率和性能对照组。
-- `observe`：真实检测和记录风险，但不改变业务结果。
-- `action`：真实阻断高风险动作，计算 Recall、FPR 和正常业务成功率。
-
-汇总三阶段指标、攻击链和最终报告：
-
-```powershell
-python .\bench\benchmark.py summarize
+python .\integration\static_inventory.py --output .\integration\reports\static-scan.json
+python .\integration\rule_contract.py --output .\integration\reports\rule-contract.json
 python .\integration\attack_chain.py --output .\integration\reports\attack-chains.json
+python .\bench\benchmark.py summarize
 python .\integration\report.py
 python .\dashboard\build_dashboard.py
 Start-Process .\dashboard\index.html
 ```
 
-主要结果位于 `bench/results/`、`integration/reports/`，评委展示入口为
-[`dashboard/index.html`](task/AgentRange-player/dashboard/index.html)。最终验收重点检查：
-Recall ≥ 95%、FPR < 5%、Inspect p95 < 1000ms、正常场景成功率 100%、CPU 增量 ≤ 5%。
+主要结果位于 `integration/reports/`、`bench/results/` 和 `dashboard/index.html`。
+验收时重点查看资产覆盖、规则合同、风险召回、误报率、Inspect p95、攻击链闭环和需求证据状态。
 
 测试结束后清理容器和数据卷：
 
 ```powershell
-docker compose down -v
+docker compose `
+  -f .\task\AgentRange-player\docker-compose.yml `
+  -f .\task\agentrange-adapter\docker-compose.defenseclaw.override.yml `
+  down -v
 ```
 
 ### 当前验证状态
 
-- Python 合同、集成与静态展示页测试：30 项通过。
-- 静态资产：27/27；必要风险：7/7；六条行为规则攻击/良性合同全部通过。
-- baseline 烟雾：20/20 有效，正常业务成功率 100%，端到端 p95 约 164ms。
-- OpsPilot 与 Langflow Guard 镜像可构建并通过健康检查。
-- 需求追踪：12 项均有实现落点；8 项证据齐全，4 项等待真实 Gateway 与三模式全量结果。
-- 按项目约束未运行 Go 测试；Go 源码已格式化，容器构建在本地时限内未完成，
-  因此不宣称 Gateway 构建、observe/action、5200 全量指标或攻击链实测已经通过。
+- Python 脚本语法检查通过：contracts、静态扫描、规则/策略/需求合同、攻击链、benchmark、报告和 dashboard。
+- 静态资产扫描通过：27/27 资产命中，7/7 必要风险命中。
+- 规则合同通过：6 条通用行为规则均命中攻击样例并避开良性样例。
+- 本地审计库可生成攻击链与最终报告；全量 Docker 回放结果以实际运行后的 `bench/results/` 为准。
 
 ---
 

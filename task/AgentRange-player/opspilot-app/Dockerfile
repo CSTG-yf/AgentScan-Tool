@@ -4,7 +4,6 @@ COPY opspilot-app/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY opspilot-app/auth ./auth
 COPY opspilot-app/policy ./policy
-COPY opspilot-app/security ./security
 COPY opspilot-app/api ./api
 COPY skills ./skills
 EXPOSE 8000
