@@ -134,6 +134,33 @@ def classify_sequence(events: list[dict[str, Any]]) -> str:
     return "runtime_observation"
 
 
+def pollution_source(events: list[dict[str, Any]], sequence_type: str) -> str | None:
+    if not events:
+        return None
+    if sequence_type.startswith("langflow"):
+        return "langflow_http_request"
+    first = events[0]
+    for field in ("prompt", "request_body", "http_path", "details"):
+        value = str(first.get(field) or "").strip()
+        if value:
+            return value[:240]
+    return None
+
+
+def unexecuted_side_effects(sequence_type: str, blocked: bool) -> list[str]:
+    if not blocked:
+        return []
+    if sequence_type == "sensitive_file_access":
+        return ["subsequent credential disclosure or sync action"]
+    if sequence_type == "command_execution_or_egress":
+        return ["command execution or outbound callback"]
+    if sequence_type == "identity_scope_or_cross_tenant_access":
+        return ["cross-tenant data read"]
+    if sequence_type == "langflow_ingress_or_framework_exploit":
+        return ["forwarding to the vulnerable Langflow endpoint"]
+    return ["downstream AgentRange side effect"]
+
+
 def event_summary(event: dict[str, Any]) -> str:
     pieces = [
         str(event.get("stage") or "unknown"),
@@ -155,6 +182,7 @@ def build_chains(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         nodes = []
         edges = []
         block_node_id = None
+        sequence_type = classify_sequence(rows)
         for index, event in enumerate(rows, 1):
             node_id = f"n{index}"
             if event.get("decision") == "block" and block_node_id is None:
@@ -182,7 +210,9 @@ def build_chains(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "trace_id": rows[0].get("trace_id") or key,
                 "blocked": block_node_id is not None,
                 "block_node_id": block_node_id,
-                "sequence_type": classify_sequence(rows),
+                "pollution_source": pollution_source(rows, sequence_type),
+                "sequence_type": sequence_type,
+                "unexecuted_side_effects": unexecuted_side_effects(sequence_type, block_node_id is not None),
                 "nodes": nodes,
                 "edges": edges,
                 "evidence_summary": f"{len(nodes)} events; block={block_node_id or 'none'}",

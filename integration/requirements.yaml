@@ -1,0 +1,110 @@
+version: 1
+plan: task/DefenseClaw_AgentRange靶场改造实施计划书_v1.0.docx
+requirements:
+  - id: FR-01
+    task: DC-M1-01
+    title: 通用 inspect 接口与 observe/action 模式语义
+    implementation:
+      - internal/gateway/inspect.go
+      - internal/gateway/inspect_hooks.go
+    verification:
+      - integration/reports/rule-contract.json
+      - bench/results/summary.json
+  - id: FR-02
+    task: DC-M1-01
+    title: 身份与租户授权
+    implementation:
+      - internal/gateway/inspect.go
+      - internal/gateway/agentrange_adapter_test.go
+    verification:
+      - integration/reports/rule-contract.json
+  - id: FR-03
+    task: DC-M2-01
+    title: OpsPilot 非侵入式运行时适配
+    implementation:
+      - cli/defenseclaw/agentrange_adapter.py
+      - cli/defenseclaw/agentrange_sidecar.py
+      - task/agentrange-adapter/docker-compose.defenseclaw.override.yml
+    verification:
+      - integration/reports/runtime-events.jsonl
+      - integration/reports/final-report.json
+  - id: FR-04
+    task: DC-M2-02
+    title: Langflow 入站保护
+    implementation:
+      - cli/defenseclaw/agentrange_sidecar.py
+      - task/agentrange-adapter/docker-compose.defenseclaw.override.yml
+    verification:
+      - integration/reports/runtime-events.jsonl
+      - integration/reports/attack-chains.json
+  - id: FR-05
+    task: DC-M3-01
+    title: 运行时行为规则
+    implementation:
+      - internal/gateway/rules.go
+      - integration/runtime_rules.yaml
+      - integration/rule_contract.py
+    verification:
+      - integration/reports/rule-contract.json
+  - id: FR-06
+    task: DC-M4-01
+    title: 模式、策略与故障处理
+    implementation:
+      - integration/policy.yaml
+      - integration/policy_contract.py
+      - cli/defenseclaw/agentrange_sidecar.py
+    verification:
+      - integration/reports/final-report.json
+  - id: FR-07
+    task: DC-M0-01/DC-M2-01
+    title: 统一事件与证据
+    implementation:
+      - integration/agentrange_contracts/range-event.schema.json
+      - cli/defenseclaw/agentrange_sidecar.py
+      - integration/attack_chain.py
+    verification:
+      - integration/reports/runtime-events.jsonl
+  - id: FR-08
+    task: DC-M0-01
+    title: 静态资产与风险盘点
+    implementation:
+      - integration/agentrange_contracts/assets.yaml
+      - integration/static_inventory.py
+      - integration/risk_taxonomy.yaml
+    verification:
+      - integration/reports/static-scan.json
+  - id: FR-09
+    task: DC-M5-01
+    title: 攻击链还原
+    implementation:
+      - integration/attack_chain.py
+    verification:
+      - integration/reports/attack-chains.json
+  - id: FR-10
+    task: DC-M6-01/DC-M7-01
+    title: Benchmark 与最终报告
+    implementation:
+      - bench/benchmark.py
+      - integration/report.py
+      - dashboard/build_dashboard.py
+    verification:
+      - bench/results/summary.json
+      - integration/reports/final-report.json
+      - dashboard/index.html
+  - id: NFR-01
+    task: DC-M8-01
+    title: 性能与可用性
+    implementation:
+      - bench/benchmark.py
+      - cli/defenseclaw/agentrange_sidecar.py
+    verification:
+      - bench/results/summary.json
+  - id: NFR-02
+    task: DC-M8-01
+    title: 可维护性与兼容性
+    implementation:
+      - integration/agentrange_contracts/scenario-matrix.yaml
+      - integration/requirements.yaml
+      - integration/requirements_contract.py
+    verification:
+      - integration/reports/final-report.json
