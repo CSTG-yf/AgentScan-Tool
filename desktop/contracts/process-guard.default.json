@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "enabled": false,
+  "mode": "observe",
+  "agentNames": [
+    "codex.exe",
+    "claude.exe",
+    "cursor.exe",
+    "cursor-agent.exe",
+    "windsurf.exe",
+    "codeium.exe",
+    "language_server_windows_x64.exe",
+    "aider.exe",
+    "opencode.exe",
+    "openhands.exe",
+    "goose.exe",
+    "cline.exe"
+  ],
+  "rules": [
+    {
+      "id": "command.grep",
+      "enabled": false,
+      "executable": "grep.exe",
+      "action": "terminateAgentTree",
+      "description": "Agent 创建 grep.exe 时记录并终止所属 Agent 进程树。"
+    },
+    {
+      "id": "command.curl",
+      "enabled": false,
+      "executable": "curl.exe",
+      "action": "audit",
+      "description": "观察 Agent 发起的 curl 子进程，不执行终止。"
+    },
+    {
+      "id": "command.powershell",
+      "enabled": false,
+      "executable": "powershell.exe",
+      "action": "audit",
+      "description": "观察传统 Windows PowerShell 子进程。"
+    }
+  ],
+  "termination": {
+    "gracePeriodMs": 1500,
+    "verifyProcessIdentity": true,
+    "protectedProcessBehavior": "auditOnly"
+  }
+}

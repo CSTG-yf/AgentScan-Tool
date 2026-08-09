@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://defenseclaw.dev/schemas/desktop/environment-v1.json",
+  "title": "Desktop environment snapshot",
+  "type": "object",
+  "required": ["capturedAt", "components"],
+  "properties": {
+    "capturedAt": { "type": "string", "format": "date-time" },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "state", "detail"],
+        "properties": {
+          "id": { "enum": ["gateway", "docker", "agentrange", "processGuard"] },
+          "label": { "type": "string", "minLength": 1 },
+          "state": { "enum": ["ready", "degraded", "stopped", "missing", "unknown"] },
+          "detail": { "type": "string" },
+          "version": { "type": "string" },
+          "requiresElevation": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

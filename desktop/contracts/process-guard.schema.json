@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://defenseclaw.dev/schemas/desktop/process-guard-policy-v1.json",
+  "title": "Windows Agent process guard policy",
+  "type": "object",
+  "required": ["version", "enabled", "mode", "agentNames", "rules", "termination"],
+  "properties": {
+    "version": { "const": 1 },
+    "enabled": { "type": "boolean" },
+    "mode": { "enum": ["observe", "enforce"] },
+    "agentNames": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9._+-]+$" },
+      "uniqueItems": true
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "enabled", "executable", "action"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$" },
+          "enabled": { "type": "boolean" },
+          "executable": {
+            "type": "string",
+            "description": "Exact, case-insensitive executable basename; no paths, wildcards, or shell syntax.",
+            "pattern": "^[A-Za-z0-9._+-]+(?:\\.exe)?$"
+          },
+          "action": { "enum": ["audit", "terminateAgentTree"] },
+          "description": { "type": "string", "maxLength": 240 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "termination": {
+      "type": "object",
+      "required": ["gracePeriodMs", "verifyProcessIdentity", "protectedProcessBehavior"],
+      "properties": {
+        "gracePeriodMs": { "type": "integer", "minimum": 0, "maximum": 30000 },
+        "verifyProcessIdentity": { "const": true },
+        "protectedProcessBehavior": { "const": "auditOnly" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

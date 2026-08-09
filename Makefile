@@ -796,3 +796,16 @@ clean:
 	rm -f coverage.out coverage-py.xml
 	rm -rf cli/defenseclaw/_data
 	find cli/ -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+.PHONY: desktop-install desktop-dev desktop-web desktop-build
+
+desktop-install:
+	cd desktop && pnpm install --frozen-lockfile
+
+desktop-dev:
+	cd desktop && pnpm dev
+
+desktop-web:
+	powershell -NoProfile -ExecutionPolicy Bypass -File desktop/scripts/build.ps1 -SkipInstall -WebOnly
+
+desktop-build:
+	powershell -NoProfile -ExecutionPolicy Bypass -File desktop/scripts/build.ps1 -SkipInstall

@@ -1,0 +1,33 @@
+[package]
+name = "defenseclaw-desktop"
+version = "0.1.0"
+description = "DefenseClaw Windows security control plane"
+authors = ["DefenseClaw contributors"]
+edition = "2021"
+rust-version = "1.77.2"
+default-run = "defenseclaw-desktop"
+
+[lib]
+name = "defenseclaw_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+windows-service = "0.8.1"
+
+[target.'cfg(windows)'.dependencies]
+wmi = "0.18.4"
+windows-core = "=0.61.2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

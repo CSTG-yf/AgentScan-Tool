@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://defenseclaw.dev/schemas/desktop/task-v1.json",
+  "title": "Long running desktop task",
+  "type": "object",
+  "required": ["id", "kind", "state", "createdAt", "message"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "kind": { "enum": ["gatewayStart", "gatewayStop", "rangeStart", "rangeStop", "scenarioRun", "reportExport"] },
+    "state": { "enum": ["queued", "running", "succeeded", "failed", "cancelled"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "finishedAt": { "type": ["string", "null"], "format": "date-time" },
+    "progress": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "message": { "type": "string" },
+    "errorCode": { "type": "string" }
+  },
+  "additionalProperties": false
+}

@@ -59,6 +59,17 @@ dashboard/index.html
 # Node.js
 node_modules/
 
+# Rust / Tauri build artifacts
+target/
+desktop/src-tauri/resources/*.exe
+desktop/src-tauri/gen/
+*.tsbuildinfo
+desktop/vite.config.js
+desktop/vite.config.d.ts
+desktop/src-tauri/icons/android/
+desktop/src-tauri/icons/ios/
+desktop/src-tauri/icons/icon.icns
+
 # Python
 .venv/
 __pycache__/

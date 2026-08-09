@@ -1091,11 +1091,17 @@ func (s *ContinuousDiscoveryService) detectProcesses() []AISignal {
 				MatchKind: matchKind,
 			}
 			signal := s.signalFromEvidence(sig, SignalActiveProcess, "process", []AIEvidence{ev})
+			uptimeSec := int64(0)
+			if !best.StartedAt.IsZero() {
+				if elapsed := now.Sub(best.StartedAt); elapsed > 0 {
+					uptimeSec = int64(elapsed.Seconds())
+				}
+			}
 			runtime := &ProcessRuntime{
 				PID:       best.PID,
 				PPID:      best.PPID,
 				StartedAt: best.StartedAt,
-				UptimeSec: int64(now.Sub(best.StartedAt).Seconds()),
+				UptimeSec: uptimeSec,
 				User:      best.User,
 				Comm:      best.Comm,
 			}
@@ -1103,8 +1109,10 @@ func (s *ContinuousDiscoveryService) detectProcesses() []AISignal {
 			// Process detector's `LastActiveAt` is the process'
 			// start time, not the scan time. That's the answer to
 			// "when was this thing last active" the operator wants.
-			started := best.StartedAt
-			signal.LastActiveAt = &started
+			if !best.StartedAt.IsZero() {
+				started := best.StartedAt
+				signal.LastActiveAt = &started
+			}
 			out = append(out, signal)
 		}
 	}
@@ -2956,11 +2964,10 @@ func processNames() ([]string, error) {
 	return out, nil
 }
 
-// processSnapshot returns one record per running process on POSIX
-// systems via `ps`, or an empty slice on Windows (the equivalent
-// `tasklist` parse is intentionally TODO'd; falling back to empty is
-// safe — discovery just won't emit `process` signals on Windows).
-//
+// processSnapshot returns one record per running process. POSIX uses `ps`;
+// Windows uses the native Toolhelp process snapshot API.
+// The Windows implementation avoids localized `tasklist` output and keeps
+// the same process evidence fields used by the POSIX implementation.
 // The fields requested are: pid, ppid, user, comm, etime — exactly
 // what's needed to compute uptime + a "last invoked" timestamp without
 // reading proc internals or pulling in a third-party process library.
@@ -2972,7 +2979,7 @@ func processNames() ([]string, error) {
 // the per-evidence `RawPath` already cover the legitimate use cases.
 func processSnapshot() ([]processInfo, error) {
 	if runtime.GOOS == "windows" {
-		return nil, nil
+		return processSnapshotWindows()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
