@@ -55,6 +55,20 @@ try {
     pnpm tauri build --bundles nsis
     if ($LASTEXITCODE -ne 0) { throw "Tauri build failed with exit code $LASTEXITCODE" }
 
+    # The desktop installer must let an operator choose its destination. Tauri's
+    # standard NSIS template provides that page, but assert it here so a future
+    # template/configuration change cannot silently turn the installer into a
+    # fixed-path package.
+    $generatedNsis = Get-ChildItem -LiteralPath (Join-Path $desktopRoot "src-tauri\target\release\nsis") `
+        -Filter "installer.nsi" -File -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $generatedNsis) {
+        throw "Tauri completed but the generated NSIS script could not be found."
+    }
+    if ((Get-Content -LiteralPath $generatedNsis.FullName -Raw) -notmatch '!insertmacro\s+MUI_PAGE_DIRECTORY') {
+        throw "The generated NSIS installer does not contain a destination-folder selection page."
+    }
+
     $bundleDir = Join-Path $desktopRoot "src-tauri\target\release\bundle\nsis"
     $installer = Get-ChildItem -LiteralPath $bundleDir -Filter "*.exe" -File | Select-Object -First 1
     if (-not $installer) {

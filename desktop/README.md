@@ -64,6 +64,20 @@ is unavailable so a stale or incomplete gateway cannot silently ship. For a
 local shell-only experiment, `-AllowMissingGateway` may reuse an existing
 development gateway resource.
 
+The interactive NSIS installer includes a **Choose Install Location** page and
+defaults to `%ProgramFiles%\DefenseClaw Desktop`. Browse to any suitable local
+destination before selecting **Install**. Because the process guard is a
+LocalSystem service, installation remains machine-wide and requires elevation.
+
+For unattended deployment, pass an absolute destination with NSIS `/D`. `/D`
+must be the final argument, including when the path contains spaces:
+
+```powershell
+& ".\dist\DefenseClaw-Desktop-Setup-x64.exe" /S /D=D:\Security Tools\DefenseClaw
+```
+
+An upgrade retains the destination recorded by the previous installation.
+
 ## Windows process-guard acceptance test
 
 From an elevated PowerShell session, run:
@@ -80,8 +94,12 @@ To validate the packaged NSIS installer, bundled gateway, Windows service, and
 stable uninstall cleanup from an elevated PowerShell session, run:
 
 ```powershell
-.\scripts\test-installer.ps1
+.\scripts\test-installer.ps1 -InstallDir "D:\DefenseClaw-Installer-Test"
 ```
+
+The acceptance test verifies that the selected destination is recorded in the
+Windows uninstall registry entry, exercises the bundled gateway and process
+guard service from that directory, and confirms uninstall removes it cleanly.
 
 ## Contracts
 

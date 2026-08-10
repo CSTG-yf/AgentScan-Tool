@@ -68,7 +68,7 @@ jobs:
 
       - name: Smoke-test NSIS lifecycle
         shell: powershell
-        run: .\desktop\scripts\test-installer.ps1
+        run: .\desktop\scripts\test-installer.ps1 -InstallDir "$env:SystemDrive\DefenseClawDesktop-Custom-CI"
 
       - uses: actions/upload-artifact@v4
         with:
