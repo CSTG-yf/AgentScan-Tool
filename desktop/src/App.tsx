@@ -15,8 +15,8 @@ import {
 import { Badge, Button, Card, Input, Layout, Menu, message, Modal, Progress, Segmented, Space, Switch, Table, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import ReactECharts from "echarts-for-react";
-import { applyProcessGuardPolicy, getAgentProcesses, getEnvironment, getGuardPolicy, getProcessGuardAudit, getRangeStatus, installProcessGuard, saveGuardPolicy, saveRangeRoot, setGatewayRunning, setRangeRunning, uninstallProcessGuard } from "./bridge";
-import type { AgentProcess, EnvironmentComponent, EnvironmentSnapshot, GuardAuditEvent, GuardAuditSnapshot, GuardPolicy, RangeStatus } from "./types";
+import { applyProcessGuardPolicy, getAgentProcesses, getAgentTrace, getEnvironment, getGuardPolicy, getProcessGuardAudit, getRangeStatus, installProcessGuard, saveGuardPolicy, saveRangeRoot, setGatewayRunning, setRangeRunning, uninstallProcessGuard } from "./bridge";
+import type { AgentProcess, AgentTraceEvent, AgentTraceSnapshot, EnvironmentComponent, EnvironmentSnapshot, GuardAuditEvent, GuardAuditSnapshot, GuardPolicy, RangeStatus } from "./types";
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title } = Typography;
@@ -25,6 +25,7 @@ const navigation = [
   { key: "overview", icon: <DashboardOutlined />, label: "安全总览" },
   { key: "range", icon: <ExperimentOutlined />, label: "靶场控制" },
   { key: "agents", icon: <RadarChartOutlined />, label: "Agent 检测" },
+  { key: "trace", icon: <AuditOutlined />, label: "行为追踪" },
   { key: "alerts", icon: <AlertOutlined />, label: "告警中心" },
   { key: "chain", icon: <AuditOutlined />, label: "攻击链" },
   { key: "policies", icon: <FileProtectOutlined />, label: "策略中心" },
@@ -72,6 +73,15 @@ const auditColumns: ColumnsType<GuardAuditEvent> = [
   { title: "证据详情", dataIndex: "detail", ellipsis: true },
 ];
 
+const traceColumns: ColumnsType<AgentTraceEvent> = [
+  { title: "时间", dataIndex: "timestamp", width: 180, render: formatTimestamp },
+  { title: "行为", dataIndex: "eventType", width: 160, render: (value: string) => <Tag color={value === "blacklistFileAccess" ? "red" : value.startsWith("file") ? "blue" : "cyan"}>{value}</Tag> },
+  { title: "Agent / 执行进程", render: (_, row) => <Space direction="vertical" size={0}><Text strong>{row.agentExecutable} · PID {row.agentPid}</Text><Text type="secondary" className="mono">{row.actorExecutable} · PID {row.actorPid}</Text></Space> },
+  { title: "文件", dataIndex: "path", ellipsis: true, render: (value?: string) => value ? <Text className="mono" copyable>{value}</Text> : "—" },
+  { title: "结果", dataIndex: "outcome", width: 140, render: outcomeTag },
+  { title: "来源", dataIndex: "source", width: 180 },
+];
+
 function ComponentCard({ component, onGatewayAction }: { component: EnvironmentComponent; onGatewayAction: (running: boolean) => void }) {
   const meta = stateMeta[component.state];
   return (
@@ -99,6 +109,7 @@ export default function App() {
   const [rangeStatus, setRangeStatus] = useState<RangeStatus>();
   const [rangeRoot, setRangeRoot] = useState("");
   const [audit, setAudit] = useState<GuardAuditSnapshot>();
+  const [trace, setTrace] = useState<AgentTraceSnapshot>();
   const [loading, setLoading] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
 
@@ -134,7 +145,7 @@ export default function App() {
 
   const refresh = async () => {
     setLoading(true);
-    const results = await Promise.allSettled([getEnvironment(), getAgentProcesses(), getGuardPolicy(), getRangeStatus(), getProcessGuardAudit()]);
+    const results = await Promise.allSettled([getEnvironment(), getAgentProcesses(), getGuardPolicy(), getRangeStatus(), getProcessGuardAudit(), getAgentTrace()]);
     if (results[0].status === "fulfilled") setEnvironment(results[0].value);
     if (results[1].status === "fulfilled") {
       setAgents(results[1].value.processes);
@@ -146,6 +157,7 @@ export default function App() {
       if (results[3].value.root) setRangeRoot(results[3].value.root);
     }
     if (results[4].status === "fulfilled") setAudit(results[4].value);
+    if (results[5].status === "fulfilled") setTrace(results[5].value);
     setLoading(false);
   };
 
@@ -163,6 +175,21 @@ export default function App() {
   const guardEvents = useMemo(() => [...(audit?.events ?? [])].reverse(), [audit]);
   const commandEvents = useMemo(() => guardEvents.filter((event) => event.eventType === "agent-command-rule-matched"), [guardEvents]);
   const terminatedCount = commandEvents.filter((event) => event.outcome === "terminated").length;
+  const traceEvents = trace?.events ?? [];
+  const fileTraceCount = traceEvents.filter((event) => event.eventType.startsWith("file") || event.eventType === "blacklistFileAccess").length;
+
+  const updateBlacklist = (id: string, patch: Partial<GuardPolicy["fileGuard"]["blacklist"][number]>, save = false) => {
+    if (!policy) return;
+    const next = { ...policy, fileGuard: { ...policy.fileGuard, blacklist: policy.fileGuard.blacklist.map((rule) => rule.id === id ? { ...rule, ...patch } : rule) } };
+    setPolicy(next);
+    if (save) void persistPolicy(next);
+  };
+
+  const addBlacklistRule = () => {
+    if (!policy) return;
+    const suffix = Date.now().toString(36);
+    void persistPolicy({ ...policy, fileGuard: { ...policy.fileGuard, blacklist: [...policy.fileGuard.blacklist, { id: `file.custom.${suffix}`, enabled: false, path: "C:\\Users\\Public", matchKind: "exact", access: ["any"], action: "terminateAgentTree", description: "自定义敏感文件规则" }] } });
+  };
 
   const requestGuardAction = async (action: "install" | "apply" | "uninstall") => {
     try {
@@ -242,7 +269,7 @@ export default function App() {
       <Sider width={238} className="sidebar" theme="dark">
         <div className="brand">
           <div className="brand-mark"><SafetyCertificateOutlined /></div>
-          <div><div className="brand-title">DefenseClaw</div><div className="brand-subtitle">DESKTOP CONTROL PLANE</div></div>
+          <div><div className="brand-title">TraceBastion</div><div className="brand-subtitle">AGENT SECURITY CONTROL PLANE</div></div>
         </div>
         <Menu mode="inline" selectedKeys={[active]} items={navigation} onClick={({ key }) => setActive(key)} />
         <div className="sidebar-footer"><Badge status={readyCount ? "success" : "warning"} /><span>本机控制平面</span><span className="version">v0.1</span></div>
@@ -269,6 +296,13 @@ export default function App() {
               {agentWarning && <div className="inline-warning">{agentWarning}</div>}
               <Card bordered={false}><Table rowKey={(row) => `${row.pid}-${row.startedAt ?? "unknown"}`} columns={columns} dataSource={agents} pagination={false} locale={{ emptyText: "当前没有检测到常见 Agent 进程" }} /></Card>
             </section>
+          ) : active === "trace" ? (
+            <section>
+              <div className="section-heading"><div><Text className="eyebrow">AGENT ACTIVITY TRACE</Text><Title level={2}>Agent 行为追踪</Title><Text type="secondary">记录 Agent 进程、子命令以及文件读取、写入、新增和删除；文件事件来自 Windows 安全审计。</Text></div><Space><Tag color="cyan">{traceEvents.length} 条事件</Tag><Tag color="blue">{fileTraceCount} 条文件行为</Tag></Space></div>
+              {trace?.warning && <div className="inline-warning">{trace.warning}</div>}
+              <Card bordered={false} className="evidence-path"><Text type="secondary">SQLite Trace 库</Text><Text className="mono">agent-trace.db · 本机受保护存储</Text></Card>
+              <Card bordered={false}><Table rowKey="id" columns={traceColumns} dataSource={traceEvents} pagination={{ pageSize: 20 }} locale={{ emptyText: "尚未捕获 Agent 行为" }} /></Card>
+            </section>
           ) : active === "policies" ? (
             <section>
               <div className="section-heading"><div><Text className="eyebrow">PROCESS GUARD</Text><Title level={2}>Agent 命令黑名单</Title><Text type="secondary">精确匹配 Agent 子进程的可执行文件名；强制模式由管理员服务执行。</Text></div><Segmented disabled={!policy || savingPolicy} options={[{ label: "仅观察", value: "observe" }, { label: "强制终止", value: "enforce" }]} value={policy?.mode ?? "observe"} onChange={changeMode} /></div>
@@ -280,6 +314,23 @@ export default function App() {
                   { title: "动作", dataIndex: "action", render: (value: string) => <Tag color={value === "terminateAgentTree" ? "red" : "gold"}>{value === "terminateAgentTree" ? "终止 Agent 进程树" : "仅审计"}</Tag> },
                   { title: "说明", dataIndex: "description" },
                 ]} />
+              </Card>
+              <Card bordered={false} title="文件访问监控范围">
+                <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+                  <Space><Switch checked={policy?.trace.enabled} disabled={!policy} loading={savingPolicy} onChange={(enabled) => policy && void persistPolicy({ ...policy, trace: { ...policy.trace, enabled } })} /><Text>启用 SQLite 行为 Trace</Text></Space>
+                  <Text type="secondary">每行一个绝对目录。应用到管理员服务时会启用 Windows 文件系统审计并写入 SACL；空列表时只记录进程行为。</Text>
+                  <Input.TextArea rows={3} value={(policy?.fileGuard.auditRoots ?? []).join("\n")} placeholder={"C:\\Projects\\AgentWorkspace\nC:\\Users\\Public\\Documents"} onChange={(event) => policy && setPolicy({ ...policy, fileGuard: { ...policy.fileGuard, auditRoots: event.target.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean) } })} onBlur={() => policy && void persistPolicy(policy)} />
+                </Space>
+              </Card>
+              <Card bordered={false} title={<Space><span>敏感文件黑名单</span><Tag color="red">命中后终止 Agent 树</Tag></Space>} extra={<Space><Switch checked={policy?.fileGuard.enabled} disabled={!policy} loading={savingPolicy} onChange={(enabled) => policy && void persistPolicy({ ...policy, fileGuard: { ...policy.fileGuard, enabled } })} /><Button onClick={addBlacklistRule}>新增规则</Button></Space>}>
+                <Table rowKey="id" pagination={false} dataSource={policy?.fileGuard.blacklist ?? []} locale={{ emptyText: "尚未配置敏感文件" }} columns={[
+                  { title: "启用", width: 80, dataIndex: "enabled", render: (value: boolean, rule) => <Switch checked={value} loading={savingPolicy} onChange={(enabled) => updateBlacklist(rule.id, { enabled }, true)} /> },
+                  { title: "文件或目录", dataIndex: "path", render: (value: string, rule) => <Input value={value} className="mono" onChange={(event) => updateBlacklist(rule.id, { path: event.target.value })} onBlur={() => policy && void persistPolicy(policy)} /> },
+                  { title: "匹配", width: 180, dataIndex: "matchKind", render: (value: string, rule) => <Segmented value={value} options={[{ label: "精确文件", value: "exact" }, { label: "整个目录", value: "subtree" }]} onChange={(matchKind) => updateBlacklist(rule.id, { matchKind: String(matchKind) as "exact" | "subtree" }, true)} /> },
+                  { title: "访问类型", width: 110, render: () => <Tag color="volcano">全部访问</Tag> },
+                  { title: "操作", width: 90, render: (_, rule) => <Button danger type="link" onClick={() => policy && void persistPolicy({ ...policy, fileGuard: { ...policy.fileGuard, blacklist: policy.fileGuard.blacklist.filter((item) => item.id !== rule.id) } })}>删除</Button> },
+                ]} />
+                <div className="inline-warning">用户态审计在访问发生后通知服务，可以立即终止后续行为，但不能撤回第一次读取。读取前硬阻断需要签名的 Windows Minifilter 驱动。</div>
               </Card>
             </section>
           ) : active === "alerts" ? (
@@ -296,7 +347,7 @@ export default function App() {
           ) : active === "evidence" ? (
             <section>
               <div className="section-heading"><div><Text className="eyebrow">LOCAL JSONL EVIDENCE</Text><Title level={2}>报告与证据</Title><Text type="secondary">审计先落盘后执行终止；证据写入失败时系统不会执行破坏性动作。</Text></div><Tag color="geekblue">{audit?.events.length ?? 0} 条载入</Tag></div>
-              <Card bordered={false} className="evidence-path"><Text type="secondary">本机证据文件</Text><Text className="mono" copyable>{audit?.path ?? "正在定位…"}</Text></Card>
+              <Card bordered={false} className="evidence-path"><Text type="secondary">本机证据文件</Text><Text className="mono">process-guard.jsonl · 本机受保护存储</Text></Card>
               <Card bordered={false}><Table rowKey={(row) => `${row.timestamp}-${row.eventType}-${row.outcome}`} columns={auditColumns} dataSource={guardEvents} pagination={{ pageSize: 20 }} locale={{ emptyText: "尚无审计证据" }} /></Card>
             </section>
           ) : active === "settings" ? (
@@ -311,7 +362,7 @@ export default function App() {
             <section>
               <div className="hero-grid">
                 <Card bordered={false} className="hero-card">
-                  <div><Text className="eyebrow">DEFENSE POSTURE</Text><Title>本机 AI Agent 防御控制台</Title><Text type="secondary">统一查看网关、靶场、Agent 进程与命令策略。敏感动作由独立管理员服务执行并写入审计证据。</Text><div className="hero-actions"><Button type="primary" size="large" onClick={() => setActive("agents")}>查看 Agent 列表</Button><Button size="large" onClick={() => setActive("policies")}>配置防护规则</Button></div></div>
+                  <div><Text className="eyebrow">TRACEBASTION POSTURE</Text><Title>本机 AI Agent 安全控制台</Title><Text type="secondary">统一查看网关、靶场、Agent 进程与命令策略。敏感动作由独立管理员服务执行并写入审计证据。</Text><div className="hero-actions"><Button type="primary" size="large" onClick={() => setActive("agents")}>查看 Agent 列表</Button><Button size="large" onClick={() => setActive("policies")}>配置防护规则</Button></div></div>
                   <ReactECharts option={chartOption} className="posture-chart" />
                 </Card>
                 <Card bordered={false} className="signal-card"><Text className="eyebrow">LIVE SIGNALS</Text><div className="signal-number">{agents.length}</div><Text>运行中的常见 Agent 进程</Text><div className="signal-divider" /><Space direction="vertical"><Badge status={policy?.mode === "enforce" ? "error" : "processing"} text={`进程守护：${policy?.enabled ? policy.mode : "未启用"}`} /><Badge status={enabledRules ? "warning" : "default"} text={`${enabledRules} 条命令规则已启用`} /></Space></Card>

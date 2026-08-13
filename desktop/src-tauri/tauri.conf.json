@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "DefenseClaw Desktop",
+  "productName": "TraceBastion Desktop",
   "version": "0.1.0",
   "identifier": "dev.defenseclaw.desktop",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "DefenseClaw Desktop",
+        "title": "TraceBastion Desktop",
         "width": 1440,
         "height": 900,
         "minWidth": 1080,
@@ -32,7 +32,7 @@
     "resources": ["resources/*"],
     "category": "DeveloperTool",
     "shortDescription": "AI Agent security defense and range control plane",
-    "longDescription": "DefenseClaw Desktop monitors local AI Agents, controls security policy, and orchestrates the AgentRange environment.",
+    "longDescription": "TraceBastion Desktop monitors local AI Agents, enforces security policy, records runtime traces, and orchestrates the AgentRange environment.",
     "windows": {
       "nsis": {
         "installMode": "perMachine",

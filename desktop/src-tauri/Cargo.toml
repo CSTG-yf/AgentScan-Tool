@@ -1,8 +1,8 @@
 [package]
 name = "defenseclaw-desktop"
 version = "0.1.0"
-description = "DefenseClaw Windows security control plane"
-authors = ["DefenseClaw contributors"]
+description = "TraceBastion Windows AI Agent security control plane"
+authors = ["TraceBastion contributors"]
 edition = "2021"
 rust-version = "1.77.2"
 default-run = "defenseclaw-desktop"
@@ -20,6 +20,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
 windows-service = "0.8.1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+quick-xml = "0.37"
 
 [target.'cfg(windows)'.dependencies]
 wmi = "0.18.4"

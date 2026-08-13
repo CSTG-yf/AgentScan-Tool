@@ -9,11 +9,11 @@ $ErrorActionPreference = "Stop"
 $desktopRoot = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $desktopRoot
 if (-not $InstallerPath) {
-    $InstallerPath = Join-Path $repoRoot "dist\DefenseClaw-Desktop-Setup-x64.exe"
+    $InstallerPath = Join-Path $repoRoot "dist\TraceBastion-Desktop-Setup-x64.exe"
 }
 $InstallerPath = (Resolve-Path -LiteralPath $InstallerPath).Path
 if (-not $InstallDir) {
-    $InstallDir = Join-Path $env:ProgramFiles "DefenseClaw Desktop"
+    $InstallDir = Join-Path $env:ProgramFiles "TraceBastion Desktop"
 }
 if (-not [IO.Path]::IsPathRooted($InstallDir)) {
     throw "InstallDir must be an absolute Windows path."
@@ -27,7 +27,7 @@ $installDir = $InstallDir
 $installedExe = Join-Path $installDir "defenseclaw-desktop.exe"
 $gatewayExe = Join-Path $installDir "resources\defenseclaw-gateway.exe"
 $uninstaller = Join-Path $installDir "uninstall.exe"
-$uninstallKey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\DefenseClaw Desktop"
+$uninstallKey = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\TraceBastion Desktop"
 $systemRoot = Join-Path $env:ProgramData "DefenseClaw"
 $policyPath = Join-Path $systemRoot "process-guard.json"
 $auditPath = Join-Path $systemRoot "audit\process-guard.jsonl"
@@ -43,7 +43,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     throw "Run the installer acceptance test from an elevated PowerShell session."
 }
 if ((Test-Path -LiteralPath $installDir) -or (Test-Path -LiteralPath $uninstallKey)) {
-    throw "A pre-existing DefenseClaw Desktop installation was found; refusing to modify it."
+    throw "A pre-existing TraceBastion Desktop installation was found; refusing to modify it."
 }
 sc.exe query DefenseClawProcessGuard *> $null
 if ($LASTEXITCODE -eq 0) {
@@ -54,7 +54,7 @@ function Wait-StableInstall([Diagnostics.Process]$SetupProcess) {
     for ($attempt = 0; $attempt -lt 240; $attempt++) {
         $setupRunning = (-not $SetupProcess.HasExited) -or [bool](
             Get-Process -ErrorAction SilentlyContinue |
-                Where-Object { $_.ProcessName -like "*DefenseClaw*setup*" }
+                Where-Object { $_.ProcessName -like "*TraceBastion*setup*" }
         )
         $filesReady = (Test-Path -LiteralPath $installedExe) -and
             (Test-Path -LiteralPath $gatewayExe) -and

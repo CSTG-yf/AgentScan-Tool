@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use serde::Serialize;
 
-use crate::models::{GuardPolicy, GuardRule};
+use crate::models::{FileBlacklistRule, GuardPolicy, GuardRule};
 use crate::windows_process::{self, ProcessInfo};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(150);
@@ -85,6 +85,30 @@ fn find_agent_ancestor<'a>(
         pid = process.ppid;
     }
     None
+}
+
+pub fn attributed_process(
+    actor_pid: u32,
+    agent_names: &[String],
+) -> Result<Option<(ProcessInfo, ProcessInfo)>, String> {
+    let current = windows_process::snapshot()?;
+    let Some(actor) = current.iter().find(|process| process.pid == actor_pid) else {
+        return Ok(None);
+    };
+    if agent_names
+        .iter()
+        .any(|name| executable_matches(&actor.name, name))
+    {
+        return Ok(Some((actor.clone(), actor.clone())));
+    }
+    let by_pid = current
+        .iter()
+        .map(|process| (process.pid, process))
+        .collect::<HashMap<_, _>>();
+    Ok(
+        find_agent_ancestor(actor, &by_pid, agent_names)
+            .map(|agent| (actor.clone(), agent.clone())),
+    )
 }
 
 fn evaluate(
@@ -203,7 +227,7 @@ fn depth_from_root(
     None
 }
 
-fn terminate_agent_tree(agent: &ProcessInfo) -> Result<String, String> {
+pub(crate) fn terminate_agent_tree(agent: &ProcessInfo) -> Result<String, String> {
     let snapshot = windows_process::snapshot()?;
     let current_root = snapshot
         .iter()
@@ -239,16 +263,50 @@ fn terminate_agent_tree(agent: &ProcessInfo) -> Result<String, String> {
     }
 }
 
-pub fn load_and_validate_policy(path: &Path) -> Result<GuardPolicy, String> {
-    let raw = fs::read_to_string(path)
-        .map_err(|error| format!("read policy {}: {error}", path.display()))?;
-    let policy: GuardPolicy = serde_json::from_str(&raw)
-        .map_err(|error| format!("parse policy {}: {error}", path.display()))?;
-    if policy.version != 1
+fn valid_windows_path(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.len() < 3 || trimmed.contains(['\0', '*', '?', '"']) {
+        return false;
+    }
+    let bytes = trimmed.as_bytes();
+    let drive_absolute = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    let unc_absolute = trimmed.starts_with(r"\\") && trimmed[2..].contains(['\\', '/']);
+    if !drive_absolute && !unc_absolute {
+        return false;
+    }
+    let without_trailing = trimmed.trim_end_matches(['\\', '/']);
+    without_trailing.len() > 2
+        && !matches!(
+            without_trailing.to_ascii_lowercase().as_str(),
+            r"c:\windows" | r"c:\program files" | r"c:\program files (x86)" | r"c:\users"
+        )
+}
+
+fn validate_file_rule(rule: &FileBlacklistRule) -> bool {
+    !rule.id.trim().is_empty()
+        && valid_windows_path(&rule.path)
+        && matches!(rule.match_kind.as_str(), "exact" | "subtree")
+        && !rule.access.is_empty()
+        && rule.access.iter().all(|access| {
+            matches!(
+                access.as_str(),
+                "read" | "write" | "create" | "delete" | "any"
+            )
+        })
+        && rule.action == "terminateAgentTree"
+}
+
+pub fn validate_policy(policy: &GuardPolicy) -> Result<(), String> {
+    if !matches!(policy.version, 1 | 2)
         || !matches!(policy.mode.as_str(), "observe" | "enforce")
         || policy.termination.grace_period_ms > 30_000
         || !policy.termination.verify_process_identity
         || policy.termination.protected_process_behavior != "auditOnly"
+        || !(1..=3650).contains(&policy.trace.retention_days)
+        || !(16..=10_240).contains(&policy.trace.max_database_mb)
     {
         return Err("unsupported or invalid process guard policy".to_owned());
     }
@@ -266,7 +324,37 @@ pub fn load_and_validate_policy(path: &Path) -> Result<GuardPolicy, String> {
     {
         return Err("process guard policy contains an invalid executable or action".to_owned());
     }
-    Ok(policy)
+    if policy.file_guard.audit_roots.len() > 64
+        || policy.file_guard.blacklist.len() > 256
+        || !policy
+            .file_guard
+            .audit_roots
+            .iter()
+            .all(|path| valid_windows_path(path))
+        || !policy.file_guard.blacklist.iter().all(validate_file_rule)
+    {
+        return Err("file guard policy contains an unsafe path, access type, or action".to_owned());
+    }
+    let mut ids = HashSet::new();
+    if !policy
+        .rules
+        .iter()
+        .map(|rule| &rule.id)
+        .chain(policy.file_guard.blacklist.iter().map(|rule| &rule.id))
+        .all(|id| ids.insert(id.to_ascii_lowercase()))
+    {
+        return Err("guard policy rule identifiers must be unique".to_owned());
+    }
+    Ok(())
+}
+
+pub fn load_and_validate_policy(path: &Path) -> Result<GuardPolicy, String> {
+    let raw = fs::read_to_string(path)
+        .map_err(|error| format!("read policy {}: {error}", path.display()))?;
+    let policy: GuardPolicy = serde_json::from_str(&raw)
+        .map_err(|error| format!("parse policy {}: {error}", path.display()))?;
+    validate_policy(&policy)?;
+    Ok(policy.normalize())
 }
 
 fn audit_match(
@@ -381,9 +469,6 @@ pub fn handle_process_start(
     child_name: String,
 ) -> Result<bool, String> {
     let policy = load_and_validate_policy(policy_path)?;
-    if !policy.enabled {
-        return Ok(false);
-    }
     let current = windows_process::snapshot()?;
     let child = ProcessInfo {
         pid: child_pid,
@@ -393,6 +478,45 @@ pub fn handle_process_start(
         started_at: None,
         uptime_sec: 0,
     };
+    if policy.trace.enabled && policy.trace.capture_processes {
+        let by_pid = current
+            .iter()
+            .map(|process| (process.pid, process))
+            .collect::<HashMap<_, _>>();
+        let child_is_agent = policy
+            .agent_names
+            .iter()
+            .any(|name| executable_matches(&child.name, name));
+        let agent = if child_is_agent {
+            Some(&child)
+        } else {
+            find_agent_ancestor(&child, &by_pid, &policy.agent_names)
+        };
+        if let Some(agent) = agent {
+            let _ = crate::trace_store::append(
+                &crate::trace_store::default_database_path(),
+                &crate::trace_store::NewTraceEvent {
+                    event_type: if child_is_agent {
+                        "agentProcessStart"
+                    } else {
+                        "agentCommandStart"
+                    },
+                    source: "wmi-process-start",
+                    agent_pid: agent.pid,
+                    agent_executable: &agent.name,
+                    actor_pid: child.pid,
+                    actor_executable: &child.name,
+                    path: None,
+                    action: None,
+                    outcome: "observed",
+                    detail: "Windows process-create event attributed to an Agent tree",
+                },
+            );
+        }
+    }
+    if !policy.enabled {
+        return Ok(false);
+    }
     let Some(matched) = evaluate_start(&child, &current, &policy) else {
         return Ok(false);
     };
@@ -431,10 +555,10 @@ pub fn handle_process_start(
 mod tests {
     use std::collections::HashSet;
 
-    use crate::models::{GuardPolicy, GuardRule, TerminationPolicy};
+    use crate::models::{FileGuardPolicy, GuardPolicy, GuardRule, TerminationPolicy, TracePolicy};
     use crate::windows_process::ProcessInfo;
 
-    use super::{canonical_executable, evaluate, evaluate_start};
+    use super::{canonical_executable, evaluate, evaluate_start, validate_policy};
 
     fn process(pid: u32, ppid: u32, name: &str) -> ProcessInfo {
         ProcessInfo {
@@ -449,7 +573,7 @@ mod tests {
 
     fn policy() -> GuardPolicy {
         GuardPolicy {
-            version: 1,
+            version: 2,
             enabled: true,
             mode: "enforce".to_owned(),
             agent_names: vec!["codex.exe".to_owned()],
@@ -460,6 +584,8 @@ mod tests {
                 action: "terminateAgentTree".to_owned(),
                 description: String::new(),
             }],
+            file_guard: FileGuardPolicy::default(),
+            trace: TracePolicy::default(),
             termination: TerminationPolicy {
                 grace_period_ms: 0,
                 verify_process_identity: true,
@@ -507,5 +633,27 @@ mod tests {
         let matched = evaluate_start(&child_event, &current, &policy()).expect("event match");
         assert_eq!(matched.agent.pid, 10);
         assert_eq!(matched.child.pid, 12);
+    }
+
+    #[test]
+    fn version_one_policy_deserializes_with_safe_file_defaults() {
+        let raw = r#"{
+          "version":1,"enabled":false,"mode":"observe","agentNames":["codex.exe"],
+          "rules":[],"termination":{"gracePeriodMs":0,"verifyProcessIdentity":true,
+          "protectedProcessBehavior":"auditOnly"}}
+        "#;
+        let old: GuardPolicy = serde_json::from_str(raw).expect("v1 policy");
+        assert!(!old.file_guard.enabled);
+        assert!(old.file_guard.blacklist.is_empty());
+        assert!(old.trace.enabled);
+        assert!(validate_policy(&old).is_ok());
+        assert_eq!(old.normalize().version, 2);
+    }
+
+    #[test]
+    fn rejects_broad_system_audit_roots() {
+        let mut invalid = policy();
+        invalid.file_guard.audit_roots = vec![r"C:\Users".to_owned()];
+        assert!(validate_policy(&invalid).is_err());
     }
 }

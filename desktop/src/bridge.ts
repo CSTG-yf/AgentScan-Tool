@@ -1,12 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentSnapshot, EnvironmentSnapshot, GuardAuditSnapshot, GuardPolicy, RangeStatus } from "./types";
+import type { AgentRuntimeCatalog, AgentSnapshot, AgentTraceSnapshot, EnvironmentSnapshot, GuardAuditSnapshot, GuardPolicy, RangeStatus } from "./types";
 
 const inTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
 const browserEnvironment = (): EnvironmentSnapshot => ({
   capturedAt: new Date().toISOString(),
   components: [
-    { id: "gateway", label: "DefenseClaw Gateway", state: "unknown", detail: "桌面宿主未连接" },
+    { id: "gateway", label: "TraceBastion Gateway", state: "unknown", detail: "桌面宿主未连接" },
     { id: "docker", label: "Docker Desktop", state: "unknown", detail: "桌面宿主未连接" },
     { id: "agentrange", label: "AgentRange 靶场", state: "unknown", detail: "桌面宿主未连接" },
     { id: "processGuard", label: "Windows 进程守护", state: "unknown", detail: "桌面宿主未连接", requiresElevation: true },
@@ -24,18 +24,32 @@ export async function getAgentProcesses(): Promise<AgentSnapshot> {
   return invoke<AgentSnapshot>("get_agent_processes");
 }
 
+export async function getAgentRuntimeCatalog(): Promise<AgentRuntimeCatalog> {
+  if (!inTauri()) throw new Error("Agent runtime catalog is available from the desktop host only");
+  return invoke<AgentRuntimeCatalog>("get_agent_runtime_catalog");
+}
+
 export async function getGuardPolicy(): Promise<GuardPolicy> {
   if (!inTauri()) {
     return {
-      version: 1,
+      version: 2,
       enabled: false,
       mode: "observe",
       agentNames: [],
       rules: [],
+      fileGuard: { enabled: false, auditRoots: [], blacklist: [] },
+      trace: { enabled: true, captureProcesses: true, captureFileReads: true, captureFileWrites: true, captureFileCreates: true, captureFileDeletes: true, retentionDays: 30, maxDatabaseMb: 256 },
       termination: { gracePeriodMs: 1500, verifyProcessIdentity: true, protectedProcessBehavior: "auditOnly" },
     };
   }
   return invoke<GuardPolicy>("get_guard_policy");
+}
+
+export async function getAgentTrace(limit = 300): Promise<AgentTraceSnapshot> {
+  if (!inTauri()) {
+    return { capturedAt: new Date().toISOString(), databasePath: "本机受保护存储", events: [], warning: "浏览器预览模式不读取本机 Trace 库" };
+  }
+  return invoke<AgentTraceSnapshot>("get_agent_trace", { limit });
 }
 
 export async function saveGuardPolicy(policy: GuardPolicy): Promise<GuardPolicy> {
@@ -60,7 +74,7 @@ export async function uninstallProcessGuard(): Promise<void> {
 
 export async function getProcessGuardAudit(limit = 200): Promise<GuardAuditSnapshot> {
   if (!inTauri()) {
-    return { capturedAt: new Date().toISOString(), path: "C:\\ProgramData\\DefenseClaw\\audit\\process-guard.jsonl", events: [], warning: "浏览器预览模式不读取本机审计文件" };
+    return { capturedAt: new Date().toISOString(), path: "本机受保护存储", events: [], warning: "浏览器预览模式不读取本机审计文件" };
   }
   return invoke<GuardAuditSnapshot>("get_process_guard_audit", { limit });
 }

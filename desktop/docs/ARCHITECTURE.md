@@ -59,8 +59,8 @@ and consent controls and is therefore not silently enabled.
 
 The repeatable release pipeline must eventually produce:
 
-- `DefenseClaw-Desktop-Setup-x64.exe`
-- a signed `DefenseClaw Desktop.exe`
+- `TraceBastion-Desktop-Setup-x64.exe`
+- a signed `TraceBastion Desktop.exe`
 - a signed Go gateway sidecar
 - the elevated process guard service
 - an offline WebView2 bootstrap strategy

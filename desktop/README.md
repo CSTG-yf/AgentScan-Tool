@@ -1,7 +1,7 @@
-# DefenseClaw Desktop
+# TraceBastion Desktop
 
-DefenseClaw Desktop is the Windows control plane for the existing DefenseClaw
-gateway, AI discovery, policy engine, evidence store, and AgentRange runtime.
+TraceBastion Desktop is the Windows control plane for the existing gateway,
+AI discovery, policy engine, evidence store, and AgentRange runtime.
 The desktop shell does not replace those components: it packages and
 orchestrates them behind one signed application entry point.
 
@@ -9,12 +9,14 @@ orchestrates them behind one signed application entry point.
 
 - **UI:** React + TypeScript + Ant Design, bundled by Vite.
 - **Desktop host:** Tauri 2/Rust. Only typed commands are exposed to the webview.
-- **Gateway:** the existing Go `defenseclaw-gateway` process.
+- **Gateway:** the existing Go gateway process (its internal executable name is
+  retained for upgrade compatibility).
 - **Range:** the existing Docker Compose AgentRange checkout and adapter.
 - **Process guard:** a separate LocalSystem Windows service. The UI itself
   remains unelevated; fixed UAC entry points install/remove the service and
-  apply validated policy to `%ProgramData%\DefenseClaw`. The service reloads
-  that policy and writes append-only JSONL audit evidence there.
+  apply validated policy to a protected machine-wide data directory. The
+  service reloads that policy and writes append-only JSONL audit evidence
+  there.
 
 There are two command-control paths:
 
@@ -27,6 +29,43 @@ There are two command-control paths:
 
 The process guard is opt-in and starts in `observe` mode. Switching to `enforce`
 requires elevation and explicit operator confirmation.
+
+## Agent file blacklist and activity Trace
+
+Policy v2 adds absolute monitoring roots under `fileGuard.auditRoots` and
+sensitive file or directory rules under `fileGuard.blacklist`. Applying the
+policy with elevation enables successful Windows File System auditing and adds
+a success-audit SACL to each configured path. The LocalSystem service consumes
+Security events 4663 (an access right was actually used) and 4660 (deletion),
+then attributes the PID to a known Agent process tree.
+
+On a blacklist match the service writes SQLite Trace and JSONL evidence first,
+then verifies PID identity and terminates the Agent tree in `enforce` mode.
+`observe` mode records the same signal without terminating. Trace is stored in
+the protected machine-wide data directory; it includes Agent launches, child
+commands, file reads, writes, creates, deletes, and blacklist outcomes.
+Default retention is 30 days with a 256 MB database cap. Operators configure
+the feature in Policy Center and query it from the Activity Trace page.
+
+Windows object access auditing reports after access occurred. It can stop
+subsequent Agent activity immediately, but it cannot undo the first read. A
+signed Windows file-system Minifilter is required for guaranteed pre-access
+denial. Directory-change APIs are not used to infer reads because they do not
+reliably identify the process that accessed a file.
+
+## Agent runtime knowledge base
+
+The structured catalog at `knowledge/agent-runtime-catalog.json` records common
+Agent launch commands, dedicated Windows process image names, related host
+processes, and frequently spawned command processes with risk metadata. The
+desktop host uses it as the source of truth for local Agent process identity and
+exposes it through the read-only `get_agent_runtime_catalog` command.
+
+Generic hosts such as `node.exe`, `python.exe`, `code.exe`, `wsl.exe`, and
+`docker.exe` are context hints only and are never treated as Agent roots by
+basename. The contract is
+`contracts/agent-runtime-catalog.schema.json`; maintenance and source rules are
+documented in `knowledge/README.md`.
 
 ## Local development
 
@@ -65,7 +104,7 @@ local shell-only experiment, `-AllowMissingGateway` may reuse an existing
 development gateway resource.
 
 The interactive NSIS installer includes a **Choose Install Location** page and
-defaults to `%ProgramFiles%\DefenseClaw Desktop`. Browse to any suitable local
+defaults to `%ProgramFiles%\TraceBastion Desktop`. Browse to any suitable local
 destination before selecting **Install**. Because the process guard is a
 LocalSystem service, installation remains machine-wide and requires elevation.
 
@@ -73,7 +112,7 @@ For unattended deployment, pass an absolute destination with NSIS `/D`. `/D`
 must be the final argument, including when the path contains spaces:
 
 ```powershell
-& ".\dist\DefenseClaw-Desktop-Setup-x64.exe" /S /D=D:\Security Tools\DefenseClaw
+& ".\dist\TraceBastion-Desktop-Setup-x64.exe" /S /D=D:\Security Tools\TraceBastion
 ```
 
 An upgrade retains the destination recorded by the previous installation.
@@ -90,16 +129,33 @@ The test builds a dedicated fixture Agent, applies a temporary `cmd.exe`
 blacklist rule, verifies that the LocalSystem service terminates the fixture
 tree, and restores the previous machine policy and service state in `finally`.
 
+The file guard has a separate end-to-end acceptance test. It backs up and
+restores the machine audit policy, applies a temporary SACL and blacklist,
+starts a fixture Agent that reads the sensitive file, verifies termination and
+evidence, and removes the temporary service and files:
+
+```powershell
+.\scripts\test-file-guard.ps1
+```
+
 To validate the packaged NSIS installer, bundled gateway, Windows service, and
 stable uninstall cleanup from an elevated PowerShell session, run:
 
 ```powershell
-.\scripts\test-installer.ps1 -InstallDir "D:\DefenseClaw-Installer-Test"
+.\scripts\test-installer.ps1 -InstallDir "D:\TraceBastion-Installer-Test"
 ```
 
 The acceptance test verifies that the selected destination is recorded in the
 Windows uninstall registry entry, exercises the bundled gateway and process
 guard service from that directory, and confirms uninstall removes it cleanly.
+
+## Upgrade compatibility
+
+The Windows service key, application identifier, internal executable names,
+and existing machine data directory retain their legacy values. Keeping these
+non-user-facing identifiers stable lets an installed version upgrade without
+creating a second service, losing policy, or orphaning evidence. Product UI,
+window titles, installer display names, and documentation use TraceBastion.
 
 ## Contracts
 

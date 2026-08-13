@@ -70,13 +70,17 @@ try {
     }
 
     $bundleDir = Join-Path $desktopRoot "src-tauri\target\release\bundle\nsis"
-    $installer = Get-ChildItem -LiteralPath $bundleDir -Filter "*.exe" -File | Select-Object -First 1
+    # A product rename can leave an older installer beside the new bundle.
+    # Select the current product explicitly instead of copying an arbitrary EXE.
+    $installer = Get-ChildItem -LiteralPath $bundleDir -Filter "TraceBastion Desktop_*-setup.exe" -File |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
     if (-not $installer) {
         throw "Tauri completed but no NSIS installer was found under $bundleDir"
     }
     $artifactDir = Join-Path $repoRoot "dist"
     New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
-    $releaseInstaller = Join-Path $artifactDir "DefenseClaw-Desktop-Setup-x64.exe"
+    $releaseInstaller = Join-Path $artifactDir "TraceBastion-Desktop-Setup-x64.exe"
     Copy-Item -LiteralPath $installer.FullName -Destination $releaseInstaller -Force
     Write-Host "Installer: $releaseInstaller"
 } finally {

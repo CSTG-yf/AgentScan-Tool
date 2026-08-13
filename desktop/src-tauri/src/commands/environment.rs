@@ -52,7 +52,7 @@ pub fn get_environment_snapshot() -> EnvironmentSnapshot {
         components: vec![
             EnvironmentComponent {
                 id: "gateway",
-                label: "DefenseClaw Gateway",
+                label: "TraceBastion Gateway",
                 state: if gateway_ready { "ready" } else { "stopped" },
                 detail: if gateway_ready {
                     "本机 127.0.0.1:18970 可连接"

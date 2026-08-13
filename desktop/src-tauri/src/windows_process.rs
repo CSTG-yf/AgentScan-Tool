@@ -87,6 +87,7 @@ mod platform {
         fn CloseHandle(handle: Handle) -> i32;
         fn GetCurrentProcess() -> Handle;
         fn GetLastError() -> u32;
+        fn SetLastError(code: u32);
     }
 
     #[link(name = "advapi32")]
@@ -159,7 +160,7 @@ mod platform {
     /// Enables SeDebugPrivilege in the current process token. Administrator or
     /// LocalSystem context is still required; this only activates a privilege
     /// already granted to the token.
-    pub fn enable_debug_privilege() -> Result<(), String> {
+    fn enable_privilege(name: &str) -> Result<(), String> {
         let mut raw_token = std::ptr::null_mut();
         // SAFETY: GetCurrentProcess returns a valid pseudo handle and raw_token
         // points to writable storage for the returned token handle.
@@ -177,7 +178,7 @@ mod platform {
         }
         let token = OwnedHandle(raw_token);
 
-        let privilege_name = "SeDebugPrivilege"
+        let privilege_name = name
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>();
@@ -189,7 +190,7 @@ mod platform {
             // SAFETY: GetLastError has no preconditions.
             let code = unsafe { GetLastError() };
             return Err(format!(
-                "LookupPrivilegeValueW(SeDebugPrivilege) failed with Windows error {code}"
+                "LookupPrivilegeValueW({name}) failed with Windows error {code}"
             ));
         }
 
@@ -202,6 +203,7 @@ mod platform {
         };
         // SAFETY: token is valid and state has the documented single-entry
         // TOKEN_PRIVILEGES layout. Previous-state output is not requested.
+        unsafe { SetLastError(0) };
         let adjusted = unsafe {
             AdjustTokenPrivileges(
                 token.0,
@@ -218,13 +220,21 @@ mod platform {
         let code = unsafe { GetLastError() };
         if adjusted == 0 {
             return Err(format!(
-                "AdjustTokenPrivileges(SeDebugPrivilege) failed with Windows error {code}"
+                "AdjustTokenPrivileges({name}) failed with Windows error {code}"
             ));
         }
         if code == ERROR_NOT_ALL_ASSIGNED {
-            return Err("SeDebugPrivilege is not assigned to the current token".to_owned());
+            return Err(format!("{name} is not assigned to the current token"));
         }
         Ok(())
+    }
+
+    pub fn enable_debug_privilege() -> Result<(), String> {
+        enable_privilege("SeDebugPrivilege")
+    }
+
+    pub fn enable_security_privilege() -> Result<(), String> {
+        enable_privilege("SeSecurityPrivilege")
     }
 
     pub fn snapshot() -> Result<Vec<ProcessInfo>, String> {
@@ -312,6 +322,12 @@ mod platform {
     pub fn enable_debug_privilege() -> Result<(), String> {
         Err("SeDebugPrivilege is available only on Windows".to_owned())
     }
+
+    pub fn enable_security_privilege() -> Result<(), String> {
+        Err("SeSecurityPrivilege is available only on Windows".to_owned())
+    }
 }
 
-pub use platform::{enable_debug_privilege, snapshot, terminate_verified};
+pub use platform::{
+    enable_debug_privilege, enable_security_privilege, snapshot, terminate_verified,
+};

@@ -1,35 +1,22 @@
 {
-  "version": 1,
+  "version": 2,
   "enabled": false,
   "mode": "observe",
-  "agentNames": [
-    "codex.exe",
-    "claude.exe",
-    "cursor.exe",
-    "cursor-agent.exe",
-    "windsurf.exe",
-    "codeium.exe",
-    "language_server_windows_x64.exe",
-    "aider.exe",
-    "opencode.exe",
-    "openhands.exe",
-    "goose.exe",
-    "cline.exe"
-  ],
+  "agentNames": [],
   "rules": [
     {
       "id": "command.grep",
       "enabled": false,
       "executable": "grep.exe",
       "action": "terminateAgentTree",
-      "description": "Agent 创建 grep.exe 时记录并终止所属 Agent 进程树。"
+      "description": "示例规则：记录 grep.exe；仅在显式启用强制模式后终止所属 Agent 进程树。"
     },
     {
       "id": "command.curl",
       "enabled": false,
       "executable": "curl.exe",
       "action": "audit",
-      "description": "观察 Agent 发起的 curl 子进程，不执行终止。"
+      "description": "观察 Agent 启动的 curl.exe 子进程，不执行终止。"
     },
     {
       "id": "command.powershell",
@@ -39,6 +26,21 @@
       "description": "观察传统 Windows PowerShell 子进程。"
     }
   ],
+  "fileGuard": {
+    "enabled": false,
+    "auditRoots": [],
+    "blacklist": []
+  },
+  "trace": {
+    "enabled": true,
+    "captureProcesses": true,
+    "captureFileReads": true,
+    "captureFileWrites": true,
+    "captureFileCreates": true,
+    "captureFileDeletes": true,
+    "retentionDays": 30,
+    "maxDatabaseMb": 256
+  },
   "termination": {
     "gracePeriodMs": 1500,
     "verifyProcessIdentity": true,

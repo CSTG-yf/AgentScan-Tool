@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://defenseclaw.dev/schemas/desktop/agent-runtime-catalog-v1.json",
+  "title": "DefenseClaw Agent runtime knowledge catalog",
+  "type": "object",
+  "required": ["version", "updatedAt", "sources", "agents", "commands"],
+  "properties": {
+    "version": { "const": 1 },
+    "updatedAt": { "type": "string", "format": "date" },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "url"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "title": { "type": "string", "minLength": 1 },
+          "url": { "type": "string", "format": "uri" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "product", "vendor", "kind", "launchCommands", "windowsProcessNames", "relatedProcessNames", "guardRootEligible", "confidence", "sourceRefs"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "product": { "type": "string", "minLength": 1 },
+          "vendor": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["terminal-agent", "editor-agent", "desktop-agent", "agent-platform"] },
+          "launchCommands": { "$ref": "#/$defs/stringSet" },
+          "windowsProcessNames": { "$ref": "#/$defs/processSet" },
+          "relatedProcessNames": { "$ref": "#/$defs/processSet" },
+          "guardRootEligible": { "type": "boolean" },
+          "confidence": { "enum": ["high", "medium", "low"] },
+          "notes": { "type": "string" },
+          "sourceRefs": { "$ref": "#/$defs/stringSet" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "commandNames", "windowsProcessNames", "processVisibility", "riskLevel", "recommendedAction", "commonUses"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "category": { "enum": ["shell", "search", "version-control", "network", "runtime", "package-manager", "build", "container-cloud", "filesystem", "system-control"] },
+          "commandNames": { "$ref": "#/$defs/stringSet" },
+          "windowsProcessNames": { "$ref": "#/$defs/processSet" },
+          "processVisibility": { "enum": ["exact-image", "host-process", "mixed"] },
+          "riskLevel": { "enum": ["low", "medium", "high", "critical"] },
+          "recommendedAction": { "enum": ["observe", "review", "restrict"] },
+          "commonUses": { "$ref": "#/$defs/stringSet" },
+          "notes": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$" },
+    "stringSet": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "processSet": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9._+-]+(?:\\.exe)?$" },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}

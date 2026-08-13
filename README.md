@@ -1,18 +1,10 @@
 <div align="center">
 
-<pre>
-     ____         ____                       ____  _
-    / __ \  ___  / __/___   ___   ___  ___  / ___|| | __ _ __      __
-   / / / / / _ \/ /_// _ \ / _ \ / __|/ _ \| |    | |/ _` |\ \ /\ / /
-  / /_/ / /  __/ __//  __/| | | |\__ \  __/| |___ | | (_| | \ V  V /
- /_____/  \___/_/   \___/ |_| |_||___/\___| \____||_|\__,_|  \_/\_/
-</pre>
-
-<h1>DefenseClaw</h1>
+<h1>TraceBastion</h1>
 
 <p>
-  <strong>Security governance for OpenClaw and agentic AI runtimes.</strong><br />
-  Scan capabilities before use, inspect runtime traffic, and export durable audit evidence.
+  <strong>Runtime protection and traceability for local AI Agents.</strong><br />
+  Discover Agent processes, enforce command and file policy, and retain durable audit evidence.
 </p>
 
 <p>
@@ -34,7 +26,10 @@
 |--------|---------|-------|
 | Skills, MCP servers, plugins, and generated code before they run | Prompts, completions, tool calls, and sandbox activity at runtime | SQLite audit history, JSONL, OTLP, Splunk, webhooks, and TUI views |
 
-DefenseClaw combines a Python operator CLI, a Go gateway sidecar, and an OpenClaw TypeScript plugin. Together they enforce a simple operating rule: untrusted agent capabilities are scanned, governed, logged, and blocked when policy says they are unsafe.
+TraceBastion combines a Windows desktop control plane, a Python operator CLI,
+a Go gateway sidecar, and an OpenClaw TypeScript plugin. Together they enforce
+a simple operating rule: untrusted Agent capabilities are discovered, scanned,
+governed, traced, and blocked when policy says they are unsafe.
 
 ## Highlights
 
@@ -45,14 +40,30 @@ DefenseClaw combines a Python operator CLI, a Go gateway sidecar, and an OpenCla
 - **Registries** - ingest external skill / MCP catalogs (corporate HTTPS YAML, [smithery.ai](https://smithery.ai/), [skills.sh](https://skills.sh/), git, ClawHub) with SSRF guards, scanner-driven verdicts, and auto-promotion into asset policy. See [docs/REGISTRIES.md](docs/REGISTRIES.md).
 - **Audit and observability** - SQLite audit store, JSONL gateway logs, OTLP export, Splunk HEC, webhooks, Splunk Observability and local Grafana/Splunk bundles.
 - **Operator UX** - a CLI and TUI for setup, health checks, alerts, block/allow lists, scanner results, and policy workflows.
+- **Windows Agent process guard** - discover known Agent processes, monitor their child commands, and terminate configured process trees through a LocalSystem service.
+- **File policy and activity Trace** - audit configured Windows paths, enforce a sensitive-file blacklist, and query process/file activity from a retained SQLite Trace store.
+
+## TraceBastion Desktop
+
+The Windows desktop application provides the primary local security console.
+It includes Agent discovery, the runtime knowledge catalog, command and file
+blacklists, Activity Trace, evidence review, AgentRange controls, and an NSIS
+installer with a selectable destination directory.
+
+See [desktop/README.md](desktop/README.md) for architecture, prerequisites,
+build instructions, policy behavior, acceptance tests, and upgrade details.
+The existing `defenseclaw` command names, gateway executable, Windows service
+key, application identifier, and machine data directory remain unchanged as
+internal compatibility identifiers so existing installations can upgrade
+without losing policy or evidence.
 
 ---
 
-## AgentRange DefenseClaw 集成与评测升级
+## AgentRange 集成与评测升级
 
-本项目保留 `task/AgentRange-player` 作为未侵入的原始靶场目录；DefenseClaw 适配、
+本项目保留 `task/AgentRange-player` 作为未侵入的原始靶场目录；TraceBastion 适配、
 运行时证据、静态资产合同、攻击链、benchmark、最终报告和 dashboard 均放在目标项目侧。
-这样可以吸收升级版项目的验证与展示能力，同时避免把靶场源码改动误当成 DefenseClaw 升级。
+这样可以吸收升级版项目的验证与展示能力，同时避免把靶场源码改动误当成 TraceBastion 升级。
 
 ### 升级范围
 
@@ -72,7 +83,7 @@ DefenseClaw combines a Python operator CLI, a Go gateway sidecar, and an OpenCla
 
 | 文档 | 用途 |
 |---|---|
-| [DefenseClaw AgentRange 改造计划书](task/DefenseClaw_AgentRange靶场改造实施计划书_v1.0.md) | 需求、接口、架构、任务分配、验收与风险基线 |
+| [AgentRange 改造计划书（历史文档）](task/DefenseClaw_AgentRange靶场改造实施计划书_v1.0.md) | 需求、接口、架构、任务分配、验收与风险基线 |
 | [非侵入 AgentRange 适配说明](task/agentrange-adapter/README.md) | 项目侧 Compose overlay、sidecar 代理和启动方式 |
 | [AgentRange contracts](integration/agentrange_contracts/README.md) | 资产、场景、事件、决策和攻击链数据合同 |
 | [需求追踪矩阵](integration/requirements.yaml) | FR/NFR 实现点和证据文件 |
@@ -97,7 +108,7 @@ defenseclaw agentrange adapt `
   --force
 ```
 
-启动 DefenseClaw Gateway 后，用原始靶场 Compose 加项目侧 overlay 启动 AgentRange：
+启动 TraceBastion Gateway 后，用原始靶场 Compose 加项目侧 overlay 启动 AgentRange：
 
 ```powershell
 defenseclaw init --enable-guardrail
@@ -111,7 +122,7 @@ docker compose `
   up -d --build
 ```
 
-切换 observe/action 模式时，仍由 DefenseClaw Gateway 的 guardrail 配置决定：
+切换 observe/action 模式时，仍由 TraceBastion Gateway 的 guardrail 配置决定：
 
 ```powershell
 defenseclaw setup guardrail --mode observe --scanner-mode local --non-interactive --restart
@@ -153,9 +164,9 @@ docker compose `
 
 ## Scope and Limitations
 
-DefenseClaw is an enforcement and evidence layer for agentic AI deployments. It improves safety by combining scanner results, runtime inspection, policy decisions, sandbox controls, and audit trails, but it does not prove that an agent, skill, plugin, or model interaction is risk-free.
+TraceBastion is an enforcement and evidence layer for agentic AI deployments. It improves safety by combining scanner results, runtime inspection, policy decisions, sandbox controls, and audit trails, but it does not prove that an agent, skill, plugin, or model interaction is risk-free.
 
-High-risk deployments should pair DefenseClaw with human review, least-privilege credentials, sandboxing, CI gates, and production monitoring. In observe mode, findings are logged without blocking. In action mode, configured HIGH and CRITICAL findings can block prompts, tool calls, or component admission.
+High-risk deployments should pair TraceBastion with human review, least-privilege credentials, sandboxing, CI gates, and production monitoring. In observe mode, findings are logged without blocking. In action mode, configured HIGH and CRITICAL findings can block prompts, tool calls, or component admission.
 
 ---
 
@@ -269,7 +280,7 @@ See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the full walkthrough.
 The gateway exposes local REST APIs for the CLI and plugin, connects to OpenClaw over WebSocket, inspects LLM traffic through a local proxy, and records decisions in a durable audit store.
 
 ```text
-Agent runtime -> OpenClaw plugin -> DefenseClaw gateway -> policy + scanners + audit
+Agent runtime -> OpenClaw plugin -> TraceBastion gateway -> policy + scanners + audit
                                     |
                                     +-> guardrail proxy -> LLM provider
                                     +-> OTLP / Splunk / webhooks / JSONL
@@ -281,13 +292,13 @@ For diagrams and detailed flows, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.m
 
 ## Scanning and Guardrails
 
-DefenseClaw wraps Cisco AI Defense scanners and local policy into a single admission flow:
+TraceBastion wraps Cisco AI Defense scanners and local policy into a single admission flow:
 
 | Surface | Scanner or control |
 |---------|--------------------|
 | Skills | `cisco-ai-skill-scanner`, CodeGuard, policy actions |
 | MCP servers | `cisco-ai-mcp-scanner`, block/allow policy |
-| Plugins | DefenseClaw plugin scanner, install-source checks, optional LLM analysis |
+| Plugins | TraceBastion plugin scanner, install-source checks, optional LLM analysis |
 | Source code | CodeGuard via CLI, sidecar API, and plugin write/edit hooks |
 | Prompts and completions | Guardrail proxy with rule packs, suppressions, optional LLM judge, Cisco inspection |
 | Tool calls | Tool argument inspection, sensitive path checks, command risk checks, policy verdicts |
@@ -298,7 +309,7 @@ Scanner policies live in [policies/scanners/](policies/scanners/). Guardrail rul
 
 ## Observability
 
-DefenseClaw records enforcement and runtime evidence across several channels:
+TraceBastion records enforcement and runtime evidence across several channels:
 
 | Channel | Use |
 |---------|-----|
@@ -306,7 +317,7 @@ DefenseClaw records enforcement and runtime evidence across several channels:
 | Gateway JSONL | Correlated structured runtime events |
 | OTLP | Named, independent metrics/logs/traces destinations with native fan-out |
 | Splunk HEC | SIEM forwarding and local Splunk app workflows |
-| Splunk O11y dashboards | Native Splunk Observability Cloud dashboards and detectors for DefenseClaw metrics |
+| Splunk O11y dashboards | Native Splunk Observability Cloud dashboards and detectors for TraceBastion metrics |
 | Webhooks | Slack, PagerDuty, Webex, and generic event notifications |
 | TUI | Operator-facing alerts, health, scans, tools, policy, and setup |
 
