@@ -12,6 +12,8 @@ on:
       - ".github/workflows/desktop-windows.yml"
   push:
     branches: [main, qjq]
+    tags:
+      - "tracebastion-desktop-v*"
     paths:
       - "desktop/**"
       - "cmd/defenseclaw/**"
@@ -68,10 +70,35 @@ jobs:
 
       - name: Smoke-test NSIS lifecycle
         shell: powershell
-        run: .\desktop\scripts\test-installer.ps1 -InstallDir "$env:SystemDrive\DefenseClawDesktop-Custom-CI"
+        run: .\desktop\scripts\test-installer.ps1 -InstallDir "$env:SystemDrive\TraceBastionDesktop-Custom-CI"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: DefenseClaw-Desktop-Windows-x64
-          path: dist/DefenseClaw-Desktop-Setup-x64.exe
+          name: TraceBastion-Desktop-Windows-x64
+          path: dist/TraceBastion-Desktop-Setup-x64.exe
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/tracebastion-desktop-v')
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: TraceBastion-Desktop-Windows-x64
+          path: dist
+
+      - name: Publish GitHub Release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" `
+            ".\dist\TraceBastion-Desktop-Setup-x64.exe#TraceBastion Desktop Setup (Windows x64)" `
+            --repo "$env:GITHUB_REPOSITORY" `
+            --verify-tag `
+            --title "TraceBastion Desktop $($env:GITHUB_REF_NAME -replace '^tracebastion-desktop-', '')" `
+            --generate-notes

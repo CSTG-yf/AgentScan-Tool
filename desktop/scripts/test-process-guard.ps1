@@ -129,3 +129,4 @@ if ($LASTEXITCODE -ne 1060) {
     throw "Acceptance-test cleanup failed; the service still exists after 15 seconds."
 }
 Write-Output "Cleanup: service absent and original policy restored."
+exit 0

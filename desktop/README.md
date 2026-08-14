@@ -5,6 +5,11 @@ AI discovery, policy engine, evidence store, and AgentRange runtime.
 The desktop shell does not replace those components: it packages and
 orchestrates them behind one signed application entry point.
 
+Download the current Windows x64 installer from
+[GitHub Releases](https://github.com/CSTG-yf/AgentScan-Tool/releases/latest).
+The installer is currently unsigned, so Windows SmartScreen may require an
+explicit operator confirmation until code signing is configured.
+
 ## Architecture
 
 - **UI:** React + TypeScript + Ant Design, bundled by Vite.

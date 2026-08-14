@@ -52,6 +52,8 @@ installer with a selectable destination directory.
 
 See [desktop/README.md](desktop/README.md) for architecture, prerequisites,
 build instructions, policy behavior, acceptance tests, and upgrade details.
+Windows users can download the current x64 installer from
+[GitHub Releases](https://github.com/CSTG-yf/AgentScan-Tool/releases/latest).
 The existing `defenseclaw` command names, gateway executable, Windows service
 key, application identifier, and machine data directory remain unchanged as
 internal compatibility identifiers so existing installations can upgrade
