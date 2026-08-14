@@ -157,3 +157,5 @@ finally {
         Remove-Item -LiteralPath $auditPath -Force
     }
 }
+
+exit 0
