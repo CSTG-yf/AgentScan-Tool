@@ -32,6 +32,7 @@ export interface AgentSnapshot {
 }
 
 export type GuardMode = "observe" | "enforce";
+export type RangeMode = "baseline" | "observe" | "action";
 
 export interface GuardRule {
   id: string;
@@ -58,10 +59,28 @@ export interface RangeStatus {
   configured: boolean;
   root: string;
   composeFile: string;
+  adapterComposeFile: string;
+  mode: RangeMode;
   dockerAvailable: boolean;
   runningServices: string[];
   state: "unconfigured" | "invalid" | "dockerUnavailable" | "stopped" | "running";
   detail: string;
+}
+
+export interface RangeReplayStatus {
+  running: boolean;
+  command: string;
+  scenario: string;
+  startedAt: string;
+  finishedAt?: string;
+  pid?: number;
+  completed: number;
+  total: number;
+  remaining: number;
+  exitCode?: number;
+  error?: string;
+  detail: string;
+  log: string[];
 }
 
 export interface GuardAuditEvent {
@@ -76,11 +95,56 @@ export interface GuardAuditEvent {
   childExecutable?: string;
   agentPid?: number;
   agentExecutable?: string;
+  traceId?: string;
+  sessionId?: string;
+  agentName?: string;
+  connector?: string;
+  stage?: string;
+  source?: string;
+  destinationApp?: string;
+  toolName?: string;
+  mcpServer?: string;
+  prompt?: string;
+  model?: string;
+  decision?: string;
+  severity?: string;
+  reason?: string;
+  latencyMs?: number;
+  rawRef?: string;
 }
 
 export interface GuardAuditSnapshot {
   capturedAt: string;
   path: string;
   events: GuardAuditEvent[];
+  warning?: string;
+}
+
+export interface GatewayAuditEvent {
+  timestamp: string;
+  action: string;
+  target: string;
+  actor: string;
+  details: string;
+  severity: string;
+  traceId: string;
+  sessionId: string;
+  agentName: string;
+  connector: string;
+  destinationApp: string;
+  toolName: string;
+  stage: string;
+  prompt: string;
+  model: string;
+  mcpServer: string;
+  decision: string;
+  reason: string;
+  latencyMs?: number;
+}
+
+export interface GatewayAuditSnapshot {
+  capturedAt: string;
+  source: string;
+  events: GatewayAuditEvent[];
   warning?: string;
 }

@@ -2,7 +2,8 @@
 param(
     [switch]$SkipInstall,
     [switch]$WebOnly,
-    [switch]$AllowMissingGateway
+    [switch]$AllowMissingGateway,
+    [switch]$SkipGatewayBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,14 +39,19 @@ try {
         pnpm tauri icon "src-tauri\icons\app-icon.svg"
     }
 
+    $existingGateway = Join-Path $desktopRoot "src-tauri\resources\defenseclaw-gateway.exe"
     $goCommand = Get-Command "go" -ErrorAction SilentlyContinue
-    if ($goCommand) {
+    if ($SkipGatewayBuild) {
+        if (-not (Test-Path $existingGateway)) {
+            throw "Cannot skip gateway build because $existingGateway does not exist."
+        }
+        Write-Warning "Skipping gateway build; reusing the existing gateway resource."
+    } elseif ($goCommand) {
         $resourceDir = Join-Path $desktopRoot "src-tauri\resources"
         New-Item -ItemType Directory -Force -Path $resourceDir | Out-Null
         & go build -trimpath -ldflags "-s -w" -o (Join-Path $resourceDir "defenseclaw-gateway.exe") "$repoRoot\cmd\defenseclaw"
         if ($LASTEXITCODE -ne 0) { throw "gateway build failed with exit code $LASTEXITCODE" }
     } else {
-        $existingGateway = Join-Path $desktopRoot "src-tauri\resources\defenseclaw-gateway.exe"
         if (-not $AllowMissingGateway -or -not (Test-Path $existingGateway)) {
             throw "Go is required to build the bundled gateway. Install the version declared by go.mod, or use -AllowMissingGateway only for a local shell build with an existing gateway resource."
         }
