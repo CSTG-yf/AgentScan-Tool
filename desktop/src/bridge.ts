@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentRuntimeCatalog, AgentSnapshot, AgentTraceSnapshot, EnvironmentSnapshot, GuardAuditSnapshot, GuardPolicy, RangeStatus } from "./types";
+import type { AgentRuntimeCatalog, AgentSnapshot, AgentTraceSnapshot, EnvironmentSnapshot, GatewayAuditSnapshot, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus } from "./types";
 
 const inTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
@@ -79,6 +79,13 @@ export async function getProcessGuardAudit(limit = 200): Promise<GuardAuditSnaps
   return invoke<GuardAuditSnapshot>("get_process_guard_audit", { limit });
 }
 
+export async function getGatewayAudit(limit = 200): Promise<GatewayAuditSnapshot> {
+  if (!inTauri()) {
+    return { capturedAt: new Date().toISOString(), source: "defenseclaw-gateway audit export", events: [], warning: "浏览器预览模式不读取网关审计数据库" };
+  }
+  return invoke<GatewayAuditSnapshot>("get_gateway_audit", { limit });
+}
+
 export interface LifecycleResult {
   action: string;
   success: boolean;
@@ -91,16 +98,38 @@ export async function setGatewayRunning(running: boolean): Promise<LifecycleResu
 }
 
 export async function getRangeStatus(): Promise<RangeStatus> {
-  if (!inTauri()) return { configured: false, root: "", composeFile: "", dockerAvailable: false, runningServices: [], state: "unconfigured", detail: "桌面宿主未连接" };
+  if (!inTauri()) return { configured: false, root: "", composeFile: "", adapterComposeFile: "", mode: "baseline", dockerAvailable: false, runningServices: [], state: "unconfigured", detail: "Desktop host is not connected" };
   return invoke<RangeStatus>("get_range_status");
 }
 
 export async function saveRangeRoot(root: string): Promise<RangeStatus> {
-  if (!inTauri()) throw new Error("仅桌面应用可以配置靶场");
+  if (!inTauri()) throw new Error("Only the desktop app can configure the range");
   return invoke<RangeStatus>("set_range_root", { root });
 }
 
+export async function saveDefenseMode(mode: RangeMode): Promise<RangeStatus> {
+  if (!inTauri()) throw new Error("Only the desktop app can configure the TraceBastion mode");
+  return invoke<RangeStatus>("set_range_mode", { mode });
+}
+
+export const saveRangeMode = saveDefenseMode;
+
 export async function setRangeRunning(running: boolean): Promise<RangeStatus> {
-  if (!inTauri()) throw new Error("仅桌面应用可以控制靶场");
+  if (!inTauri()) throw new Error("Only the desktop app can control the range");
   return invoke<RangeStatus>(running ? "start_range" : "stop_range");
+}
+
+export async function getRangeReplayStatus(): Promise<RangeReplayStatus> {
+  if (!inTauri()) return { running: false, command: "", scenario: "", startedAt: "", completed: 0, total: 0, remaining: 0, detail: "Desktop host is not connected", log: [] };
+  return invoke<RangeReplayStatus>("get_range_replay_status");
+}
+
+export async function startRangeReplay(command: string): Promise<RangeReplayStatus> {
+  if (!inTauri()) throw new Error("Only the desktop app can run AgentRange replay");
+  return invoke<RangeReplayStatus>("start_range_replay", { command });
+}
+
+export async function stopRangeReplay(): Promise<RangeReplayStatus> {
+  if (!inTauri()) throw new Error("Only the desktop app can stop AgentRange replay");
+  return invoke<RangeReplayStatus>("stop_range_replay");
 }

@@ -189,4 +189,70 @@ pub struct GuardAuditRecord {
     pub agent_pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_executable: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connector: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_app: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mcp_server: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_ref: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayAuditSnapshot {
+    pub captured_at: String,
+    pub source: String,
+    pub events: Vec<GatewayAuditRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayAuditRecord {
+    pub timestamp: String,
+    pub action: String,
+    pub target: String,
+    pub actor: String,
+    pub details: String,
+    pub severity: String,
+    pub trace_id: String,
+    pub session_id: String,
+    pub agent_name: String,
+    pub connector: String,
+    pub destination_app: String,
+    pub tool_name: String,
+    pub stage: String,
+    pub prompt: String,
+    pub model: String,
+    pub mcp_server: String,
+    pub decision: String,
+    pub reason: String,
+    pub latency_ms: Option<u64>,
 }

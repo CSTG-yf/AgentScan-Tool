@@ -17,6 +17,7 @@ pub fn run() {
             commands::knowledge::get_agent_runtime_catalog,
             commands::audit::get_process_guard_audit,
             commands::trace::get_agent_trace,
+            commands::audit::get_gateway_audit,
             commands::policy::get_guard_policy,
             commands::policy::save_guard_policy,
             commands::guard_service::install_process_guard,
@@ -26,8 +27,12 @@ pub fn run() {
             commands::lifecycle::stop_gateway,
             commands::range::get_range_status,
             commands::range::set_range_root,
+            commands::range::set_range_mode,
             commands::range::start_range,
             commands::range::stop_range,
+            commands::range::get_range_replay_status,
+            commands::range::start_range_replay,
+            commands::range::stop_range_replay,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run TraceBastion Desktop");

@@ -29,7 +29,11 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "resources": ["resources/*"],
+    "resources": [
+      "resources/*",
+      "../../cli/defenseclaw/agentrange_sidecar.py",
+      "../../task/agentrange-adapter/*"
+    ],
     "category": "DeveloperTool",
     "shortDescription": "AI Agent security defense and range control plane",
     "longDescription": "TraceBastion Desktop monitors local AI Agents, enforces security policy, records runtime traces, and orchestrates the AgentRange environment.",
