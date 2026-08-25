@@ -2,8 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::Manager;
+
+use crate::models::StaticResourceScanSettings;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -53,6 +55,214 @@ pub(crate) fn desktop_defenseclaw_home(app: &tauri::AppHandle) -> Result<PathBuf
         .map_err(|error| format!("resolve DefenseClaw data directory: {error}"))
 }
 
+#[derive(Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct DesktopSettings {
+    agentrange_root: String,
+}
+
+fn desktop_settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map(|directory| directory.join("desktop-settings.json"))
+        .map_err(|error| format!("resolve desktop settings path: {error}"))
+}
+
+fn read_desktop_settings(app: &tauri::AppHandle) -> DesktopSettings {
+    let Ok(path) = desktop_settings_path(app) else {
+        return DesktopSettings::default();
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return DesktopSettings::default();
+    };
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+fn looks_like_agentrange_root(path: &Path) -> bool {
+    path.join("docker-compose.yml").is_file()
+        && (path.join("skills").is_dir() || path.join("mcp").is_dir())
+}
+
+fn normalize_agentrange_root(path: PathBuf) -> Option<PathBuf> {
+    if path.as_os_str().is_empty() || !looks_like_agentrange_root(&path) {
+        return None;
+    }
+    Some(path.canonicalize().unwrap_or(path))
+}
+
+fn default_development_agentrange_root() -> Option<PathBuf> {
+    normalize_agentrange_root(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("task")
+            .join("AgentRange-player"),
+    )
+}
+
+fn configured_agentrange_root(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let settings = read_desktop_settings(app);
+    let configured = settings.agentrange_root.trim();
+    if !configured.is_empty() {
+        if let Some(root) = normalize_agentrange_root(PathBuf::from(configured)) {
+            return Some(root);
+        }
+    }
+
+    if let Some(root) = std::env::var_os("DEFENSECLAW_AGENTRANGE_ROOT")
+        .and_then(|value| normalize_agentrange_root(PathBuf::from(value)))
+    {
+        return Some(root);
+    }
+
+    default_development_agentrange_root()
+}
+
+fn yaml_quoted_path(path: &Path) -> String {
+    let value = path
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    format!("\"{value}\"")
+}
+
+fn render_claw_block(agentrange_root: Option<&Path>) -> String {
+    let Some(root) = agentrange_root else {
+        return "claw:\n  mode: \"\"".to_owned();
+    };
+    let root = yaml_quoted_path(root);
+    format!("claw:\n  mode: \"\"\n  home_dir: {root}\n  workspace_dir: {root}")
+}
+
+fn render_yaml_path_list(paths: &[PathBuf], item_indent: usize) -> String {
+    if paths.is_empty() {
+        return "[]".to_owned();
+    }
+    let indent = " ".repeat(item_indent);
+    let items = paths
+        .iter()
+        .map(|path| format!("{indent}- {}", yaml_quoted_path(path)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("\n{items}")
+}
+
+fn read_static_resource_scan_settings_from_path(path: &Path) -> StaticResourceScanSettings {
+    let Ok(raw) = fs::read_to_string(path) else {
+        return StaticResourceScanSettings::default();
+    };
+    parse_static_resource_scan_settings(&raw).normalize()
+}
+
+fn parse_static_resource_scan_settings(raw: &str) -> StaticResourceScanSettings {
+    let mut settings = StaticResourceScanSettings::default();
+    let mut in_watch = false;
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            in_watch = trimmed == "watch:";
+            continue;
+        }
+        if !in_watch {
+            continue;
+        }
+
+        let Some((key, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = clean_yaml_scalar(value);
+        match key {
+            "realtime_enabled" => {
+                settings.realtime_enabled = parse_yaml_bool(value, settings.realtime_enabled)
+            }
+            "rescan_enabled" => {
+                settings.rescan_enabled = parse_yaml_bool(value, settings.rescan_enabled)
+            }
+            "debounce_ms" => settings.debounce_ms = parse_yaml_u64(value, settings.debounce_ms),
+            "rescan_skill_interval_min" => {
+                settings.skill_interval_min = parse_yaml_u64(value, settings.skill_interval_min)
+            }
+            "rescan_plugin_interval_min" => {
+                settings.plugin_interval_min = parse_yaml_u64(value, settings.plugin_interval_min)
+            }
+            "rescan_mcp_interval_min" => {
+                settings.mcp_interval_min = parse_yaml_u64(value, settings.mcp_interval_min)
+            }
+            "rescan_prompt_interval_min" => {
+                settings.prompt_interval_min = parse_yaml_u64(value, settings.prompt_interval_min)
+            }
+            "rescan_credential_interval_min" => {
+                settings.credential_interval_min =
+                    parse_yaml_u64(value, settings.credential_interval_min)
+            }
+            "rescan_environment_interval_min" => {
+                settings.environment_interval_min =
+                    parse_yaml_u64(value, settings.environment_interval_min)
+            }
+            _ => {}
+        }
+    }
+
+    settings
+}
+
+fn clean_yaml_scalar(value: &str) -> &str {
+    value
+        .split('#')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+}
+
+fn parse_yaml_bool(value: &str, fallback: bool) -> bool {
+    match value.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "on" | "1" => true,
+        "false" | "no" | "off" | "0" => false,
+        _ => fallback,
+    }
+}
+
+fn parse_yaml_u64(value: &str, fallback: u64) -> u64 {
+    value.parse::<u64>().unwrap_or(fallback)
+}
+
+fn render_watch_block(settings: StaticResourceScanSettings) -> String {
+    let settings = settings.normalize();
+    format!(
+        "\
+watch:
+  debounce_ms: {debounce_ms}
+  auto_block: true
+  allow_list_bypass_scan: false
+  realtime_enabled: {realtime_enabled}
+  rescan_enabled: {rescan_enabled}
+  rescan_interval_min: 60
+  rescan_skill_interval_min: {skill_interval_min}
+  rescan_plugin_interval_min: {plugin_interval_min}
+  rescan_mcp_interval_min: {mcp_interval_min}
+  rescan_prompt_interval_min: {prompt_interval_min}
+  rescan_credential_interval_min: {credential_interval_min}
+  rescan_environment_interval_min: {environment_interval_min}
+  rescan_content_gated: true",
+        debounce_ms = settings.debounce_ms,
+        realtime_enabled = settings.realtime_enabled,
+        rescan_enabled = settings.rescan_enabled,
+        skill_interval_min = settings.skill_interval_min,
+        plugin_interval_min = settings.plugin_interval_min,
+        mcp_interval_min = settings.mcp_interval_min,
+        prompt_interval_min = settings.prompt_interval_min,
+        credential_interval_min = settings.credential_interval_min,
+        environment_interval_min = settings.environment_interval_min,
+    )
+}
+
 fn write_file_if_missing(path: &Path, contents: &str) -> Result<(), String> {
     if path.is_file() {
         return Ok(());
@@ -81,6 +291,18 @@ pub(crate) fn ensure_gateway_home(app: &tauri::AppHandle, mode: &str) -> Result<
     };
     let config_path = home.join("config.yaml");
     let home_text = home.to_string_lossy().replace('\\', "\\\\");
+    let agentrange_root = configured_agentrange_root(app);
+    let claw_block = render_claw_block(agentrange_root.as_deref());
+    let skill_dirs = agentrange_root
+        .as_ref()
+        .map(|root| vec![root.join("skills")])
+        .unwrap_or_default();
+    let skill_dirs_yaml = render_yaml_path_list(&skill_dirs, 8);
+    let static_scan_settings = read_static_resource_scan_settings_from_path(&config_path);
+    let watch_block = render_watch_block(static_scan_settings);
+    let watcher_enabled =
+        static_scan_settings.realtime_enabled || static_scan_settings.rescan_enabled;
+    let plugin_watcher_enabled = watcher_enabled && agentrange_root.is_none();
     let contents = format!(
         r#"config_version: 7
 data_dir: "{home}"
@@ -90,8 +312,7 @@ quarantine_dir: "{home}\\quarantine"
 plugin_dir: ""
 policy_dir: ""
 environment: windows
-claw:
-  mode: ""
+{claw_block}
 guardrail:
   enabled: true
   mode: {mode}
@@ -113,6 +334,7 @@ guardrail:
   hilt:
     enabled: false
     min_severity: HIGH
+{watch_block}
 gateway:
   host: 127.0.0.1
   port: 18789
@@ -126,13 +348,13 @@ gateway:
   api_port: 18970
   fleet_mode: disabled
   watcher:
-    enabled: false
+    enabled: {watcher_enabled}
     skill:
-      enabled: false
+      enabled: {watcher_enabled}
       take_action: false
-      dirs: []
+      dirs: {skill_dirs_yaml}
     plugin:
-      enabled: false
+      enabled: {plugin_watcher_enabled}
       take_action: false
       dirs: []
     mcp:
@@ -143,7 +365,12 @@ gateway:
     debounce: 2
 "#,
         home = home_text,
-        mode = mode
+        mode = mode,
+        claw_block = claw_block,
+        watch_block = watch_block,
+        watcher_enabled = watcher_enabled,
+        skill_dirs_yaml = skill_dirs_yaml,
+        plugin_watcher_enabled = plugin_watcher_enabled
     );
     fs::write(&config_path, contents)
         .map_err(|error| format!("write {}: {error}", config_path.display()))?;

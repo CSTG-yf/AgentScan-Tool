@@ -238,7 +238,8 @@ interval; events older than the debounce window are processed. Default:
 
 1. **Pre-scan OPA**: checks block/allow lists + fallback profile. Verdicts:
    `blocked`, `rejected`, `allowed` (skip scan), `scan` (continue).
-2. **Scanning**: selects scanner by install type (skill / MCP / plugin).
+2. **Scanning**: selects scanner by install type (skill / MCP / plugin /
+   prompt / credential / environment).
    Timeout: 5 minutes (hardcoded).
 3. **Post-scan OPA**: adds scan findings to policy input, re-evaluates.
    Falls back to built-in severity logic when OPA is unavailable.
@@ -254,11 +255,26 @@ interval; events older than the debounce window are processed. Default:
 | `warning` | Medium/low findings — installed with warning |
 | `scan_error` | Scanner failed |
 
+**Realtime static resource scanning:** When `watch.realtime_enabled` is
+`true` (default), the watcher subscribes to skill and plugin directories
+recursively. File changes under an installed skill/plugin are debounced and
+mapped back to the top-level asset, then re-run through the admission gate.
+The watcher also watches known configuration, policy, prompt, and credential
+locations. Changes there trigger an immediate type-scoped rescan for MCP,
+prompt, credential, or environment targets.
+
 **Periodic rescan and drift detection:** When `watch.rescan_enabled` is
-`true` (default), a `rescanLoop` runs every `watch.rescan_interval_min`
-minutes (default: 60). A bootstrap rescan also runs immediately on watcher
-startup. Each cycle snapshots installed targets (content hash, dependency
-hashes, config hashes, network endpoints) and compares against the baseline.
+`true` (default), rescan loops run on the per-target intervals configured
+under `watch:`. `watch.rescan_interval_min` is the fallback interval
+(default: 60 minutes); `watch.rescan_skill_interval_min`,
+`watch.rescan_plugin_interval_min`, `watch.rescan_mcp_interval_min`,
+`watch.rescan_prompt_interval_min`,
+`watch.rescan_credential_interval_min`, and
+`watch.rescan_environment_interval_min` override it for their target type
+when set to a positive value. A bootstrap rescan also runs immediately on
+watcher startup. Each cycle snapshots installed targets (content hash,
+dependency hashes, config hashes, network endpoints, or hashed process
+environment state) and compares against the baseline.
 
 Drift types:
 

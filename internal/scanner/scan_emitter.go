@@ -130,6 +130,11 @@ type ScanSummaryParams struct {
 	// mid-stream, tool-call-inspect). Empty for classic scanner
 	// invocations.
 	EvaluationID string
+	// StaticResourceID / ResourceRuleID / ScanProfileID carry the
+	// agent_resource_rules lineage for rule-driven resource scans.
+	StaticResourceID string
+	ResourceRuleID   int64
+	ScanProfileID    int64
 }
 
 // ScanFindingMeta stamps correlation + provenance on scan_findings rows.
@@ -270,6 +275,9 @@ func EmitScanResult(
 			AgentInstanceID:   agent.AgentInstanceID,
 			SidecarInstanceID: agent.SidecarInstanceID,
 			EvaluationID:      agent.EvaluationID,
+			StaticResourceID:  agent.StaticResourceID,
+			ResourceRuleID:    agent.ResourceRuleID,
+			ScanProfileID:     agent.ScanProfileID,
 		}
 		if err := pers.InsertScanSummary(sum); err != nil {
 			return scanID, err

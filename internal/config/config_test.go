@@ -294,11 +294,28 @@ func TestDefaultConfig(t *testing.T) {
 	if !cfg.Watch.AllowListBypassScan {
 		t.Error("expected allow-list bypass scan enabled by default")
 	}
+	if !cfg.Watch.RealtimeEnabled {
+		t.Error("expected realtime static-resource scanning enabled by default")
+	}
 	if !cfg.Watch.RescanEnabled {
 		t.Error("expected rescan enabled by default")
 	}
 	if cfg.Watch.RescanIntervalMin != 60 {
 		t.Errorf("expected rescan interval 60 min, got %d", cfg.Watch.RescanIntervalMin)
+	}
+	if cfg.Watch.RescanSkillIntervalMin != 0 ||
+		cfg.Watch.RescanPluginIntervalMin != 0 ||
+		cfg.Watch.RescanMCPIntervalMin != 0 ||
+		cfg.Watch.RescanPromptIntervalMin != 0 ||
+		cfg.Watch.RescanCredentialIntervalMin != 0 ||
+		cfg.Watch.RescanEnvironmentIntervalMin != 0 {
+		t.Errorf("expected per-target rescan intervals to inherit global by default, got skill=%d plugin=%d mcp=%d prompt=%d credential=%d environment=%d",
+			cfg.Watch.RescanSkillIntervalMin,
+			cfg.Watch.RescanPluginIntervalMin,
+			cfg.Watch.RescanMCPIntervalMin,
+			cfg.Watch.RescanPromptIntervalMin,
+			cfg.Watch.RescanCredentialIntervalMin,
+			cfg.Watch.RescanEnvironmentIntervalMin)
 	}
 	if !cfg.Watch.RescanContentGated {
 		t.Error("expected rescan content-gated enabled by default")

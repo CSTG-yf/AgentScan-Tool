@@ -93,6 +93,13 @@ type Sidecar struct {
 	runCancelMu        sync.Mutex
 	runCancel          context.CancelFunc
 
+	// staticScanMu guards the watcher's on-demand scan entry points (see
+	// setStaticScanTriggers): the watcher and the API server start and
+	// restart independently, so whichever comes up second re-wires them.
+	staticScanMu  sync.RWMutex
+	staticScanOne func(resourceID string) error
+	staticRescan  func(agentID string) error
+
 	alertCtx    context.Context
 	alertCancel context.CancelFunc
 	alertWg     sync.WaitGroup
@@ -187,6 +194,12 @@ func NewSidecar(cfg *config.Config, store *audit.Store, logger *audit.Logger, sh
 		retainJudge = false
 	}
 	SetRetainJudgeBodies(retainJudge)
+
+	// Phase-1 unified runtime events: install the audit store for the
+	// Guardrail / Agent Hook / Proxy adapters before any request
+	// handling begins, so every runtime event can be normalized into
+	// behavior_events from the first request on.
+	SetRuntimeEventStore(store)
 
 	// In standalone sandbox mode the veth link is point-to-point;
 	// TLS is not needed and the gateway serves plain WS.
@@ -1435,6 +1448,26 @@ func (s *Sidecar) apiSnapshot() *APIServer {
 	return s.apiServer
 }
 
+// setStaticScanTriggers records the current watcher's on-demand scan entry
+// points and forwards them to a live API server. The watcher (re)starts
+// independently of the API server, so both sides pull from here: runWatcher
+// pushes on (re)start, runAPI pulls when the APIServer comes up.
+func (s *Sidecar) setStaticScanTriggers(scanOne func(resourceID string) error, rescan func(agentID string) error) {
+	s.staticScanMu.Lock()
+	s.staticScanOne = scanOne
+	s.staticRescan = rescan
+	s.staticScanMu.Unlock()
+	if api := s.apiSnapshot(); api != nil {
+		api.SetStaticScanTrigger(scanOne, rescan)
+	}
+}
+
+func (s *Sidecar) staticScanTriggers() (func(string) error, func(string) error) {
+	s.staticScanMu.RLock()
+	defer s.staticScanMu.RUnlock()
+	return s.staticScanOne, s.staticRescan
+}
+
 func (s *Sidecar) setGuardrailProxy(proxy *GuardrailProxy) {
 	s.proxyMu.Lock()
 	s.guardrailProxy = proxy
@@ -1686,18 +1719,30 @@ func (s *Sidecar) runWatcher(ctx context.Context) error {
 	}
 
 	if len(skillDirs) == 0 && len(pluginDirs) == 0 {
-		s.health.SetWatcher(StateError, "no directories configured", nil)
-		fmt.Fprintf(os.Stderr, "[sidecar] watcher: no directories to watch\n")
-		<-ctx.Done()
-		return nil
+		if !s.currentConfig().Watch.RescanEnabled {
+			s.health.SetWatcher(StateError, "no directories configured", nil)
+			fmt.Fprintf(os.Stderr, "[sidecar] watcher: no directories to watch\n")
+			<-ctx.Done()
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "[sidecar] watcher: no realtime directories; periodic rescan remains enabled\n")
 	}
 
 	s.health.SetWatcher(StateStarting, "", map[string]interface{}{
-		"skill_dirs":         len(skillDirs),
-		"plugin_dirs":        len(pluginDirs),
-		"skill_take_action":  wcfg.Skill.TakeAction,
-		"plugin_take_action": wcfg.Plugin.TakeAction,
-		"mcp_take_action":    wcfg.MCP.TakeAction,
+		"realtime_enabled":                    s.currentConfig().Watch.RealtimeEnabled,
+		"rescan_enabled":                      s.currentConfig().Watch.RescanEnabled,
+		"skill_dirs":                          len(skillDirs),
+		"plugin_dirs":                         len(pluginDirs),
+		"skill_take_action":                   wcfg.Skill.TakeAction,
+		"plugin_take_action":                  wcfg.Plugin.TakeAction,
+		"mcp_take_action":                     wcfg.MCP.TakeAction,
+		"rescan_skill_interval_min":           s.currentConfig().Watch.RescanSkillIntervalMin,
+		"rescan_plugin_interval_min":          s.currentConfig().Watch.RescanPluginIntervalMin,
+		"rescan_mcp_interval_min":             s.currentConfig().Watch.RescanMCPIntervalMin,
+		"rescan_prompt_interval_min":          s.currentConfig().Watch.RescanPromptIntervalMin,
+		"rescan_credential_interval_min":      s.currentConfig().Watch.RescanCredentialIntervalMin,
+		"rescan_environment_interval_min":     s.currentConfig().Watch.RescanEnvironmentIntervalMin,
+		"rescan_global_fallback_interval_min": s.currentConfig().Watch.RescanIntervalMin,
 	})
 
 	tel := s.otelSnapshot()
@@ -1710,16 +1755,38 @@ func (s *Sidecar) runWatcher(ctx context.Context) error {
 	if webhooks := s.webhooksSnapshot(); webhooks != nil {
 		w.SetWebhookDispatcher(webhooks)
 	}
+	// Wire the watcher's on-demand scan entry points into the API server so
+	// POST /api/v1/static-resources/{id}/scan and POST /api/v1/static-resources/rescan
+	// can trigger immediate re-scans from the desktop inventory page.
+	s.setStaticScanTriggers(
+		func(resourceID string) error {
+			_, err := w.ScanResourceByID(context.Background(), resourceID)
+			return err
+		},
+		func(agentID string) error {
+			_, err := w.RescanAgentResources(context.Background(), agentID)
+			return err
+		},
+	)
 
 	fmt.Fprintf(os.Stderr, "[sidecar] watcher starting (%d skill dirs, %d plugin dirs, skill_take_action=%v, plugin_take_action=%v)\n",
 		len(skillDirs), len(pluginDirs), wcfg.Skill.TakeAction, wcfg.Plugin.TakeAction)
 
 	s.health.SetWatcher(StateRunning, "", map[string]interface{}{
-		"skill_dirs":         len(skillDirs),
-		"plugin_dirs":        len(pluginDirs),
-		"skill_take_action":  wcfg.Skill.TakeAction,
-		"plugin_take_action": wcfg.Plugin.TakeAction,
-		"mcp_take_action":    wcfg.MCP.TakeAction,
+		"realtime_enabled":                    s.currentConfig().Watch.RealtimeEnabled,
+		"rescan_enabled":                      s.currentConfig().Watch.RescanEnabled,
+		"skill_dirs":                          len(skillDirs),
+		"plugin_dirs":                         len(pluginDirs),
+		"skill_take_action":                   wcfg.Skill.TakeAction,
+		"plugin_take_action":                  wcfg.Plugin.TakeAction,
+		"mcp_take_action":                     wcfg.MCP.TakeAction,
+		"rescan_skill_interval_min":           s.currentConfig().Watch.RescanSkillIntervalMin,
+		"rescan_plugin_interval_min":          s.currentConfig().Watch.RescanPluginIntervalMin,
+		"rescan_mcp_interval_min":             s.currentConfig().Watch.RescanMCPIntervalMin,
+		"rescan_prompt_interval_min":          s.currentConfig().Watch.RescanPromptIntervalMin,
+		"rescan_credential_interval_min":      s.currentConfig().Watch.RescanCredentialIntervalMin,
+		"rescan_environment_interval_min":     s.currentConfig().Watch.RescanEnvironmentIntervalMin,
+		"rescan_global_fallback_interval_min": s.currentConfig().Watch.RescanIntervalMin,
 	})
 
 	runErr := w.Run(ctx)
@@ -3585,6 +3652,11 @@ func (s *Sidecar) runAPI(ctx context.Context) error {
 	}
 	s.setAPIServer(api)
 	defer s.setAPIServer(nil)
+	// The watcher may already be running: pull its on-demand scan entry
+	// points into this fresh APIServer (runWatcher re-pushes on restart).
+	if scanOne, rescan := s.staticScanTriggers(); scanOne != nil {
+		api.SetStaticScanTrigger(scanOne, rescan)
+	}
 	tel := s.otelSnapshot()
 	api.SetOTelProvider(tel)
 	api.SetHILTApprovalManager(s.hilt)

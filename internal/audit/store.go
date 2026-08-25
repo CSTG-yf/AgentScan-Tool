@@ -105,6 +105,7 @@ type Event struct {
 	Generation        uint64 `json:"generation,omitempty"`
 	BinaryVersion     string `json:"binary_version,omitempty"`
 	AgentID           string `json:"agent_id,omitempty"`
+	CanonicalAgentID  string `json:"canonical_agent_id,omitempty"`
 	SidecarInstanceID string `json:"sidecar_instance_id,omitempty"`
 
 	// Multi-connector identity + per-turn / enforcement fields
@@ -1354,6 +1355,1337 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		description: "agent inventory: canonical agents, aliases, static resources, and cross-table agent keys",
+		apply: func(ex dbExecer) error {
+			if _, err := ex.Exec(`
+			CREATE TABLE IF NOT EXISTS agents (
+				id TEXT PRIMARY KEY,
+				display_name TEXT NOT NULL,
+				vendor TEXT NOT NULL DEFAULT '',
+				kind TEXT NOT NULL DEFAULT '',
+				runtime TEXT NOT NULL DEFAULT '',
+				source TEXT NOT NULL DEFAULT '',
+				status TEXT NOT NULL DEFAULT 'observed',
+				first_seen_at DATETIME NOT NULL,
+				last_seen_at DATETIME NOT NULL,
+				last_static_scan_at DATETIME,
+				metadata_json TEXT NOT NULL DEFAULT '{}'
+			);
+			CREATE TABLE IF NOT EXISTS agent_aliases (
+				alias TEXT PRIMARY KEY,
+				agent_id TEXT NOT NULL,
+				raw_alias TEXT NOT NULL,
+				alias_type TEXT NOT NULL DEFAULT '',
+				source TEXT NOT NULL DEFAULT '',
+				created_at DATETIME NOT NULL,
+				last_seen_at DATETIME NOT NULL,
+				FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+			);
+			CREATE TABLE IF NOT EXISTS static_resources (
+				id TEXT PRIMARY KEY,
+				canonical_agent_id TEXT NOT NULL,
+				resource_type TEXT NOT NULL,
+				name TEXT NOT NULL,
+				target TEXT NOT NULL,
+				scanner TEXT NOT NULL DEFAULT '',
+				target_type TEXT NOT NULL DEFAULT '',
+				last_scan_id TEXT,
+				last_seen_at DATETIME NOT NULL,
+				max_severity TEXT NOT NULL DEFAULT 'INFO',
+				finding_count INTEGER NOT NULL DEFAULT 0,
+				content_hash TEXT,
+				status TEXT NOT NULL DEFAULT 'discovered',
+				source TEXT NOT NULL DEFAULT '',
+				FOREIGN KEY (canonical_agent_id) REFERENCES agents(id) ON DELETE CASCADE
+			);
+			CREATE INDEX IF NOT EXISTS idx_agents_last_seen ON agents(last_seen_at);
+			CREATE INDEX IF NOT EXISTS idx_agent_aliases_agent_id ON agent_aliases(agent_id);
+			CREATE INDEX IF NOT EXISTS idx_static_resources_agent ON static_resources(canonical_agent_id);
+			CREATE INDEX IF NOT EXISTS idx_static_resources_target ON static_resources(target);
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_static_resources_agent_target ON static_resources(canonical_agent_id, target);
+			`); err != nil {
+				return fmt.Errorf("create canonical agent inventory tables: %w", err)
+			}
+
+			for _, spec := range []struct {
+				table, column, stmt string
+			}{
+				{"audit_events", "canonical_agent_id", `ALTER TABLE audit_events ADD COLUMN canonical_agent_id TEXT`},
+				{"scan_results", "agent_name", `ALTER TABLE scan_results ADD COLUMN agent_name TEXT`},
+				{"scan_results", "canonical_agent_id", `ALTER TABLE scan_results ADD COLUMN canonical_agent_id TEXT`},
+				{"scan_results", "static_resource_id", `ALTER TABLE scan_results ADD COLUMN static_resource_id TEXT`},
+				{"scan_findings", "agent_name", `ALTER TABLE scan_findings ADD COLUMN agent_name TEXT`},
+				{"scan_findings", "trace_id", `ALTER TABLE scan_findings ADD COLUMN trace_id TEXT`},
+				{"scan_findings", "canonical_agent_id", `ALTER TABLE scan_findings ADD COLUMN canonical_agent_id TEXT`},
+				{"scan_findings", "static_resource_id", `ALTER TABLE scan_findings ADD COLUMN static_resource_id TEXT`},
+				{"network_egress_events", "canonical_agent_id", `ALTER TABLE network_egress_events ADD COLUMN canonical_agent_id TEXT`},
+				{"network_egress_events", "root_agent_id", `ALTER TABLE network_egress_events ADD COLUMN root_agent_id TEXT`},
+				{"network_egress_events", "parent_agent_id", `ALTER TABLE network_egress_events ADD COLUMN parent_agent_id TEXT`},
+				{"network_egress_events", "root_session_id", `ALTER TABLE network_egress_events ADD COLUMN root_session_id TEXT`},
+			} {
+				present, err := tableExists(ex, spec.table)
+				if err != nil {
+					return err
+				}
+				if !present {
+					continue
+				}
+				exists, err := hasColumnDB(ex, spec.table, spec.column)
+				if err != nil {
+					return err
+				}
+				if !exists {
+					if _, err := ex.Exec(spec.stmt); err != nil {
+						return fmt.Errorf("alter %s.%s: %w", spec.table, spec.column, err)
+					}
+				}
+			}
+			for _, spec := range []struct {
+				table string
+				stmts []string
+			}{
+				{"audit_events", []string{
+					`CREATE INDEX IF NOT EXISTS idx_audit_canonical_agent ON audit_events(canonical_agent_id)`,
+				}},
+				{"scan_results", []string{
+					`CREATE INDEX IF NOT EXISTS idx_scan_results_canonical_agent ON scan_results(canonical_agent_id)`,
+					`CREATE INDEX IF NOT EXISTS idx_scan_results_static_resource ON scan_results(static_resource_id)`,
+				}},
+				{"scan_findings", []string{
+					`CREATE INDEX IF NOT EXISTS idx_scan_findings_canonical_agent ON scan_findings(canonical_agent_id)`,
+					`CREATE INDEX IF NOT EXISTS idx_scan_findings_static_resource ON scan_findings(static_resource_id)`,
+					`CREATE INDEX IF NOT EXISTS idx_scan_findings_trace_id ON scan_findings(trace_id)`,
+				}},
+				{"network_egress_events", []string{
+					`CREATE INDEX IF NOT EXISTS idx_egress_canonical_agent ON network_egress_events(canonical_agent_id)`,
+					`CREATE INDEX IF NOT EXISTS idx_egress_root_agent ON network_egress_events(root_agent_id)`,
+				}},
+			} {
+				present, err := tableExists(ex, spec.table)
+				if err != nil {
+					return err
+				}
+				if !present {
+					continue
+				}
+				for _, stmt := range spec.stmts {
+					if _, err := ex.Exec(stmt); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		},
+	},
+	{
+		description: "behavior trace inventory: Go-owned desktop behavior events",
+		apply: func(ex dbExecer) error {
+			if _, err := ex.Exec(`
+			CREATE TABLE IF NOT EXISTS behavior_events (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				timestamp DATETIME NOT NULL,
+				event_type TEXT NOT NULL,
+				source TEXT NOT NULL,
+				agent_pid INTEGER NOT NULL DEFAULT 0,
+				agent_executable TEXT NOT NULL DEFAULT '',
+				actor_pid INTEGER NOT NULL DEFAULT 0,
+				actor_executable TEXT NOT NULL DEFAULT '',
+				path TEXT,
+				action TEXT,
+				outcome TEXT NOT NULL DEFAULT 'observed',
+				detail TEXT NOT NULL DEFAULT '',
+				agent_name TEXT,
+				canonical_agent_id TEXT,
+				agent_instance_id TEXT,
+				session_id TEXT,
+				trace_id TEXT,
+				sidecar_instance_id TEXT,
+				FOREIGN KEY (canonical_agent_id) REFERENCES agents(id) ON DELETE SET NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_behavior_events_timestamp ON behavior_events(timestamp DESC);
+			CREATE INDEX IF NOT EXISTS idx_behavior_events_agent ON behavior_events(canonical_agent_id, timestamp DESC);
+			CREATE INDEX IF NOT EXISTS idx_behavior_events_agent_pid ON behavior_events(agent_pid, timestamp DESC);
+			CREATE INDEX IF NOT EXISTS idx_behavior_events_path ON behavior_events(path);
+			CREATE INDEX IF NOT EXISTS idx_behavior_events_type ON behavior_events(event_type, timestamp DESC);
+			`); err != nil {
+				return fmt.Errorf("create behavior events table: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		description: "application settings: Go-owned desktop UI settings",
+		apply: func(ex dbExecer) error {
+			if _, err := ex.Exec(`
+			CREATE TABLE IF NOT EXISTS app_settings (
+				key TEXT PRIMARY KEY,
+				value_json TEXT NOT NULL,
+				updated_at DATETIME NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_app_settings_updated_at ON app_settings(updated_at DESC);
+			`); err != nil {
+				return fmt.Errorf("create app settings table: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		description: "agent inventory: bind network egress events to canonical agents",
+		apply: func(ex dbExecer) error {
+			present, err := tableExists(ex, "network_egress_events")
+			if err != nil || !present {
+				return err
+			}
+			exists, err := hasColumnDB(ex, "network_egress_events", "canonical_agent_id")
+			if err != nil {
+				return err
+			}
+			if !exists {
+				if _, err := ex.Exec(`ALTER TABLE network_egress_events ADD COLUMN canonical_agent_id TEXT`); err != nil {
+					return fmt.Errorf("alter network_egress_events.canonical_agent_id: %w", err)
+				}
+			}
+			if _, err := ex.Exec(`CREATE INDEX IF NOT EXISTS idx_egress_canonical_agent ON network_egress_events(canonical_agent_id)`); err != nil {
+				return fmt.Errorf("create idx_egress_canonical_agent: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		description: "agent inventory: bind activity and judge records to canonical agents",
+		apply: func(ex dbExecer) error {
+			for _, spec := range []struct {
+				table, column, stmt string
+			}{
+				{"activity_events", "canonical_agent_id", `ALTER TABLE activity_events ADD COLUMN canonical_agent_id TEXT`},
+				{"judge_responses", "canonical_agent_id", `ALTER TABLE judge_responses ADD COLUMN canonical_agent_id TEXT`},
+			} {
+				present, err := tableExists(ex, spec.table)
+				if err != nil || !present {
+					return err
+				}
+				exists, err := hasColumnDB(ex, spec.table, spec.column)
+				if err != nil {
+					return err
+				}
+				if !exists {
+					if _, err := ex.Exec(spec.stmt); err != nil {
+						return fmt.Errorf("alter %s.%s: %w", spec.table, spec.column, err)
+					}
+				}
+			}
+			for _, stmt := range []string{
+				`CREATE INDEX IF NOT EXISTS idx_activity_canonical_agent ON activity_events(canonical_agent_id)`,
+				`CREATE INDEX IF NOT EXISTS idx_judge_canonical_agent ON judge_responses(canonical_agent_id)`,
+			} {
+				if _, err := ex.Exec(stmt); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
+	{
+		description: "agent discovery catalog: agent types, rules, conditions, and agent rule bindings",
+		apply: func(ex dbExecer) error {
+			if _, err := ex.Exec(`
+			CREATE TABLE IF NOT EXISTS agent_types (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				type_key TEXT NOT NULL UNIQUE,
+				name TEXT NOT NULL,
+				vendor TEXT NOT NULL DEFAULT '',
+				kind TEXT NOT NULL DEFAULT '',
+				runtime TEXT NOT NULL DEFAULT '',
+				description TEXT NOT NULL DEFAULT '',
+				enabled INTEGER NOT NULL DEFAULT 1,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL
+			);
+			CREATE TABLE IF NOT EXISTS agent_discovery_rules (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				agent_type_id INTEGER NOT NULL,
+				rule_name TEXT NOT NULL,
+				threshold INTEGER NOT NULL DEFAULT 60,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				FOREIGN KEY (agent_type_id) REFERENCES agent_types(id) ON DELETE CASCADE,
+				UNIQUE(agent_type_id, rule_name)
+			);
+			CREATE TABLE IF NOT EXISTS agent_discovery_conditions (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				rule_id INTEGER NOT NULL,
+				condition_type TEXT NOT NULL,
+				field TEXT NOT NULL DEFAULT '',
+				operator TEXT NOT NULL,
+				value TEXT NOT NULL,
+				weight INTEGER NOT NULL DEFAULT 0,
+				required INTEGER NOT NULL DEFAULT 0,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				FOREIGN KEY (rule_id) REFERENCES agent_discovery_rules(id) ON DELETE CASCADE,
+				UNIQUE(rule_id, condition_type, field, operator, value)
+			);
+			CREATE INDEX IF NOT EXISTS idx_agent_types_type_key ON agent_types(type_key);
+			CREATE INDEX IF NOT EXISTS idx_agent_discovery_rules_type ON agent_discovery_rules(agent_type_id);
+			CREATE INDEX IF NOT EXISTS idx_agent_discovery_conditions_rule ON agent_discovery_conditions(rule_id);
+			`); err != nil {
+				return fmt.Errorf("create agent discovery catalog tables: %w", err)
+			}
+
+			for _, spec := range []struct {
+				column, stmt string
+			}{
+				{"agent_type_id", `ALTER TABLE agents ADD COLUMN agent_type_id INTEGER`},
+				{"matched_rule_id", `ALTER TABLE agents ADD COLUMN matched_rule_id INTEGER`},
+				{"confidence", `ALTER TABLE agents ADD COLUMN confidence INTEGER NOT NULL DEFAULT 0`},
+			} {
+				exists, err := hasColumnDB(ex, "agents", spec.column)
+				if err != nil {
+					return err
+				}
+				if !exists {
+					if _, err := ex.Exec(spec.stmt); err != nil {
+						return fmt.Errorf("alter agents.%s: %w", spec.column, err)
+					}
+				}
+			}
+			for _, stmt := range []string{
+				`CREATE INDEX IF NOT EXISTS idx_agents_type ON agents(agent_type_id)`,
+				`CREATE INDEX IF NOT EXISTS idx_agents_matched_rule ON agents(matched_rule_id)`,
+				`CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status)`,
+			} {
+				if _, err := ex.Exec(stmt); err != nil {
+					return err
+				}
+			}
+			if err := seedAgentDiscoveryCatalog(ex); err != nil {
+				return err
+			}
+			if _, err := ex.Exec(`
+			UPDATE agents
+			SET agent_type_id = (
+				SELECT id FROM agent_types WHERE agent_types.type_key = agents.id
+			)
+			WHERE agent_type_id IS NULL
+			  AND EXISTS (SELECT 1 FROM agent_types WHERE agent_types.type_key = agents.id);
+
+			UPDATE agents
+			SET display_name = COALESCE((SELECT name FROM agent_types WHERE agent_types.id = agents.agent_type_id), display_name),
+			    vendor = COALESCE((SELECT vendor FROM agent_types WHERE agent_types.id = agents.agent_type_id), vendor),
+			    kind = COALESCE((SELECT kind FROM agent_types WHERE agent_types.id = agents.agent_type_id), kind),
+			    runtime = COALESCE((SELECT runtime FROM agent_types WHERE agent_types.id = agents.agent_type_id), runtime)
+			WHERE agent_type_id IS NOT NULL;
+			`); err != nil {
+				return fmt.Errorf("backfill agent discovery bindings: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		description: "agent resource rules: rule-driven resource enumeration, scan profiles, security capabilities, static resource risk",
+		apply: func(ex dbExecer) error {
+			if _, err := ex.Exec(`
+			CREATE TABLE IF NOT EXISTS resource_scan_profiles (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT NOT NULL UNIQUE,
+				resource_type TEXT NOT NULL,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				description TEXT,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL
+			);
+			CREATE TABLE IF NOT EXISTS security_scan_capabilities (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				capability_key TEXT NOT NULL UNIQUE,
+				name TEXT NOT NULL,
+				scanner_name TEXT NOT NULL,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				description TEXT,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL
+			);
+			CREATE TABLE IF NOT EXISTS resource_scan_profile_capabilities (
+				profile_id INTEGER NOT NULL,
+				capability_id INTEGER NOT NULL,
+				priority INTEGER NOT NULL DEFAULT 100,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				config_json TEXT,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				PRIMARY KEY (profile_id, capability_id),
+				FOREIGN KEY (profile_id) REFERENCES resource_scan_profiles(id) ON DELETE CASCADE,
+				FOREIGN KEY (capability_id) REFERENCES security_scan_capabilities(id) ON DELETE CASCADE
+			);
+			CREATE TABLE IF NOT EXISTS agent_resource_rules (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				agent_type_id INTEGER NOT NULL,
+				name TEXT NOT NULL,
+				resource_type TEXT NOT NULL,
+				path_pattern TEXT NOT NULL,
+				enumeration_mode TEXT NOT NULL DEFAULT 'children',
+				scan_profile_id INTEGER,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				priority INTEGER NOT NULL DEFAULT 100,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				FOREIGN KEY (agent_type_id) REFERENCES agent_types(id) ON DELETE CASCADE,
+				FOREIGN KEY (scan_profile_id) REFERENCES resource_scan_profiles(id) ON DELETE SET NULL,
+				UNIQUE(agent_type_id, name)
+			);
+			CREATE INDEX IF NOT EXISTS idx_agent_resource_rules_type ON agent_resource_rules(agent_type_id);
+			CREATE INDEX IF NOT EXISTS idx_resource_scan_profiles_type ON resource_scan_profiles(resource_type);
+			CREATE INDEX IF NOT EXISTS idx_profile_capabilities_profile ON resource_scan_profile_capabilities(profile_id);
+			`); err != nil {
+				return fmt.Errorf("create agent resource rule tables: %w", err)
+			}
+
+			// static_resources: rule/profile lineage + risk columns.
+			for _, spec := range []struct {
+				column, stmt string
+			}{
+				{"resource_rule_id", `ALTER TABLE static_resources ADD COLUMN resource_rule_id INTEGER`},
+				{"scan_profile_id", `ALTER TABLE static_resources ADD COLUMN scan_profile_id INTEGER`},
+				{"risk_level", `ALTER TABLE static_resources ADD COLUMN risk_level TEXT NOT NULL DEFAULT 'clean'`},
+				{"malicious", `ALTER TABLE static_resources ADD COLUMN malicious INTEGER NOT NULL DEFAULT 0`},
+			} {
+				exists, err := hasColumnDB(ex, "static_resources", spec.column)
+				if err != nil {
+					return err
+				}
+				if !exists {
+					if _, err := ex.Exec(spec.stmt); err != nil {
+						return fmt.Errorf("alter static_resources.%s: %w", spec.column, err)
+					}
+				}
+			}
+			if _, err := ex.Exec(`
+			CREATE INDEX IF NOT EXISTS idx_static_resources_rule ON static_resources(resource_rule_id);
+			CREATE INDEX IF NOT EXISTS idx_static_resources_profile ON static_resources(scan_profile_id);
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_static_resource_identity ON static_resources(canonical_agent_id, resource_type, target);
+			`); err != nil {
+				return fmt.Errorf("index static_resources resource lineage: %w", err)
+			}
+
+			// scan_results: link scans back to the rule/profile that
+			// produced them (agent_id/canonical_agent_id and
+			// static_resource_id already exist).
+			for _, spec := range []struct {
+				column, stmt string
+			}{
+				{"scan_profile_id", `ALTER TABLE scan_results ADD COLUMN scan_profile_id INTEGER`},
+				{"resource_rule_id", `ALTER TABLE scan_results ADD COLUMN resource_rule_id INTEGER`},
+			} {
+				present, err := tableExists(ex, "scan_results")
+				if err != nil {
+					return err
+				}
+				if !present {
+					continue
+				}
+				exists, err := hasColumnDB(ex, "scan_results", spec.column)
+				if err != nil {
+					return err
+				}
+				if !exists {
+					if _, err := ex.Exec(spec.stmt); err != nil {
+						return fmt.Errorf("alter scan_results.%s: %w", spec.column, err)
+					}
+				}
+			}
+			for _, stmt := range []string{
+				`CREATE INDEX IF NOT EXISTS idx_scan_results_profile ON scan_results(scan_profile_id)`,
+				`CREATE INDEX IF NOT EXISTS idx_scan_results_rule ON scan_results(resource_rule_id)`,
+			} {
+				present, err := tableExists(ex, "scan_results")
+				if err != nil {
+					return err
+				}
+				if !present {
+					continue
+				}
+				if _, err := ex.Exec(stmt); err != nil {
+					return err
+				}
+			}
+
+			// Backfill risk_level from the legacy max_severity column so
+			// existing rows show a meaningful risk bucket immediately.
+			if _, err := ex.Exec(`
+			UPDATE static_resources SET risk_level = CASE
+			  WHEN lower(max_severity) = 'critical' THEN 'critical'
+			  WHEN lower(max_severity) = 'high' THEN 'high'
+			  WHEN lower(max_severity) = 'medium' THEN 'medium'
+			  WHEN lower(max_severity) = 'low' THEN 'low'
+			  ELSE 'clean' END
+			WHERE risk_level = 'clean' AND finding_count > 0;
+			`); err != nil {
+				return fmt.Errorf("backfill static_resources risk_level: %w", err)
+			}
+
+			if err := seedAgentResourceRules(ex); err != nil {
+				return err
+			}
+			return nil
+		},
+	},
+	{
+		description: "static resources: canonical type/target identity, merge legacy duplicates",
+		apply: func(ex dbExecer) error {
+			present, err := tableExists(ex, "static_resources")
+			if err != nil || !present {
+				return err
+			}
+
+			// Legacy rows may carry capitalized/plural resource types
+			// ("Skills", "MCP") and extended-length path prefixes
+			// ("\\?\C:\...") while the rule-driven inventory writes
+			// singular lowercase types with clean paths — the same
+			// on-disk resource ends up as two rows. Recompute the
+			// canonical identity for every row and merge the groups.
+			type resRow struct {
+				id          string
+				agent       string
+				rtype       string
+				target      string
+				lastSeenAt  string
+				lastScanID  string
+				ruleID      sql.NullInt64
+				profileID   sql.NullInt64
+				contentHash sql.NullString
+			}
+			rows, err := ex.Query(`
+SELECT id,
+       COALESCE(canonical_agent_id, ''),
+       COALESCE(resource_type, ''),
+       COALESCE(target, ''),
+       COALESCE(last_seen_at, ''),
+       COALESCE(last_scan_id, ''),
+       resource_rule_id,
+       scan_profile_id,
+       content_hash
+FROM static_resources`)
+			if err != nil {
+				return fmt.Errorf("select static resources for normalization: %w", err)
+			}
+			var all []resRow
+			for rows.Next() {
+				var r resRow
+				if err := rows.Scan(
+					&r.id, &r.agent, &r.rtype, &r.target,
+					&r.lastSeenAt, &r.lastScanID, &r.ruleID, &r.profileID, &r.contentHash,
+				); err != nil {
+					rows.Close()
+					return fmt.Errorf("scan static resource for normalization: %w", err)
+				}
+				all = append(all, r)
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterate static resources for normalization: %w", err)
+			}
+
+			type resGroup struct {
+				newID  string
+				rtype  string
+				target string
+				rows   []resRow
+			}
+			groups := map[string]*resGroup{}
+			var order []string
+			for _, r := range all {
+				rtype := CanonicalResourceType(r.rtype)
+				target := TrimExtendedPathPrefix(r.target)
+				newID := StaticResourceID(r.agent, target, rtype)
+				g, ok := groups[newID]
+				if !ok {
+					g = &resGroup{newID: newID, rtype: rtype, target: target}
+					groups[newID] = g
+					order = append(order, newID)
+				}
+				g.rows = append(g.rows, r)
+			}
+
+			repoint := func(fromID, toID string) error {
+				if fromID == "" || fromID == toID {
+					return nil
+				}
+				for _, stmt := range []string{
+					`UPDATE scan_results SET static_resource_id = ? WHERE static_resource_id = ?`,
+					`UPDATE scan_findings SET static_resource_id = ? WHERE static_resource_id = ?`,
+				} {
+					if _, err := ex.Exec(stmt, toID, fromID); err != nil {
+						return fmt.Errorf("repoint references from %s: %w", fromID, err)
+					}
+				}
+				return nil
+			}
+
+			for _, newID := range order {
+				g := groups[newID]
+				// Winner: freshest last_seen_at; prefer rows that keep
+				// scan history, then rule-driven lineage, then stable id.
+				winner := g.rows[0]
+				pick := func(a, b resRow) resRow {
+					if a.lastSeenAt != b.lastSeenAt {
+						if a.lastSeenAt > b.lastSeenAt {
+							return a
+						}
+						return b
+					}
+					aScan, bScan := a.lastScanID != "", b.lastScanID != ""
+					if aScan != bScan {
+						if aScan {
+							return a
+						}
+						return b
+					}
+					aRule, bRule := a.ruleID.Valid && a.ruleID.Int64 > 0, b.ruleID.Valid && b.ruleID.Int64 > 0
+					if aRule != bRule {
+						if aRule {
+							return a
+						}
+						return b
+					}
+					if a.id >= b.id {
+						return a
+					}
+					return b
+				}
+				for _, r := range g.rows[1:] {
+					winner = pick(winner, r)
+				}
+
+				var mergedRule, mergedProfile sql.NullInt64
+				var mergedHash sql.NullString
+				mergedRule, mergedProfile, mergedHash = winner.ruleID, winner.profileID, winner.contentHash
+				for _, r := range g.rows {
+					if r.id == winner.id {
+						continue
+					}
+					// Carry rule/profile lineage and the content hash
+					// over to the surviving row when it lacks them.
+					if !mergedRule.Valid || mergedRule.Int64 == 0 {
+						mergedRule = r.ruleID
+					}
+					if !mergedProfile.Valid || mergedProfile.Int64 == 0 {
+						mergedProfile = r.profileID
+					}
+					if !mergedHash.Valid || mergedHash.String == "" {
+						mergedHash = r.contentHash
+					}
+					if err := repoint(r.id, newID); err != nil {
+						return err
+					}
+				}
+				if err := repoint(winner.id, newID); err != nil {
+					return err
+				}
+				for _, r := range g.rows {
+					if r.id == winner.id {
+						continue
+					}
+					if _, err := ex.Exec(`DELETE FROM static_resources WHERE id = ?`, r.id); err != nil {
+						return fmt.Errorf("delete duplicate static resource %s: %w", r.id, err)
+					}
+				}
+				if _, err := ex.Exec(`
+UPDATE static_resources
+SET id = ?, resource_type = ?, target = ?,
+    resource_rule_id = ?, scan_profile_id = ?, content_hash = COALESCE(?, content_hash)
+WHERE id = ?`,
+					newID, g.rtype, g.target,
+					mergedRule, mergedProfile, mergedHash,
+					winner.id,
+				); err != nil {
+					return fmt.Errorf("normalize static resource %s: %w", winner.id, err)
+				}
+			}
+			return nil
+		},
+	},
+	{
+		description: "agent runtime sessions: one row per actual agent run",
+		apply: func(ex dbExecer) error {
+			if _, err := ex.Exec(`
+			CREATE TABLE IF NOT EXISTS agent_runtime_sessions (
+				session_id TEXT PRIMARY KEY,
+				agent_id TEXT NOT NULL,
+				root_pid INTEGER NOT NULL DEFAULT 0,
+				started_at DATETIME NOT NULL,
+				ended_at DATETIME,
+				working_directory TEXT,
+				user TEXT,
+				status TEXT NOT NULL DEFAULT 'active',
+				metadata_json TEXT,
+				FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+			);
+			CREATE INDEX IF NOT EXISTS idx_agent_runtime_sessions_agent ON agent_runtime_sessions(agent_id, started_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_agent_runtime_sessions_status ON agent_runtime_sessions(status, started_at DESC);
+			`); err != nil {
+				return fmt.Errorf("create agent runtime sessions table: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		description: "behavior events: unified runtime event columns (normalizer output)",
+		apply: func(ex dbExecer) error {
+			// Phase-1 unified runtime event collection: Guardrail, Agent
+			// Hook, and Proxy adapters all write normalized events into
+			// behavior_events. The added columns are additive so the
+			// legacy desktop-behavior writer keeps working untouched.
+			cols := []struct {
+				name string
+				dql  string
+			}{
+				{"event_id", "TEXT"},
+				{"event_source", "TEXT"},   // guardrail | agent_hook | proxy | desktop-behavior
+				{"event_category", "TEXT"}, // prompt | tool | lifecycle | content | network
+				{"span_id", "TEXT"},
+				{"parent_span_id", "TEXT"},
+				{"ppid", "INTEGER"},
+				{"operation", "TEXT"},
+				{"target", "TEXT"},
+				{"tool_name", "TEXT"},
+				{"mcp_server", "TEXT"},
+				{"severity", "TEXT"},
+				{"confidence", "REAL"},
+				{"attributes_json", "TEXT"},
+				{"raw_data_json", "TEXT"},
+			}
+			for _, c := range cols {
+				if _, err := ex.Exec(fmt.Sprintf("ALTER TABLE behavior_events ADD COLUMN %s %s", c.name, c.dql)); err != nil {
+					// Columns may already exist when the migration re-runs on a
+					// partially migrated database; only duplicate-column
+					// errors are tolerable.
+					if strings.Contains(err.Error(), "duplicate column name") {
+						continue
+					}
+					return fmt.Errorf("add behavior_events.%s: %w", c.name, err)
+				}
+			}
+			if _, err := ex.Exec(`
+			CREATE INDEX IF NOT EXISTS idx_behavior_events_session ON behavior_events(session_id, timestamp ASC);
+			CREATE INDEX IF NOT EXISTS idx_behavior_events_trace ON behavior_events(trace_id, timestamp ASC);
+			CREATE INDEX IF NOT EXISTS idx_behavior_events_source ON behavior_events(event_source, timestamp DESC);
+			CREATE INDEX IF NOT EXISTS idx_behavior_events_severity ON behavior_events(severity, timestamp DESC);
+			`); err != nil {
+				return fmt.Errorf("create behavior events runtime indexes: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		description: "runtime detections: structured risk findings separate from raw events",
+		apply: func(ex dbExecer) error {
+			// Phase 2 splits "what happened" (behavior_events) from
+			// "what is the security risk" (runtime_detections). A
+			// detection is produced by a generic detection rule
+			// (atomic single-event or correlated multi-event) and is
+			// backed by evidence events linked through
+			// runtime_detection_events.
+			if _, err := ex.Exec(`
+			CREATE TABLE IF NOT EXISTS runtime_detections (
+				detection_id TEXT PRIMARY KEY,
+				agent_id TEXT NOT NULL DEFAULT '',
+				session_id TEXT,
+				trace_id TEXT,
+				detection_type TEXT NOT NULL,
+				category TEXT NOT NULL DEFAULT 'suspicious',
+				severity TEXT NOT NULL DEFAULT 'medium',
+				confidence REAL NOT NULL DEFAULT 0,
+				rule_id TEXT NOT NULL DEFAULT '',
+				status TEXT NOT NULL DEFAULT 'open',
+				title TEXT NOT NULL DEFAULT '',
+				detail TEXT,
+				remediation TEXT,
+				attributes_json TEXT,
+				first_seen_at DATETIME NOT NULL,
+				last_seen_at DATETIME NOT NULL,
+				event_count INTEGER NOT NULL DEFAULT 0,
+				agent_name TEXT
+			);
+			CREATE INDEX IF NOT EXISTS idx_runtime_detections_agent ON runtime_detections(agent_id, last_seen_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_runtime_detections_session ON runtime_detections(session_id, last_seen_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_runtime_detections_rule ON runtime_detections(rule_id, agent_id, session_id, status, last_seen_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_runtime_detections_severity ON runtime_detections(severity, last_seen_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_runtime_detections_type ON runtime_detections(detection_type, last_seen_at DESC);
+
+			CREATE TABLE IF NOT EXISTS runtime_detection_events (
+				detection_id TEXT NOT NULL,
+				event_id INTEGER NOT NULL,
+				role TEXT NOT NULL DEFAULT 'evidence',
+				sequence INTEGER NOT NULL DEFAULT 0,
+				linked_at DATETIME NOT NULL,
+				PRIMARY KEY (detection_id, event_id)
+			);
+			CREATE INDEX IF NOT EXISTS idx_runtime_detection_events_event ON runtime_detection_events(event_id);
+			`); err != nil {
+				return fmt.Errorf("create runtime detections tables: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		description: "runtime decisions: unified policy decision, response actions, and backend attack chains",
+		apply: func(ex dbExecer) error {
+			// Phase 3 closes the detect → decide → enforce loop.
+			// runtime_decisions is the unified verdict ("应该怎么处理？")
+			// derived from a runtime_detection by the policy engine;
+			// runtime_response_actions records what was ACTUALLY
+			// executed at which enforcement point (observe mode
+			// records would_block instead); runtime_attack_chains
+			// persists correlated attack chains as backend security
+			// objects with their event sequences instead of rebuilding
+			// them from page-level display logic.
+			if _, err := ex.Exec(`
+			CREATE TABLE IF NOT EXISTS runtime_decisions (
+				decision_id TEXT PRIMARY KEY,
+				detection_id TEXT NOT NULL,
+				agent_id TEXT NOT NULL DEFAULT '',
+				session_id TEXT,
+				trace_id TEXT,
+				decision TEXT NOT NULL,
+				risk_score REAL NOT NULL DEFAULT 0,
+				confidence REAL NOT NULL DEFAULT 0,
+				policy_id TEXT NOT NULL DEFAULT '',
+				reason TEXT,
+				enforcement_point TEXT NOT NULL DEFAULT '',
+				mode TEXT NOT NULL DEFAULT 'observe',
+				would_block INTEGER NOT NULL DEFAULT 0,
+				agent_name TEXT,
+				created_at DATETIME NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_runtime_decisions_detection ON runtime_decisions(detection_id, created_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_runtime_decisions_agent ON runtime_decisions(agent_id, created_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_runtime_decisions_session ON runtime_decisions(session_id, created_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_runtime_decisions_verdict ON runtime_decisions(decision, created_at DESC);
+
+			CREATE TABLE IF NOT EXISTS runtime_response_actions (
+				response_id TEXT PRIMARY KEY,
+				decision_id TEXT NOT NULL,
+				action_type TEXT NOT NULL,
+				executor TEXT NOT NULL DEFAULT '',
+				target TEXT,
+				status TEXT NOT NULL DEFAULT 'pending',
+				result TEXT,
+				executed_at DATETIME NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_runtime_response_actions_decision ON runtime_response_actions(decision_id, executed_at DESC);
+
+			CREATE TABLE IF NOT EXISTS runtime_attack_chains (
+				attack_chain_id TEXT PRIMARY KEY,
+				agent_id TEXT NOT NULL DEFAULT '',
+				session_id TEXT,
+				trace_id TEXT,
+				attack_type TEXT NOT NULL,
+				severity TEXT NOT NULL DEFAULT 'high',
+				status TEXT NOT NULL DEFAULT 'active',
+				start_time DATETIME NOT NULL,
+				end_time DATETIME NOT NULL,
+				detection_id TEXT NOT NULL DEFAULT '',
+				decision_id TEXT NOT NULL DEFAULT '',
+				agent_name TEXT
+			);
+			CREATE INDEX IF NOT EXISTS idx_runtime_attack_chains_agent ON runtime_attack_chains(agent_id, start_time DESC);
+			CREATE INDEX IF NOT EXISTS idx_runtime_attack_chains_session ON runtime_attack_chains(session_id, start_time DESC);
+			CREATE INDEX IF NOT EXISTS idx_runtime_attack_chains_detection ON runtime_attack_chains(detection_id);
+
+			CREATE TABLE IF NOT EXISTS runtime_attack_chain_events (
+				attack_chain_id TEXT NOT NULL,
+				event_id INTEGER NOT NULL,
+				sequence INTEGER NOT NULL DEFAULT 0,
+				relation TEXT NOT NULL DEFAULT '',
+				PRIMARY KEY (attack_chain_id, event_id)
+			);
+			CREATE INDEX IF NOT EXISTS idx_runtime_attack_chain_events_event ON runtime_attack_chain_events(event_id);
+			`); err != nil {
+				return fmt.Errorf("create runtime decisions tables: %w", err)
+			}
+			return nil
+		},
+	},
+}
+
+type agentDiscoverySeed struct {
+	TypeKey     string
+	Name        string
+	Vendor      string
+	Kind        string
+	Runtime     string
+	Description string
+	RuleName    string
+	Threshold   int
+	Conditions  []agentDiscoveryConditionSeed
+}
+
+type agentDiscoveryConditionSeed struct {
+	Type     string
+	Field    string
+	Operator string
+	Value    string
+	Weight   int
+	Required bool
+}
+
+func seedAgentDiscoveryCatalog(ex dbExecer) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, seed := range defaultAgentDiscoverySeeds() {
+		if _, err := ex.Exec(`
+INSERT INTO agent_types (type_key, name, vendor, kind, runtime, description, enabled, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+ON CONFLICT(type_key) DO UPDATE SET
+  name = excluded.name,
+  vendor = excluded.vendor,
+  kind = excluded.kind,
+  runtime = excluded.runtime,
+  description = excluded.description,
+  enabled = excluded.enabled,
+  updated_at = excluded.updated_at`,
+			seed.TypeKey, seed.Name, seed.Vendor, seed.Kind, seed.Runtime, seed.Description, now, now,
+		); err != nil {
+			return fmt.Errorf("seed agent type %q: %w", seed.TypeKey, err)
+		}
+		var typeID int64
+		if err := ex.QueryRow(`SELECT id FROM agent_types WHERE type_key = ?`, seed.TypeKey).Scan(&typeID); err != nil {
+			return fmt.Errorf("lookup agent type %q: %w", seed.TypeKey, err)
+		}
+		threshold := seed.Threshold
+		if threshold <= 0 {
+			threshold = 60
+		}
+		ruleName := firstNonEmpty(seed.RuleName, seed.Name+" default discovery")
+		if _, err := ex.Exec(`
+INSERT INTO agent_discovery_rules (agent_type_id, rule_name, threshold, enabled, created_at, updated_at)
+VALUES (?, ?, ?, 1, ?, ?)
+ON CONFLICT(agent_type_id, rule_name) DO UPDATE SET
+  threshold = excluded.threshold,
+  enabled = excluded.enabled,
+  updated_at = excluded.updated_at`,
+			typeID, ruleName, threshold, now, now,
+		); err != nil {
+			return fmt.Errorf("seed discovery rule %q: %w", ruleName, err)
+		}
+		var ruleID int64
+		if err := ex.QueryRow(`SELECT id FROM agent_discovery_rules WHERE agent_type_id = ? AND rule_name = ?`, typeID, ruleName).Scan(&ruleID); err != nil {
+			return fmt.Errorf("lookup discovery rule %q: %w", ruleName, err)
+		}
+		for _, cond := range seed.Conditions {
+			required := 0
+			if cond.Required {
+				required = 1
+			}
+			if _, err := ex.Exec(`
+INSERT INTO agent_discovery_conditions (
+  rule_id, condition_type, field, operator, value, weight, required, enabled, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+ON CONFLICT(rule_id, condition_type, field, operator, value) DO UPDATE SET
+  weight = excluded.weight,
+  required = excluded.required,
+  enabled = excluded.enabled,
+  updated_at = excluded.updated_at`,
+				ruleID, cond.Type, cond.Field, cond.Operator, cond.Value, cond.Weight, required, now, now,
+			); err != nil {
+				return fmt.Errorf("seed discovery condition %q/%q: %w", seed.TypeKey, cond.Value, err)
+			}
+		}
+	}
+	return nil
+}
+
+// --- Agent resource rules / scan profiles / security capabilities seeds ---
+
+type resourceProfileSeed struct {
+	Name         string
+	ResourceType string
+	Description  string
+	Capabilities []string // capability_keys, in priority order
+}
+
+type resourceCapabilitySeed struct {
+	CapabilityKey string
+	Name          string
+	ScannerName   string
+	Description   string
+}
+
+type resourceRuleSeed struct {
+	TypeKey         string
+	Name            string
+	ResourceType    string
+	PathPattern     string
+	EnumerationMode string
+	ProfileName     string
+}
+
+func defaultResourceCapabilitySeeds() []resourceCapabilitySeed {
+	return []resourceCapabilitySeed{
+		{CapabilityKey: "skill_security", Name: "Skill 安全检测", ScannerName: "skill-scanner", Description: "Python skill-scanner CLI（含可选 LLM 分析）"},
+		{CapabilityKey: "mcp_security", Name: "MCP 安全检测", ScannerName: "mcp-scanner", Description: "Python defenseclaw mcp scan CLI（含可选 LLM 分析）"},
+		{CapabilityKey: "plugin_security", Name: "Plugin 安全检测", ScannerName: "plugin-scanner", Description: "Plugin 扫描器"},
+		{CapabilityKey: "secret_detection", Name: "密钥泄露检测", ScannerName: "clawshield-secrets", Description: "ClawShield 内置密钥/凭据正则检测"},
+		{CapabilityKey: "pii_detection", Name: "PII 检测", ScannerName: "clawshield-pii", Description: "ClawShield 内置个人敏感信息检测"},
+		{CapabilityKey: "malware_detection", Name: "恶意代码检测", ScannerName: "clawshield-malware", Description: "ClawShield 内置恶意特征/脚本/高熵负载检测"},
+		{CapabilityKey: "vulnerability_detection", Name: "漏洞检测", ScannerName: "clawshield-vuln", Description: "ClawShield 内置危险 API/漏洞模式检测"},
+		{CapabilityKey: "prompt_injection", Name: "提示注入检测", ScannerName: "clawshield-injection", Description: "ClawShield 内置提示注入/指令覆盖检测"},
+	}
+}
+
+func defaultResourceProfileSeeds() []resourceProfileSeed {
+	return []resourceProfileSeed{
+		{
+			Name: "skill-full", ResourceType: "skill", Description: "Skill 全量安全检测：SkillScanner + Malware + Injection + Secrets + PII + Vuln",
+			Capabilities: []string{"skill_security", "malware_detection", "prompt_injection", "secret_detection", "pii_detection", "vulnerability_detection"},
+		},
+		{
+			Name: "mcp-full", ResourceType: "mcp", Description: "MCP 全量安全检测：MCPScanner + Secrets + Malware + Injection",
+			Capabilities: []string{"mcp_security", "secret_detection", "malware_detection", "prompt_injection"},
+		},
+		{
+			Name: "plugin-full", ResourceType: "plugin", Description: "Plugin 安全检测：PluginScanner + Secrets + Malware",
+			Capabilities: []string{"plugin_security", "secret_detection", "malware_detection"},
+		},
+		{
+			Name: "config-basic", ResourceType: "config", Description: "Config 安全检测：Secrets + Injection",
+			Capabilities: []string{"secret_detection", "prompt_injection"},
+		},
+		{
+			Name: "prompt-basic", ResourceType: "prompt", Description: "Prompt 安全检测：Injection + Secrets",
+			Capabilities: []string{"prompt_injection", "secret_detection"},
+		},
+		{
+			Name: "credential-basic", ResourceType: "credential", Description: "Credential 安全检测：Secrets + PII",
+			Capabilities: []string{"secret_detection", "pii_detection"},
+		},
+	}
+}
+
+func defaultResourceRuleSeeds() []resourceRuleSeed {
+	return []resourceRuleSeed{
+		// AgentRange 靶场：workspace 根目录下的 skills/、mcp/、docker-compose.yml
+		{TypeKey: "agentrange-opspilot", Name: "agentrange-skills", ResourceType: "skill", PathPattern: "${WORKSPACE_ROOT}/skills", EnumerationMode: "children", ProfileName: "skill-full"},
+		{TypeKey: "agentrange-opspilot", Name: "agentrange-mcp", ResourceType: "mcp", PathPattern: "${WORKSPACE_ROOT}/mcp", EnumerationMode: "children", ProfileName: "mcp-full"},
+		{TypeKey: "agentrange-opspilot", Name: "agentrange-compose", ResourceType: "config", PathPattern: "${WORKSPACE_ROOT}/docker-compose.yml", EnumerationMode: "exact", ProfileName: "config-basic"},
+
+		// OpenClaw
+		{TypeKey: "openclaw", Name: "openclaw-skills", ResourceType: "skill", PathPattern: "${CONFIG_ROOT}/skills", EnumerationMode: "children", ProfileName: "skill-full"},
+		{TypeKey: "openclaw", Name: "openclaw-config", ResourceType: "config", PathPattern: "${CONFIG_ROOT}/openclaw.json", EnumerationMode: "exact", ProfileName: "config-basic"},
+
+		// Claude Code
+		{TypeKey: "claude-code", Name: "claude-skills", ResourceType: "skill", PathPattern: "${CONFIG_ROOT}/skills", EnumerationMode: "children", ProfileName: "skill-full"},
+		{TypeKey: "claude-code", Name: "claude-settings", ResourceType: "config", PathPattern: "${CONFIG_ROOT}/settings.json", EnumerationMode: "exact", ProfileName: "config-basic"},
+		{TypeKey: "claude-code", Name: "claude-prompt", ResourceType: "prompt", PathPattern: "${CONFIG_ROOT}/CLAUDE.md", EnumerationMode: "exact", ProfileName: "prompt-basic"},
+
+		// OpenAI Codex
+		{TypeKey: "codex", Name: "codex-skills", ResourceType: "skill", PathPattern: "${CONFIG_ROOT}/skills", EnumerationMode: "children", ProfileName: "skill-full"},
+		{TypeKey: "codex", Name: "codex-config", ResourceType: "config", PathPattern: "${CONFIG_ROOT}/config.toml", EnumerationMode: "exact", ProfileName: "config-basic"},
+
+		// Gemini CLI
+		{TypeKey: "gemini-cli", Name: "gemini-settings", ResourceType: "config", PathPattern: "${CONFIG_ROOT}/settings.json", EnumerationMode: "exact", ProfileName: "config-basic"},
+		{TypeKey: "gemini-cli", Name: "gemini-prompt", ResourceType: "prompt", PathPattern: "${CONFIG_ROOT}/GEMINI.md", EnumerationMode: "exact", ProfileName: "prompt-basic"},
+	}
+}
+
+func seedAgentResourceRules(ex dbExecer) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+
+	capabilityIDs := make(map[string]int64, len(defaultResourceCapabilitySeeds()))
+	for _, cap := range defaultResourceCapabilitySeeds() {
+		if _, err := ex.Exec(`
+INSERT INTO security_scan_capabilities (capability_key, name, scanner_name, enabled, description, created_at, updated_at)
+VALUES (?, ?, ?, 1, ?, ?, ?)
+ON CONFLICT(capability_key) DO UPDATE SET
+  name = excluded.name,
+  scanner_name = excluded.scanner_name,
+  enabled = excluded.enabled,
+  description = excluded.description,
+  updated_at = excluded.updated_at`,
+			cap.CapabilityKey, cap.Name, cap.ScannerName, cap.Description, now, now,
+		); err != nil {
+			return fmt.Errorf("seed capability %q: %w", cap.CapabilityKey, err)
+		}
+		var id int64
+		if err := ex.QueryRow(`SELECT id FROM security_scan_capabilities WHERE capability_key = ?`, cap.CapabilityKey).Scan(&id); err != nil {
+			return fmt.Errorf("lookup capability %q: %w", cap.CapabilityKey, err)
+		}
+		capabilityIDs[cap.CapabilityKey] = id
+	}
+
+	profileIDs := make(map[string]int64, len(defaultResourceProfileSeeds()))
+	for _, profile := range defaultResourceProfileSeeds() {
+		if _, err := ex.Exec(`
+INSERT INTO resource_scan_profiles (name, resource_type, enabled, description, created_at, updated_at)
+VALUES (?, ?, 1, ?, ?, ?)
+ON CONFLICT(name) DO UPDATE SET
+  resource_type = excluded.resource_type,
+  enabled = excluded.enabled,
+  description = excluded.description,
+  updated_at = excluded.updated_at`,
+			profile.Name, profile.ResourceType, profile.Description, now, now,
+		); err != nil {
+			return fmt.Errorf("seed profile %q: %w", profile.Name, err)
+		}
+		var profileID int64
+		if err := ex.QueryRow(`SELECT id FROM resource_scan_profiles WHERE name = ?`, profile.Name).Scan(&profileID); err != nil {
+			return fmt.Errorf("lookup profile %q: %w", profile.Name, err)
+		}
+		profileIDs[profile.Name] = profileID
+
+		for i, key := range profile.Capabilities {
+			capID, ok := capabilityIDs[key]
+			if !ok {
+				continue
+			}
+			priority := 100 + i
+			if _, err := ex.Exec(`
+INSERT INTO resource_scan_profile_capabilities (profile_id, capability_id, priority, enabled, config_json, created_at, updated_at)
+VALUES (?, ?, ?, 1, NULL, ?, ?)
+ON CONFLICT(profile_id, capability_id) DO UPDATE SET
+  priority = excluded.priority,
+  enabled = excluded.enabled,
+  updated_at = excluded.updated_at`,
+				profileID, capID, priority, now, now,
+			); err != nil {
+				return fmt.Errorf("seed profile capability %q/%q: %w", profile.Name, key, err)
+			}
+		}
+	}
+
+	for _, rule := range defaultResourceRuleSeeds() {
+		var typeID int64
+		if err := ex.QueryRow(`SELECT id FROM agent_types WHERE type_key = ?`, rule.TypeKey).Scan(&typeID); err != nil {
+			// Agent type not seeded on this install (e.g. trimmed catalog):
+			// skip the rule rather than failing the migration.
+			continue
+		}
+		var profileID any
+		if id, ok := profileIDs[rule.ProfileName]; ok {
+			profileID = id
+		}
+		if _, err := ex.Exec(`
+INSERT INTO agent_resource_rules (
+  agent_type_id, name, resource_type, path_pattern, enumeration_mode, scan_profile_id, enabled, priority, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, 1, 100, ?, ?)
+ON CONFLICT(agent_type_id, name) DO UPDATE SET
+  resource_type = excluded.resource_type,
+  path_pattern = excluded.path_pattern,
+  enumeration_mode = excluded.enumeration_mode,
+  scan_profile_id = excluded.scan_profile_id,
+  enabled = excluded.enabled,
+  priority = excluded.priority,
+  updated_at = excluded.updated_at`,
+			typeID, rule.Name, rule.ResourceType, rule.PathPattern, rule.EnumerationMode, profileID, now, now,
+		); err != nil {
+			return fmt.Errorf("seed resource rule %q/%q: %w", rule.TypeKey, rule.Name, err)
+		}
+	}
+	return nil
+}
+
+func defaultAgentDiscoverySeeds() []agentDiscoverySeed {
+	return []agentDiscoverySeed{
+		{
+			TypeKey:     "agentrange-opspilot",
+			Name:        "AgentRange / OpsPilot",
+			Vendor:      "TraceBastion Lab",
+			Kind:        "agent-platform",
+			Runtime:     "Agent Platform",
+			Description: "Local AgentRange target platform used for TraceBastion lab scenarios.",
+			RuleName:    "AgentRange configured workspace",
+			Threshold:   70,
+			Conditions: []agentDiscoveryConditionSeed{
+				{Type: "agentrange_root", Field: "path", Operator: "exists", Value: "configured-workspace", Weight: 70, Required: true},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "agentrange", Weight: 60},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "opspilot", Weight: 60},
+			},
+		},
+		{
+			TypeKey:     "openclaw",
+			Name:        "OpenClaw",
+			Vendor:      "DefenseClaw",
+			Kind:        "agent-platform",
+			Runtime:     "Agent Platform",
+			Description: "OpenClaw local agent platform configuration and runtime signals.",
+			RuleName:    "OpenClaw local installation",
+			Threshold:   60,
+			Conditions: []agentDiscoveryConditionSeed{
+				{Type: "cli", Field: "name", Operator: "exists", Value: "openclaw", Weight: 40},
+				{Type: "directory", Field: "path", Operator: "exists", Value: "~/.openclaw", Weight: 60},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "openclaw", Weight: 60},
+			},
+		},
+		{
+			TypeKey:     "claude-code",
+			Name:        "Claude Code",
+			Vendor:      "Anthropic",
+			Kind:        "terminal-agent",
+			Runtime:     "CLI Agent",
+			Description: "Anthropic Claude Code CLI agent.",
+			RuleName:    "Claude Code CLI and config",
+			Threshold:   40,
+			Conditions: []agentDiscoveryConditionSeed{
+				{Type: "cli", Field: "name", Operator: "exists", Value: "claude", Weight: 40},
+				{Type: "directory", Field: "path", Operator: "exists", Value: "~/.claude", Weight: 25},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "claude", Weight: 60},
+			},
+		},
+		{
+			TypeKey:     "codex",
+			Name:        "OpenAI Codex",
+			Vendor:      "OpenAI",
+			Kind:        "terminal-agent",
+			Runtime:     "CLI Agent",
+			Description: "OpenAI Codex CLI coding agent.",
+			RuleName:    "Codex CLI and config",
+			Threshold:   40,
+			Conditions: []agentDiscoveryConditionSeed{
+				{Type: "cli", Field: "name", Operator: "exists", Value: "codex", Weight: 40},
+				{Type: "directory", Field: "path", Operator: "exists", Value: "~/.codex", Weight: 25},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "codex", Weight: 60},
+			},
+		},
+		{
+			TypeKey:     "gemini-cli",
+			Name:        "Gemini CLI",
+			Vendor:      "Google",
+			Kind:        "terminal-agent",
+			Runtime:     "CLI Agent",
+			Description: "Google Gemini CLI agent.",
+			RuleName:    "Gemini CLI and config",
+			Threshold:   40,
+			Conditions: []agentDiscoveryConditionSeed{
+				{Type: "cli", Field: "name", Operator: "exists", Value: "gemini", Weight: 40},
+				{Type: "directory", Field: "path", Operator: "exists", Value: "~/.gemini", Weight: 25},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "gemini", Weight: 60},
+			},
+		},
+		{
+			TypeKey:     "aider",
+			Name:        "Aider",
+			Vendor:      "Aider",
+			Kind:        "terminal-agent",
+			Runtime:     "CLI Agent",
+			Description: "Aider CLI coding agent.",
+			RuleName:    "Aider CLI and config",
+			Threshold:   40,
+			Conditions: []agentDiscoveryConditionSeed{
+				{Type: "cli", Field: "name", Operator: "exists", Value: "aider", Weight: 40},
+				{Type: "file", Field: "path", Operator: "exists", Value: "~/.aider.conf.yml", Weight: 25},
+				{Type: "directory", Field: "path", Operator: "exists", Value: "~/.aider", Weight: 25},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "aider", Weight: 60},
+			},
+		},
+		{
+			TypeKey:     "opencode",
+			Name:        "OpenCode",
+			Vendor:      "OpenCode",
+			Kind:        "terminal-agent",
+			Runtime:     "CLI Agent",
+			Description: "OpenCode CLI coding agent.",
+			RuleName:    "OpenCode CLI and config",
+			Threshold:   40,
+			Conditions: []agentDiscoveryConditionSeed{
+				{Type: "cli", Field: "name", Operator: "exists", Value: "opencode", Weight: 40},
+				{Type: "directory", Field: "path", Operator: "exists", Value: "${XDG_CONFIG_HOME}/opencode", Weight: 25},
+				{Type: "directory", Field: "path", Operator: "exists", Value: "~/.config/opencode", Weight: 25},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "opencode", Weight: 60},
+			},
+		},
+		{
+			TypeKey:     "cursor",
+			Name:        "Cursor",
+			Vendor:      "Anysphere",
+			Kind:        "editor-agent",
+			Runtime:     "IDE Agent",
+			Description: "Cursor AI editor agent.",
+			RuleName:    "Cursor installation and config",
+			Threshold:   60,
+			Conditions: []agentDiscoveryConditionSeed{
+				{Type: "file", Field: "executable_path", Operator: "exists", Value: "%LOCALAPPDATA%\\Programs\\Cursor\\Cursor.exe", Weight: 60},
+				{Type: "file", Field: "executable_path", Operator: "exists", Value: "%ProgramFiles%\\Cursor\\Cursor.exe", Weight: 60},
+				{Type: "directory", Field: "path", Operator: "exists", Value: "%APPDATA%\\Cursor\\User", Weight: 25},
+				{Type: "directory", Field: "path", Operator: "exists", Value: "~/.cursor", Weight: 25},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "cursor", Weight: 60},
+			},
+		},
+		{
+			TypeKey:     "cline",
+			Name:        "Cline",
+			Vendor:      "Cline",
+			Kind:        "editor-agent",
+			Runtime:     "IDE Agent",
+			Description: "Cline VS Code agent extension.",
+			RuleName:    "Cline extension storage",
+			Threshold:   60,
+			Conditions: []agentDiscoveryConditionSeed{
+				{Type: "directory", Field: "path", Operator: "exists", Value: "%APPDATA%\\Code\\User\\globalStorage\\saoudrizwan.claude-dev", Weight: 60},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "cline", Weight: 60},
+			},
+		},
+		{
+			TypeKey:     "roo-code",
+			Name:        "Roo Code",
+			Vendor:      "Roo Code",
+			Kind:        "editor-agent",
+			Runtime:     "IDE Agent",
+			Description: "Roo Code VS Code agent extension.",
+			RuleName:    "Roo Code extension storage",
+			Threshold:   60,
+			Conditions: []agentDiscoveryConditionSeed{
+				{Type: "directory", Field: "path", Operator: "exists", Value: "%APPDATA%\\Code\\User\\globalStorage\\rooveterinaryinc.roo-cline", Weight: 60},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "roo", Weight: 60},
+			},
+		},
+		{
+			TypeKey:     "qoder",
+			Name:        "Qoder",
+			Vendor:      "Qoder",
+			Kind:        "ide-agent",
+			Runtime:     "IDE Agent",
+			Description: "Qoder IDE agent.",
+			RuleName:    "Qoder installation and config",
+			Threshold:   60,
+			Conditions: []agentDiscoveryConditionSeed{
+				{Type: "file", Field: "executable_path", Operator: "exists", Value: "%LOCALAPPDATA%\\Programs\\Qoder\\Qoder.exe", Weight: 60},
+				{Type: "directory", Field: "path", Operator: "exists", Value: "%APPDATA%\\Qoder", Weight: 25},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "qoder", Weight: 60},
+			},
+		},
+		{
+			TypeKey:     "trae",
+			Name:        "Trae",
+			Vendor:      "ByteDance",
+			Kind:        "desktop-agent",
+			Runtime:     "Desktop Agent",
+			Description: "Trae AI desktop agent.",
+			RuleName:    "Trae installation and config",
+			Threshold:   60,
+			Conditions: []agentDiscoveryConditionSeed{
+				{Type: "file", Field: "executable_path", Operator: "exists", Value: "%LOCALAPPDATA%\\Programs\\Trae\\Trae.exe", Weight: 60},
+				{Type: "directory", Field: "path", Operator: "exists", Value: "%APPDATA%\\Trae", Weight: 25},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "trae", Weight: 60},
+			},
+		},
+		{
+			TypeKey:     "cherry-studio",
+			Name:        "Cherry Studio",
+			Vendor:      "Cherry Studio",
+			Kind:        "desktop-agent",
+			Runtime:     "Desktop Agent",
+			Description: "Cherry Studio desktop agent.",
+			RuleName:    "Cherry Studio installation and config",
+			Threshold:   60,
+			Conditions: []agentDiscoveryConditionSeed{
+				{Type: "file", Field: "executable_path", Operator: "exists", Value: "%LOCALAPPDATA%\\Programs\\Cherry Studio\\Cherry Studio.exe", Weight: 60},
+				{Type: "directory", Field: "path", Operator: "exists", Value: "%APPDATA%\\CherryStudio", Weight: 25},
+				{Type: "directory", Field: "path", Operator: "exists", Value: "%APPDATA%\\Cherry Studio", Weight: 25},
+				{Type: "process", Field: "command_line", Operator: "contains", Value: "cherry", Weight: 60},
+			},
+		},
+	}
 }
 
 // tableExists reports whether the given SQLite table is present.
@@ -1392,6 +2724,10 @@ func (s *Store) Init() error {
 		if err := s.applyMigration(ver, m); err != nil {
 			return err
 		}
+	}
+
+	if err := s.backfillAgentInventory(); err != nil {
+		return err
 	}
 
 	return nil
@@ -1468,10 +2804,23 @@ var knownTables = map[string]bool{
 	"network_egress_events": true,
 	"judge_responses":       true,
 	"schema_version":        true,
+	"agents":                true,
+	"agent_aliases":         true,
+	"static_resources":      true,
+	"behavior_events":       true,
+	"app_settings":          true,
 	// v7 additions
 	"scan_findings":   true,
 	"activity_events": true,
 	"sink_health":     true,
+	// agent discovery catalog + resource rules
+	"agent_types":                        true,
+	"agent_discovery_rules":              true,
+	"agent_discovery_conditions":         true,
+	"agent_resource_rules":               true,
+	"resource_scan_profiles":             true,
+	"security_scan_capabilities":         true,
+	"resource_scan_profile_capabilities": true,
 }
 
 func (s *Store) hasColumn(table, column string) (bool, error) {
@@ -1543,6 +2892,24 @@ func (s *Store) LogEvent(e Event) error {
 	if e.SidecarInstanceID == "" {
 		e.SidecarInstanceID = ProcessAgentInstanceID()
 	}
+	agent, err := s.EnsureAgent(AgentIdentityInput{
+		AgentID:    e.AgentID,
+		AgentName:  e.AgentName,
+		Connector:  e.Connector,
+		Target:     e.Target,
+		Source:     "audit_events",
+		Status:     "observed",
+		ObservedAt: e.Timestamp,
+	})
+	if err != nil {
+		return err
+	}
+	if e.CanonicalAgentID == "" {
+		e.CanonicalAgentID = agent.ID
+	}
+	if agent.DisplayName != "" {
+		e.AgentName = agent.DisplayName
+	}
 
 	structuredJSON, err := encodeStructuredPayload(e.Structured)
 	if err != nil {
@@ -1554,15 +2921,15 @@ func (s *Store) LogEvent(e Event) error {
 		`INSERT INTO audit_events (id, timestamp, action, target, actor, details, structured_json, severity,
 			run_id, trace_id, request_id,
 			session_id, agent_name, agent_instance_id, policy_id, destination_app, tool_name, tool_id,
-			schema_version, content_hash, generation, binary_version, agent_id, sidecar_instance_id,
+			schema_version, content_hash, generation, binary_version, agent_id, canonical_agent_id, sidecar_instance_id,
 			connector, step_idx, enforced, rule_pack_dir)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, ts, e.Action, e.Target, e.Actor, e.Details, structuredJSON, e.Severity,
 		nullStr(e.RunID), nullStr(e.TraceID), nullStr(e.RequestID),
 		nullStr(e.SessionID), nullStr(e.AgentName), nullStr(e.AgentInstanceID),
 		nullStr(e.PolicyID), nullStr(e.DestinationApp), nullStr(e.ToolName), nullStr(e.ToolID),
 		nullInt(e.SchemaVersion), nullStr(e.ContentHash), nullUint64(e.Generation),
-		nullStr(e.BinaryVersion), nullStr(e.AgentID), nullStr(e.SidecarInstanceID),
+		nullStr(e.BinaryVersion), nullStr(e.AgentID), nullStr(e.CanonicalAgentID), nullStr(e.SidecarInstanceID),
 		nullStr(e.Connector), nullInt(e.StepIdx), nullBool(e.Enforced),
 		nullStr(e.RulePackDir),
 	)
@@ -1594,6 +2961,7 @@ type ActivityEventRow struct {
 	Generation        uint64    `json:"generation,omitempty"`
 	BinaryVersion     string    `json:"binary_version,omitempty"`
 	AgentID           string    `json:"agent_id,omitempty"`
+	CanonicalAgentID  string    `json:"canonical_agent_id,omitempty"`
 	SidecarInstanceID string    `json:"sidecar_instance_id,omitempty"`
 }
 
@@ -1608,21 +2976,35 @@ func (s *Store) InsertActivityEvent(a ActivityEventRow) error {
 	if a.RunID == "" {
 		a.RunID = currentRunID()
 	}
-	_, err := s.execDB(context.Background(), "audit",
+	agent, err := s.EnsureAgent(AgentIdentityInput{
+		AgentID:    firstNonEmpty(a.CanonicalAgentID, a.AgentID),
+		AgentName:  a.AgentID,
+		Target:     a.TargetID,
+		Source:     "activity_events",
+		Status:     "observed",
+		ObservedAt: a.Timestamp,
+	})
+	if err != nil {
+		return err
+	}
+	if agent.ID != "" {
+		a.CanonicalAgentID = agent.ID
+	}
+	_, err = s.execDB(context.Background(), "audit",
 		`INSERT INTO activity_events (
 			id, timestamp, actor, action, target_type, target_id, reason,
 			before_json, after_json, diff_json, version_from, version_to,
 			request_id, trace_id, run_id,
 			schema_version, content_hash, generation, binary_version,
-			agent_id, sidecar_instance_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			agent_id, canonical_agent_id, sidecar_instance_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Timestamp.Format(time.RFC3339Nano),
 		a.Actor, a.Action, a.TargetType, a.TargetID, anyString(a.Reason),
 		anyString(a.BeforeJSON), anyString(a.AfterJSON), anyString(a.DiffJSON),
 		anyString(a.VersionFrom), anyString(a.VersionTo),
 		anyString(a.RequestID), anyString(a.TraceID), anyString(a.RunID),
 		nullInt(a.SchemaVersion), anyString(a.ContentHash), nullUint64(a.Generation),
-		anyString(a.BinaryVersion), anyString(a.AgentID), anyString(a.SidecarInstanceID),
+		anyString(a.BinaryVersion), anyString(a.AgentID), anyString(a.CanonicalAgentID), anyString(a.SidecarInstanceID),
 	)
 	if err != nil {
 		return fmt.Errorf("audit: insert activity event: %w", err)
@@ -1694,7 +3076,7 @@ func (s *Store) ListActivityEvents(limit int) ([]ActivityEventRow, error) {
 			COALESCE(version_from,''), COALESCE(version_to,''),
 			COALESCE(request_id,''), COALESCE(trace_id,''), COALESCE(run_id,''),
 			COALESCE(schema_version,0), COALESCE(content_hash,''), COALESCE(generation,0),
-			COALESCE(binary_version,''), COALESCE(agent_id,''), COALESCE(sidecar_instance_id,'')
+			COALESCE(binary_version,''), COALESCE(agent_id,''), COALESCE(canonical_agent_id,''), COALESCE(sidecar_instance_id,'')
 		FROM activity_events ORDER BY timestamp DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("audit: list activity events: %w", err)
@@ -1713,7 +3095,7 @@ func (s *Store) ListActivityEvents(limit int) ([]ActivityEventRow, error) {
 			&a.VersionFrom, &a.VersionTo,
 			&a.RequestID, &a.TraceID, &a.RunID,
 			&schema, &a.ContentHash, &gen,
-			&a.BinaryVersion, &a.AgentID, &a.SidecarInstanceID,
+			&a.BinaryVersion, &a.AgentID, &a.CanonicalAgentID, &a.SidecarInstanceID,
 		); err != nil {
 			return nil, fmt.Errorf("audit: scan activity: %w", err)
 		}
@@ -1768,6 +3150,7 @@ type JudgeResponse struct {
 	Generation        uint64
 	BinaryVersion     string
 	AgentID           string
+	CanonicalAgentID  string
 	AgentInstanceID   string
 	SidecarInstanceID string
 	PolicyID          string
@@ -1817,6 +3200,7 @@ func (b *JudgeBatch) InsertJudgeResponse(e JudgeResponse) error {
 	if e.RunID == "" {
 		e.RunID = currentRunID()
 	}
+	e.CanonicalAgentID = firstNonEmpty(e.CanonicalAgentID, CanonicalAgentIDFromHints(e.AgentID, e.AgentInstanceID))
 	raw := truncateJudgeRaw(e.Raw, MaxJudgeRawBytes)
 	failClosed := 0
 	if e.FailClosedApplied {
@@ -1828,9 +3212,9 @@ func (b *JudgeBatch) InsertJudgeResponse(e JudgeResponse) error {
 			 parse_error, raw_response, request_id, trace_id, run_id, session_id, input_hash,
 			 confidence, fail_closed_applied, inspected_model, prompt_template_id,
 			 schema_version, content_hash, generation, binary_version,
-			 agent_id, agent_instance_id, sidecar_instance_id,
+			 agent_id, canonical_agent_id, agent_instance_id, sidecar_instance_id,
 			 policy_id, destination_app, tool_name, tool_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID,
 		e.Timestamp.Format(time.RFC3339Nano),
 		e.Kind,
@@ -1855,6 +3239,7 @@ func (b *JudgeBatch) InsertJudgeResponse(e JudgeResponse) error {
 		int64(e.Generation),
 		nullStr(e.BinaryVersion),
 		nullStr(e.AgentID),
+		nullStr(e.CanonicalAgentID),
 		nullStr(e.AgentInstanceID),
 		nullStr(e.SidecarInstanceID),
 		nullStr(e.PolicyID),
@@ -1949,20 +3334,34 @@ func (s *Store) InsertJudgeResponse(e JudgeResponse) error {
 	if e.RunID == "" {
 		e.RunID = currentRunID()
 	}
+	agent, err := s.EnsureAgent(AgentIdentityInput{
+		AgentID:    firstNonEmpty(e.CanonicalAgentID, e.AgentID),
+		AgentName:  e.AgentID,
+		Target:     firstNonEmpty(e.ToolName, e.DestinationApp, e.Model),
+		Source:     "judge_responses",
+		Status:     "observed",
+		ObservedAt: e.Timestamp,
+	})
+	if err != nil {
+		return err
+	}
+	if agent.ID != "" {
+		e.CanonicalAgentID = agent.ID
+	}
 	raw := truncateJudgeRaw(e.Raw, MaxJudgeRawBytes)
 	failClosed := 0
 	if e.FailClosedApplied {
 		failClosed = 1
 	}
-	_, err := s.execDB(context.Background(), "audit",
+	_, err = s.execDB(context.Background(), "audit",
 		`INSERT INTO judge_responses
 			(id, timestamp, kind, direction, model, action, severity, latency_ms,
 			 parse_error, raw_response, request_id, trace_id, run_id, session_id, input_hash,
 			 confidence, fail_closed_applied, inspected_model, prompt_template_id,
 			 schema_version, content_hash, generation, binary_version,
-			 agent_id, agent_instance_id, sidecar_instance_id,
+			 agent_id, canonical_agent_id, agent_instance_id, sidecar_instance_id,
 			 policy_id, destination_app, tool_name, tool_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID,
 		e.Timestamp.Format(time.RFC3339Nano),
 		e.Kind,
@@ -1987,6 +3386,7 @@ func (s *Store) InsertJudgeResponse(e JudgeResponse) error {
 		nullUint64(e.Generation),
 		nullStr(e.BinaryVersion),
 		nullStr(e.AgentID),
+		nullStr(e.CanonicalAgentID),
 		nullStr(e.AgentInstanceID),
 		nullStr(e.SidecarInstanceID),
 		nullStr(e.PolicyID),
@@ -2034,7 +3434,7 @@ func (s *Store) ListJudgeResponses(limit int) ([]JudgeResponse, error) {
 			COALESCE(fail_closed_applied,0),
 			COALESCE(inspected_model,''), COALESCE(prompt_template_id,''),
 			COALESCE(schema_version,0), COALESCE(content_hash,''), COALESCE(generation,0), COALESCE(binary_version,''),
-			COALESCE(agent_id,''), COALESCE(agent_instance_id,''), COALESCE(sidecar_instance_id,''),
+			COALESCE(agent_id,''), COALESCE(canonical_agent_id,''), COALESCE(agent_instance_id,''), COALESCE(sidecar_instance_id,''),
 			COALESCE(policy_id,''), COALESCE(destination_app,''), COALESCE(tool_name,''), COALESCE(tool_id,'')
 		FROM judge_responses ORDER BY timestamp DESC LIMIT ?`, limit)
 	if err != nil {
@@ -2053,7 +3453,7 @@ func (s *Store) ListJudgeResponses(limit int) ([]JudgeResponse, error) {
 			&r.RequestID, &r.TraceID, &r.RunID, &r.SessionID, &r.InputHash, &r.Confidence,
 			&failClosed, &r.InspectedModel, &r.PromptTemplateID,
 			&r.SchemaVersion, &r.ContentHash, &gen, &r.BinaryVersion,
-			&r.AgentID, &r.AgentInstanceID, &r.SidecarInstanceID,
+			&r.AgentID, &r.CanonicalAgentID, &r.AgentInstanceID, &r.SidecarInstanceID,
 			&r.PolicyID, &r.DestinationApp, &r.ToolName, &r.ToolID); err != nil {
 			return nil, fmt.Errorf("audit: scan judge response: %w", err)
 		}
@@ -2087,7 +3487,7 @@ func (s *Store) GetJudgeResponsesByRequestID(requestID string) ([]JudgeResponse,
 			COALESCE(fail_closed_applied,0),
 			COALESCE(inspected_model,''), COALESCE(prompt_template_id,''),
 			COALESCE(schema_version,0), COALESCE(content_hash,''), COALESCE(generation,0), COALESCE(binary_version,''),
-			COALESCE(agent_id,''), COALESCE(agent_instance_id,''), COALESCE(sidecar_instance_id,''),
+			COALESCE(agent_id,''), COALESCE(canonical_agent_id,''), COALESCE(agent_instance_id,''), COALESCE(sidecar_instance_id,''),
 			COALESCE(policy_id,''), COALESCE(destination_app,''), COALESCE(tool_name,''), COALESCE(tool_id,'')
 		FROM judge_responses WHERE request_id = ? ORDER BY timestamp DESC`, requestID)
 	if err != nil {
@@ -2106,7 +3506,7 @@ func (s *Store) GetJudgeResponsesByRequestID(requestID string) ([]JudgeResponse,
 			&r.RequestID, &r.TraceID, &r.RunID, &r.SessionID, &r.InputHash, &r.Confidence,
 			&failClosed, &r.InspectedModel, &r.PromptTemplateID,
 			&r.SchemaVersion, &r.ContentHash, &gen, &r.BinaryVersion,
-			&r.AgentID, &r.AgentInstanceID, &r.SidecarInstanceID,
+			&r.AgentID, &r.CanonicalAgentID, &r.AgentInstanceID, &r.SidecarInstanceID,
 			&r.PolicyID, &r.DestinationApp, &r.ToolName, &r.ToolID); err != nil {
 			return nil, fmt.Errorf("audit: scan judge row: %w", err)
 		}
@@ -2156,7 +3556,7 @@ func (s *Store) ListEvents(limit int) ([]Event, error) {
 		        session_id, agent_name, agent_instance_id, policy_id,
 		        destination_app, tool_name, tool_id,
 		        schema_version, content_hash, generation, binary_version,
-		        agent_id, sidecar_instance_id,
+		        agent_id, canonical_agent_id, sidecar_instance_id,
 		        connector, step_idx, enforced, rule_pack_dir
 		 FROM audit_events ORDER BY timestamp DESC LIMIT ?`, limit,
 	)
@@ -2191,7 +3591,7 @@ func scanAuditEventRow(rows rowScanner) (Event, error) {
 		schemaVerI                                      sql.NullInt64
 		contentHashStr, binaryVerStr                    sql.NullString
 		generation                                      sql.NullInt64
-		agentID, sidecarInst                            sql.NullString
+		agentID, canonicalAgentID, sidecarInst          sql.NullString
 		connector, rulePackDir                          sql.NullString
 		stepIdx, enforced                               sql.NullInt64
 	)
@@ -2201,7 +3601,7 @@ func scanAuditEventRow(rows rowScanner) (Event, error) {
 		&sessionID, &agentName, &agentInstanceID, &policyID,
 		&destinationApp, &toolName, &toolID,
 		&schemaVerI, &contentHashStr, &generation, &binaryVerStr,
-		&agentID, &sidecarInst,
+		&agentID, &canonicalAgentID, &sidecarInst,
 		&connector, &stepIdx, &enforced, &rulePackDir,
 	); err != nil {
 		return Event{}, fmt.Errorf("audit: scan row: %w", err)
@@ -2238,6 +3638,9 @@ func scanAuditEventRow(rows rowScanner) (Event, error) {
 	}
 	if agentID.Valid {
 		e.AgentID = agentID.String
+	}
+	if canonicalAgentID.Valid {
+		e.CanonicalAgentID = canonicalAgentID.String
 	}
 	if sidecarInst.Valid {
 		e.SidecarInstanceID = sidecarInst.String
@@ -2756,7 +4159,7 @@ func (s *Store) ListEventsByTarget(target string, limit int) ([]Event, error) {
 		        session_id, agent_name, agent_instance_id, policy_id,
 		        destination_app, tool_name, tool_id,
 		        schema_version, content_hash, generation, binary_version,
-		        agent_id, sidecar_instance_id,
+		        agent_id, canonical_agent_id, sidecar_instance_id,
 		        connector, step_idx, enforced, rule_pack_dir
 		 FROM audit_events
 		 WHERE target = ?
@@ -2873,14 +4276,15 @@ func (s *Store) GetCounts() (Counts, error) {
 // NetworkEgressFilter parameterises QueryNetworkEgressEvents.
 // Zero values mean "no filter". Limit defaults to 100 when zero.
 type NetworkEgressFilter struct {
-	Hostname    string    // exact match; empty = all hosts
-	SessionID   string    // exact match; empty = all sessions
-	AgentID     string    // exact match; empty = all agents
-	RootAgentID string    // exact match; empty = all agent trees
-	UserID      string    // exact match; empty = all users
-	Since       time.Time // only events at or after this time; zero = all time
-	Blocked     *bool     // nil = all; &true = blocked only; &false = allowed only
-	Limit       int       // defaults to 100
+	Hostname         string    // exact match; empty = all hosts
+	SessionID        string    // exact match; empty = all sessions
+	AgentID          string    // exact raw or canonical match; empty = all agents
+	CanonicalAgentID string    // exact canonical agents.id match; empty = all agents
+	RootAgentID      string    // exact match; empty = all agent trees
+	UserID           string    // exact match; empty = all users
+	Since            time.Time // only events at or after this time; zero = all time
+	Blocked          *bool     // nil = all; &true = blocked only; &false = allowed only
+	Limit            int       // defaults to 100
 }
 
 // QueryNetworkEgressEvents returns egress events matching the filter, newest first.
@@ -2890,7 +4294,7 @@ func (s *Store) QueryNetworkEgressEvents(f NetworkEgressFilter) ([]NetworkEgress
 		limit = 100
 	}
 
-	query := `SELECT id, timestamp, session_id, connector, agent_id, root_agent_id, parent_agent_id, root_session_id, agent_lifecycle_id,
+	query := `SELECT id, timestamp, session_id, connector, agent_id, canonical_agent_id, root_agent_id, parent_agent_id, root_session_id, agent_lifecycle_id,
 	                 agent_execution_id, user_id, tool_id, hostname, url, http_method, protocol,
 	                 policy_outcome, decision_code, blocked, severity, details
 	          FROM network_egress_events WHERE 1=1`
@@ -2905,8 +4309,12 @@ func (s *Store) QueryNetworkEgressEvents(f NetworkEgressFilter) ([]NetworkEgress
 		args = append(args, f.SessionID)
 	}
 	if f.AgentID != "" {
-		query += " AND agent_id = ?"
-		args = append(args, f.AgentID)
+		query += " AND (agent_id = ? OR canonical_agent_id = ?)"
+		args = append(args, f.AgentID, f.AgentID)
+	}
+	if f.CanonicalAgentID != "" {
+		query += " AND canonical_agent_id = ?"
+		args = append(args, f.CanonicalAgentID)
 	}
 	if f.RootAgentID != "" {
 		query += " AND root_agent_id = ?"
@@ -2940,11 +4348,11 @@ func (s *Store) QueryNetworkEgressEvents(f NetworkEgressFilter) ([]NetworkEgress
 	var events []NetworkEgressRow
 	for rows.Next() {
 		var e NetworkEgressRow
-		var sessionID, connector, agentID, rootAgentID, parentAgentID, rootSessionID, lifecycleID, executionID, userID, toolID sql.NullString
+		var sessionID, connector, agentID, canonicalAgentID, rootAgentID, parentAgentID, rootSessionID, lifecycleID, executionID, userID, toolID sql.NullString
 		var url, httpMethod, protocol, decisionCode, details sql.NullString
 		var blocked int
 		if err := rows.Scan(
-			&e.ID, &e.Timestamp, &sessionID, &connector, &agentID, &rootAgentID, &parentAgentID, &rootSessionID, &lifecycleID,
+			&e.ID, &e.Timestamp, &sessionID, &connector, &agentID, &canonicalAgentID, &rootAgentID, &parentAgentID, &rootSessionID, &lifecycleID,
 			&executionID, &userID, &toolID, &e.Hostname, &url, &httpMethod, &protocol,
 			&e.PolicyOutcome, &decisionCode, &blocked, &e.Severity, &details,
 		); err != nil {
@@ -2953,6 +4361,7 @@ func (s *Store) QueryNetworkEgressEvents(f NetworkEgressFilter) ([]NetworkEgress
 		e.SessionID = sessionID.String
 		e.Connector = connector.String
 		e.AgentID = agentID.String
+		e.CanonicalAgentID = canonicalAgentID.String
 		e.RootAgentID = rootAgentID.String
 		e.ParentAgentID = parentAgentID.String
 		e.RootSessionID = rootSessionID.String
@@ -3020,6 +4429,7 @@ type NetworkEgressRow struct {
 	SessionID        string    `json:"session_id,omitempty"`
 	Connector        string    `json:"connector,omitempty"`
 	AgentID          string    `json:"agent_id,omitempty"`
+	CanonicalAgentID string    `json:"canonical_agent_id,omitempty"`
 	RootAgentID      string    `json:"root_agent_id,omitempty"`
 	ParentAgentID    string    `json:"parent_agent_id,omitempty"`
 	RootSessionID    string    `json:"root_session_id,omitempty"`
@@ -3059,18 +4469,33 @@ func (s *Store) InsertNetworkEgressEvent(e NetworkEgressRow) error {
 	if e.Severity == "" {
 		e.Severity = "INFO"
 	}
+	agent, err := s.EnsureAgent(AgentIdentityInput{
+		AgentID:    firstNonEmpty(e.CanonicalAgentID, e.AgentID, e.RootAgentID, e.ParentAgentID),
+		AgentName:  firstNonEmpty(e.Connector, e.AgentID, e.RootAgentID, e.ParentAgentID),
+		Connector:  e.Connector,
+		Target:     firstNonEmpty(e.Hostname, e.URL),
+		Source:     "network_egress_events",
+		Status:     "observed",
+		ObservedAt: e.Timestamp,
+	})
+	if err != nil {
+		return err
+	}
+	if agent.ID != "" {
+		e.CanonicalAgentID = agent.ID
+	}
 	ts := e.Timestamp.Format(time.RFC3339Nano)
 	blocked := 0
 	if e.Blocked {
 		blocked = 1
 	}
-	_, err := s.execDB(context.Background(), "audit",
+	_, err = s.execDB(context.Background(), "audit",
 		`INSERT INTO network_egress_events
-		 (id, timestamp, session_id, connector, agent_id, root_agent_id, parent_agent_id, root_session_id, agent_lifecycle_id, agent_execution_id, user_id, tool_id,
+		 (id, timestamp, session_id, connector, agent_id, canonical_agent_id, root_agent_id, parent_agent_id, root_session_id, agent_lifecycle_id, agent_execution_id, user_id, tool_id,
 		  hostname, url, http_method, protocol, policy_outcome, decision_code, blocked, severity, details)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID, ts,
-		nullStr(e.SessionID), nullStr(e.Connector), nullStr(e.AgentID), nullStr(e.RootAgentID), nullStr(e.ParentAgentID), nullStr(e.RootSessionID), nullStr(e.AgentLifecycleID),
+		nullStr(e.SessionID), nullStr(e.Connector), nullStr(e.AgentID), nullStr(e.CanonicalAgentID), nullStr(e.RootAgentID), nullStr(e.ParentAgentID), nullStr(e.RootSessionID), nullStr(e.AgentLifecycleID),
 		nullStr(e.AgentExecutionID), nullStr(e.UserID), nullStr(e.ToolID),
 		e.Hostname, nullStr(e.URL), nullStr(e.HTTPMethod), nullStr(e.Protocol),
 		e.PolicyOutcome, nullStr(e.DecisionCode), blocked, e.Severity, nullStr(e.Details),
@@ -3146,7 +4571,7 @@ func (s *Store) ListNetworkEgressEvents(limit int, hostname string) ([]NetworkEg
 	)
 	if hostname == "" {
 		rows, err = s.queryDB(context.Background(), "audit",
-			`SELECT id, timestamp, session_id, connector, agent_id, root_agent_id, parent_agent_id, root_session_id, agent_lifecycle_id,
+			`SELECT id, timestamp, session_id, connector, agent_id, canonical_agent_id, root_agent_id, parent_agent_id, root_session_id, agent_lifecycle_id,
 			        agent_execution_id, user_id, tool_id, hostname, url, http_method, protocol,
 			        policy_outcome, decision_code, blocked, severity, details
 			 FROM network_egress_events
@@ -3154,7 +4579,7 @@ func (s *Store) ListNetworkEgressEvents(limit int, hostname string) ([]NetworkEg
 		)
 	} else {
 		rows, err = s.queryDB(context.Background(), "audit",
-			`SELECT id, timestamp, session_id, connector, agent_id, root_agent_id, parent_agent_id, root_session_id, agent_lifecycle_id,
+			`SELECT id, timestamp, session_id, connector, agent_id, canonical_agent_id, root_agent_id, parent_agent_id, root_session_id, agent_lifecycle_id,
 			        agent_execution_id, user_id, tool_id, hostname, url, http_method, protocol,
 			        policy_outcome, decision_code, blocked, severity, details
 			 FROM network_egress_events WHERE hostname = ?
@@ -3169,11 +4594,11 @@ func (s *Store) ListNetworkEgressEvents(limit int, hostname string) ([]NetworkEg
 	var events []NetworkEgressRow
 	for rows.Next() {
 		var e NetworkEgressRow
-		var sessionID, connector, agentID, rootAgentID, parentAgentID, rootSessionID, lifecycleID, executionID, userID, toolID sql.NullString
+		var sessionID, connector, agentID, canonicalAgentID, rootAgentID, parentAgentID, rootSessionID, lifecycleID, executionID, userID, toolID sql.NullString
 		var url, httpMethod, protocol, decisionCode, details sql.NullString
 		var blocked int
 		if err := rows.Scan(
-			&e.ID, &e.Timestamp, &sessionID, &connector, &agentID, &rootAgentID, &parentAgentID, &rootSessionID, &lifecycleID,
+			&e.ID, &e.Timestamp, &sessionID, &connector, &agentID, &canonicalAgentID, &rootAgentID, &parentAgentID, &rootSessionID, &lifecycleID,
 			&executionID, &userID, &toolID, &e.Hostname, &url, &httpMethod, &protocol,
 			&e.PolicyOutcome, &decisionCode, &blocked, &e.Severity, &details,
 		); err != nil {
@@ -3182,6 +4607,7 @@ func (s *Store) ListNetworkEgressEvents(limit int, hostname string) ([]NetworkEg
 		e.SessionID = sessionID.String
 		e.Connector = connector.String
 		e.AgentID = agentID.String
+		e.CanonicalAgentID = canonicalAgentID.String
 		e.RootAgentID = rootAgentID.String
 		e.ParentAgentID = parentAgentID.String
 		e.RootSessionID = rootSessionID.String

@@ -20,16 +20,17 @@ pub struct EnvironmentComponent {
     pub requires_elevation: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSnapshot {
     pub captured_at: String,
+    pub agents: Vec<AgentInventory>,
     pub processes: Vec<AgentProcess>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentProcess {
     pub pid: u32,
@@ -39,7 +40,43 @@ pub struct AgentProcess {
     pub vendor: String,
     pub started_at: Option<String>,
     pub uptime_sec: u64,
-    pub source: &'static str,
+    pub source: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentConfigRoot {
+    pub path: String,
+    pub kind: String,
+    pub exists: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInventory {
+    pub id: String,
+    pub product: String,
+    pub vendor: String,
+    pub kind: String,
+    pub status: String,
+    pub running: bool,
+    pub process_count: usize,
+    pub pids: Vec<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_pid: Option<u32>,
+    pub executable_names: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uptime_sec: Option<u64>,
+    pub source: String,
+    pub config_roots: Vec<AgentConfigRoot>,
+    pub static_resource_count: u64,
+    pub risk_resource_count: u64,
+    pub critical_resource_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_static_scan_at: Option<String>,
+    pub description: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -61,6 +98,221 @@ impl GuardPolicy {
     pub fn normalize(mut self) -> Self {
         self.version = 2;
         self
+    }
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanTaskSchedule {
+    pub enabled: bool,
+    pub interval_sec: u64,
+}
+
+impl ScanTaskSchedule {
+    pub fn new(enabled: bool, interval_sec: u64) -> Self {
+        Self {
+            enabled,
+            interval_sec,
+        }
+    }
+
+    fn normalize(self, default_interval_sec: u64) -> Self {
+        let interval_sec = if self.interval_sec == 0 {
+            default_interval_sec
+        } else {
+            self.interval_sec
+        };
+
+        Self {
+            enabled: self.enabled,
+            interval_sec: interval_sec.clamp(3, 3600),
+        }
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanScheduleSettings {
+    #[serde(default = "ScanScheduleSettings::default_version")]
+    pub version: u8,
+    #[serde(default = "ScanScheduleSettings::default_environment")]
+    pub environment: ScanTaskSchedule,
+    #[serde(default = "ScanScheduleSettings::default_agent_discovery")]
+    pub agent_discovery: ScanTaskSchedule,
+    #[serde(default = "ScanScheduleSettings::default_static_assets")]
+    pub static_assets: ScanTaskSchedule,
+    #[serde(default = "ScanScheduleSettings::default_behavior_trace")]
+    pub behavior_trace: ScanTaskSchedule,
+    #[serde(default = "ScanScheduleSettings::default_event_detection")]
+    pub event_detection: ScanTaskSchedule,
+    #[serde(default = "ScanScheduleSettings::default_process_guard_audit")]
+    pub process_guard_audit: ScanTaskSchedule,
+    #[serde(default = "ScanScheduleSettings::default_gateway_audit")]
+    pub gateway_audit: ScanTaskSchedule,
+    #[serde(default = "ScanScheduleSettings::default_range_status")]
+    pub range_status: ScanTaskSchedule,
+}
+
+impl ScanScheduleSettings {
+    fn default_version() -> u8 {
+        1
+    }
+
+    fn default_environment() -> ScanTaskSchedule {
+        ScanTaskSchedule::new(true, 30)
+    }
+
+    fn default_agent_discovery() -> ScanTaskSchedule {
+        ScanTaskSchedule::new(true, 15)
+    }
+
+    fn default_static_assets() -> ScanTaskSchedule {
+        ScanTaskSchedule::new(true, 300)
+    }
+
+    fn default_behavior_trace() -> ScanTaskSchedule {
+        ScanTaskSchedule::new(true, 5)
+    }
+
+    fn default_event_detection() -> ScanTaskSchedule {
+        ScanTaskSchedule::new(true, 15)
+    }
+
+    fn default_process_guard_audit() -> ScanTaskSchedule {
+        ScanTaskSchedule::new(true, 10)
+    }
+
+    fn default_gateway_audit() -> ScanTaskSchedule {
+        ScanTaskSchedule::new(true, 10)
+    }
+
+    fn default_range_status() -> ScanTaskSchedule {
+        ScanTaskSchedule::new(true, 30)
+    }
+
+    pub fn normalize(mut self) -> Self {
+        self.version = 1;
+        self.environment = self.environment.normalize(30);
+        self.agent_discovery = self.agent_discovery.normalize(15);
+        self.static_assets = self.static_assets.normalize(300);
+        self.behavior_trace = self.behavior_trace.normalize(5);
+        self.event_detection = self.event_detection.normalize(15);
+        self.process_guard_audit = self.process_guard_audit.normalize(10);
+        self.gateway_audit = self.gateway_audit.normalize(10);
+        self.range_status = self.range_status.normalize(30);
+        self
+    }
+}
+
+impl Default for ScanScheduleSettings {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            environment: Self::default_environment(),
+            agent_discovery: Self::default_agent_discovery(),
+            static_assets: Self::default_static_assets(),
+            behavior_trace: Self::default_behavior_trace(),
+            event_detection: Self::default_event_detection(),
+            process_guard_audit: Self::default_process_guard_audit(),
+            gateway_audit: Self::default_gateway_audit(),
+            range_status: Self::default_range_status(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StaticResourceScanSettings {
+    #[serde(default = "StaticResourceScanSettings::default_version")]
+    pub version: u8,
+    #[serde(default = "StaticResourceScanSettings::default_realtime_enabled")]
+    pub realtime_enabled: bool,
+    #[serde(default = "StaticResourceScanSettings::default_rescan_enabled")]
+    pub rescan_enabled: bool,
+    #[serde(default = "StaticResourceScanSettings::default_debounce_ms")]
+    pub debounce_ms: u64,
+    #[serde(default = "StaticResourceScanSettings::default_skill_interval_min")]
+    pub skill_interval_min: u64,
+    #[serde(default = "StaticResourceScanSettings::default_plugin_interval_min")]
+    pub plugin_interval_min: u64,
+    #[serde(default = "StaticResourceScanSettings::default_mcp_interval_min")]
+    pub mcp_interval_min: u64,
+    #[serde(default = "StaticResourceScanSettings::default_prompt_interval_min")]
+    pub prompt_interval_min: u64,
+    #[serde(default = "StaticResourceScanSettings::default_credential_interval_min")]
+    pub credential_interval_min: u64,
+    #[serde(default = "StaticResourceScanSettings::default_environment_interval_min")]
+    pub environment_interval_min: u64,
+}
+
+impl StaticResourceScanSettings {
+    fn default_version() -> u8 {
+        1
+    }
+
+    fn default_realtime_enabled() -> bool {
+        true
+    }
+
+    fn default_rescan_enabled() -> bool {
+        true
+    }
+
+    fn default_debounce_ms() -> u64 {
+        500
+    }
+
+    fn default_skill_interval_min() -> u64 {
+        15
+    }
+
+    fn default_plugin_interval_min() -> u64 {
+        30
+    }
+
+    fn default_mcp_interval_min() -> u64 {
+        10
+    }
+
+    fn default_prompt_interval_min() -> u64 {
+        15
+    }
+
+    fn default_credential_interval_min() -> u64 {
+        5
+    }
+
+    fn default_environment_interval_min() -> u64 {
+        30
+    }
+
+    pub fn normalize(mut self) -> Self {
+        self.version = 1;
+        self.debounce_ms = self.debounce_ms.clamp(100, 10_000);
+        self.skill_interval_min = self.skill_interval_min.clamp(1, 1_440);
+        self.plugin_interval_min = self.plugin_interval_min.clamp(1, 1_440);
+        self.mcp_interval_min = self.mcp_interval_min.clamp(1, 1_440);
+        self.prompt_interval_min = self.prompt_interval_min.clamp(1, 1_440);
+        self.credential_interval_min = self.credential_interval_min.clamp(1, 1_440);
+        self.environment_interval_min = self.environment_interval_min.clamp(1, 1_440);
+        self
+    }
+}
+
+impl Default for StaticResourceScanSettings {
+    fn default() -> Self {
+        Self {
+            version: Self::default_version(),
+            realtime_enabled: Self::default_realtime_enabled(),
+            rescan_enabled: Self::default_rescan_enabled(),
+            debounce_ms: Self::default_debounce_ms(),
+            skill_interval_min: Self::default_skill_interval_min(),
+            plugin_interval_min: Self::default_plugin_interval_min(),
+            mcp_interval_min: Self::default_mcp_interval_min(),
+            prompt_interval_min: Self::default_prompt_interval_min(),
+            credential_interval_min: Self::default_credential_interval_min(),
+            environment_interval_min: Self::default_environment_interval_min(),
+        }
     }
 }
 
@@ -148,7 +400,7 @@ pub struct TraceEvent {
     pub detail: String,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceSnapshot {
     pub captured_at: String,
@@ -158,7 +410,7 @@ pub struct TraceSnapshot {
     pub warning: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GuardAuditSnapshot {
     pub captured_at: String,
@@ -168,7 +420,7 @@ pub struct GuardAuditSnapshot {
     pub warning: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GuardAuditRecord {
     pub timestamp: String,
@@ -223,7 +475,7 @@ pub struct GuardAuditRecord {
     pub raw_ref: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayAuditSnapshot {
     pub captured_at: String,
@@ -233,7 +485,7 @@ pub struct GatewayAuditSnapshot {
     pub warning: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayAuditRecord {
     pub timestamp: String,

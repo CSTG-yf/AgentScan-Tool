@@ -903,8 +903,15 @@ class WatchConfig:
     debounce_ms: int = 500
     auto_block: bool = True
     allow_list_bypass_scan: bool = True
+    realtime_enabled: bool = True
     rescan_enabled: bool = True
     rescan_interval_min: int = 60
+    rescan_skill_interval_min: int = 0
+    rescan_plugin_interval_min: int = 0
+    rescan_mcp_interval_min: int = 0
+    rescan_prompt_interval_min: int = 0
+    rescan_credential_interval_min: int = 0
+    rescan_environment_interval_min: int = 0
 
 
 @dataclass
@@ -2967,6 +2974,18 @@ def _config_to_dict(cfg: Config) -> dict[str, Any]:
         d.pop("privacy", None)
     if d.get("ai_discovery") == _disabled_ai_discovery_dict():
         d.pop("ai_discovery", None)
+    watch = d.get("watch")
+    if isinstance(watch, dict):
+        for key in (
+            "rescan_skill_interval_min",
+            "rescan_plugin_interval_min",
+            "rescan_mcp_interval_min",
+            "rescan_prompt_interval_min",
+            "rescan_credential_interval_min",
+            "rescan_environment_interval_min",
+        ):
+            if not watch.get(key):
+                watch.pop(key, None)
     if d.get("application_protection") == _default_application_protection_dict():
         d.pop("application_protection", None)
     else:
@@ -3166,6 +3185,13 @@ _OWNED_NESTED_KEYS: frozenset[str] = frozenset(
         "guardrail.judge.hook_connectors",
         # Hook-lane judge timeout: 0 = gateway default, stripped on save.
         "guardrail.judge.hook_timeout",
+        # Per-target watcher rescan overrides: 0 = inherit watch.rescan_interval_min.
+        "watch.rescan_skill_interval_min",
+        "watch.rescan_plugin_interval_min",
+        "watch.rescan_mcp_interval_min",
+        "watch.rescan_prompt_interval_min",
+        "watch.rescan_credential_interval_min",
+        "watch.rescan_environment_interval_min",
     }
 )
 
@@ -4701,8 +4727,15 @@ def load() -> Config:
             debounce_ms=raw.get("watch", {}).get("debounce_ms", 500),
             auto_block=raw.get("watch", {}).get("auto_block", True),
             allow_list_bypass_scan=raw.get("watch", {}).get("allow_list_bypass_scan", True),
+            realtime_enabled=raw.get("watch", {}).get("realtime_enabled", True),
             rescan_enabled=raw.get("watch", {}).get("rescan_enabled", True),
             rescan_interval_min=raw.get("watch", {}).get("rescan_interval_min", 60),
+            rescan_skill_interval_min=raw.get("watch", {}).get("rescan_skill_interval_min", 0),
+            rescan_plugin_interval_min=raw.get("watch", {}).get("rescan_plugin_interval_min", 0),
+            rescan_mcp_interval_min=raw.get("watch", {}).get("rescan_mcp_interval_min", 0),
+            rescan_prompt_interval_min=raw.get("watch", {}).get("rescan_prompt_interval_min", 0),
+            rescan_credential_interval_min=raw.get("watch", {}).get("rescan_credential_interval_min", 0),
+            rescan_environment_interval_min=raw.get("watch", {}).get("rescan_environment_interval_min", 0),
         ),
         firewall=FirewallConfig(
             config_file=raw.get("firewall", {}).get("config_file", os.path.join(data_dir, "firewall.yaml")),

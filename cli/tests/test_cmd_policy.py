@@ -213,17 +213,32 @@ class TestPolicyActivate(PolicyCommandTestBase):
 
         self.app.cfg.watch.rescan_enabled = False
         self.app.cfg.watch.rescan_interval_min = 120
+        self.app.cfg.watch.realtime_enabled = False
 
         result = self.invoke(["activate", "strict"])
         self.assertEqual(result.exit_code, 0, result.output)
 
+        self.assertTrue(self.app.cfg.watch.realtime_enabled)
         self.assertTrue(self.app.cfg.watch.rescan_enabled)
         self.assertEqual(self.app.cfg.watch.rescan_interval_min, 30)
+        self.assertEqual(self.app.cfg.watch.rescan_skill_interval_min, 15)
+        self.assertEqual(self.app.cfg.watch.rescan_plugin_interval_min, 30)
+        self.assertEqual(self.app.cfg.watch.rescan_mcp_interval_min, 10)
+        self.assertEqual(self.app.cfg.watch.rescan_prompt_interval_min, 15)
+        self.assertEqual(self.app.cfg.watch.rescan_credential_interval_min, 5)
+        self.assertEqual(self.app.cfg.watch.rescan_environment_interval_min, 30)
 
         with open(os.path.join(self.tmp_dir, "config.yaml")) as f:
             raw = yaml.safe_load(f)
+        self.assertTrue(raw["watch"]["realtime_enabled"])
         self.assertTrue(raw["watch"]["rescan_enabled"])
         self.assertEqual(raw["watch"]["rescan_interval_min"], 30)
+        self.assertEqual(raw["watch"]["rescan_skill_interval_min"], 15)
+        self.assertEqual(raw["watch"]["rescan_plugin_interval_min"], 30)
+        self.assertEqual(raw["watch"]["rescan_mcp_interval_min"], 10)
+        self.assertEqual(raw["watch"]["rescan_prompt_interval_min"], 15)
+        self.assertEqual(raw["watch"]["rescan_credential_interval_min"], 5)
+        self.assertEqual(raw["watch"]["rescan_environment_interval_min"], 30)
 
     def test_activate_nonexistent(self):
         result = self.invoke(["activate", "ghost"])

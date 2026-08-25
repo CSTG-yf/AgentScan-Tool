@@ -791,8 +791,15 @@ class TestConfigLoadSave(unittest.TestCase):
                     debounce_ms=750,
                     auto_block=False,
                     allow_list_bypass_scan=False,
+                    realtime_enabled=False,
                     rescan_enabled=False,
                     rescan_interval_min=15,
+                    rescan_skill_interval_min=5,
+                    rescan_plugin_interval_min=10,
+                    rescan_mcp_interval_min=3,
+                    rescan_prompt_interval_min=7,
+                    rescan_credential_interval_min=2,
+                    rescan_environment_interval_min=20,
                 ),
             )
             cfg.save()
@@ -801,15 +808,29 @@ class TestConfigLoadSave(unittest.TestCase):
             with open(config_file) as f:
                 raw = yaml.safe_load(f)
 
+            self.assertFalse(raw["watch"]["realtime_enabled"])
             self.assertFalse(raw["watch"]["rescan_enabled"])
             self.assertEqual(raw["watch"]["rescan_interval_min"], 15)
+            self.assertEqual(raw["watch"]["rescan_skill_interval_min"], 5)
+            self.assertEqual(raw["watch"]["rescan_plugin_interval_min"], 10)
+            self.assertEqual(raw["watch"]["rescan_mcp_interval_min"], 3)
+            self.assertEqual(raw["watch"]["rescan_prompt_interval_min"], 7)
+            self.assertEqual(raw["watch"]["rescan_credential_interval_min"], 2)
+            self.assertEqual(raw["watch"]["rescan_environment_interval_min"], 20)
 
             with patch("defenseclaw.config.default_data_path") as mock_dp:
                 mock_dp.return_value = Path(tmpdir)
                 loaded = load()
 
+            self.assertFalse(loaded.watch.realtime_enabled)
             self.assertFalse(loaded.watch.rescan_enabled)
             self.assertEqual(loaded.watch.rescan_interval_min, 15)
+            self.assertEqual(loaded.watch.rescan_skill_interval_min, 5)
+            self.assertEqual(loaded.watch.rescan_plugin_interval_min, 10)
+            self.assertEqual(loaded.watch.rescan_mcp_interval_min, 3)
+            self.assertEqual(loaded.watch.rescan_prompt_interval_min, 7)
+            self.assertEqual(loaded.watch.rescan_credential_interval_min, 2)
+            self.assertEqual(loaded.watch.rescan_environment_interval_min, 20)
 
     def test_asset_policy_roundtrip(self):
         import yaml

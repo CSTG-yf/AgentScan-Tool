@@ -149,8 +149,15 @@ firewall:
 
 # Periodic rescan / drift detection settings (not policy file watching).
 watch:
+  realtime_enabled: true
   rescan_enabled: true
   rescan_interval_min: 30
+  rescan_skill_interval_min: 15
+  rescan_plugin_interval_min: 30
+  rescan_mcp_interval_min: 10
+  rescan_prompt_interval_min: 15
+  rescan_credential_interval_min: 5
+  rescan_environment_interval_min: 30
 
 # webhooks:
 #   - url: "https://hooks.slack.com/services/T00/B00/xxx"

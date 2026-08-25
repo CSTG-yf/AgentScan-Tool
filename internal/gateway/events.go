@@ -643,6 +643,9 @@ func emitEgress(ctx context.Context, p gatewaylog.EgressPayload) {
 		Severity:  sev,
 		Egress:    &p,
 	})
+	// Phase-1 unified runtime events: egress observations become
+	// network.request / network.blocked rows in behavior_events.
+	recordEgressRuntimeEvent(ctx, p)
 	incEgressCounter(ctx, p.Branch, p.Decision, p.Source)
 	if sev == gatewaylog.SeverityHigh {
 		emitEgressAlert(ctx, p)

@@ -186,6 +186,10 @@ func isExternalDependencyError(err error) bool {
 		"no such file or directory",
 		"command not found",
 		"permission denied",
+		// DefenseClaw on windows is hook-only; proxy connectors
+		// legitimately refuse Setup there. That's a platform
+		// constraint, not a contract violation, so skip.
+		"is not supported on windows",
 		// OpenClaw connector Setup refuses when the gateway binary
 		// was built without the bundled extension (i.e. without a
 		// prior `make extensions`/`make plugin`). The connector-matrix

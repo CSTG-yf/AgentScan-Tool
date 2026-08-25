@@ -638,7 +638,14 @@ without restarting the sidecar.
 > config file (`~/.defenseclaw/config.yaml`).  The `watch:` section
 > inside policy YAML templates (`policies/default.yaml` etc.) controls
 > rescan/drift-detection settings — it does **not** enable automatic
-> filesystem watching of policy files themselves.
+> filesystem watching of policy files themselves. Realtime static-resource
+> scanning is controlled by `watch.realtime_enabled`; periodic fallback
+> rescans are controlled by `watch.rescan_enabled`. Per-target rescan
+> intervals can be set with `rescan_skill_interval_min`,
+> `rescan_plugin_interval_min`, `rescan_mcp_interval_min`,
+> `rescan_prompt_interval_min`, `rescan_credential_interval_min`, and
+> `rescan_environment_interval_min`; zero or omitted values inherit
+> `rescan_interval_min`.
 
 **Callers:** CLI `policy reload`, or any HTTP client.
 

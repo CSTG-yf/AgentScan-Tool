@@ -43,6 +43,7 @@ import (
 	"github.com/defenseclaw/defenseclaw/internal/audit"
 	"github.com/defenseclaw/defenseclaw/internal/config"
 	"github.com/defenseclaw/defenseclaw/internal/configs"
+	"github.com/defenseclaw/defenseclaw/internal/detection"
 	"github.com/defenseclaw/defenseclaw/internal/gateway/connector"
 	"github.com/defenseclaw/defenseclaw/internal/gateway/notifier"
 	"github.com/defenseclaw/defenseclaw/internal/gatewaylog"
@@ -885,6 +886,18 @@ func (p *GuardrailProxy) handlePassthrough(w http.ResponseWriter, r *http.Reques
 			Decision:     decision,
 			Reason:       reason,
 			Source:       "go",
+		}
+	}
+
+	// Phase-3 runtime policy enforcement: a host denied by a runtime
+	// BLOCK decision (proxy enforcement point, action mode) is refused
+	// before any other branch logic runs.
+	if bl := activeRuntimeBlocklist(); bl != nil && targetHost != "" {
+		if blocked, decisionID := bl.IsBlocked(targetHost); blocked {
+			fmt.Fprintf(os.Stderr, "[guardrail] BLOCKED runtime-decision host: %s (decision %s)\n", targetHost, decisionID)
+			emitEgress(r.Context(), mkEgress("block", "runtime-decision"))
+			detection.WriteBlockedResponse(w, targetHost, decisionID)
+			return
 		}
 	}
 
@@ -2318,6 +2331,26 @@ func guardUpstreamTargetURL(w http.ResponseWriter, r *http.Request, targetURL st
 	u, perr := url.Parse(targetURL)
 	if perr != nil {
 		return false
+	}
+	// Phase-3 runtime policy enforcement: refuse hosts denied by a
+	// runtime BLOCK decision before any other upstream guard runs.
+	if bl := activeRuntimeBlocklist(); bl != nil {
+		if host := u.Hostname(); host != "" {
+			if blocked, decisionID := bl.IsBlocked(host); blocked {
+				emitEgress(r.Context(), gatewaylog.EgressPayload{
+					TargetHost:   host,
+					TargetPath:   r.URL.Path,
+					LooksLikeLLM: true,
+					Branch:       "chat",
+					Decision:     "block",
+					Reason:       "runtime-decision",
+					Source:       "go",
+				})
+				fmt.Fprintf(os.Stderr, "[guardrail] BLOCKED chat runtime-decision host: %s (decision %s)\n", host, decisionID)
+				detection.WriteBlockedResponse(w, host, decisionID)
+				return true
+			}
+		}
 	}
 	if u.User != nil {
 		emitEgress(r.Context(), gatewaylog.EgressPayload{
@@ -4421,6 +4454,10 @@ func (p *GuardrailProxy) recordTelemetry(ctx context.Context, direction, model s
 		// finding C1 for the coverage-gap writeup.
 		_ = p.logger.LogActionCtx(ctx, string(audit.ActionGuardrailVerdict), model, details)
 	}
+	// Phase-1 unified runtime events: one behavior_events row
+	// (content.prompt_injection / content.secret / ...) per guardrail
+	// verdict, bound to the agent/session/trace envelope.
+	recordGuardrailRuntimeEvent(ctx, direction, model, verdict)
 	if p.store != nil {
 		// guardrail-inspection is the SQLite-only twin row the
 		// proxy writes for the TUI's alerts panel. Keep the same

@@ -63,6 +63,7 @@ type NetworkEgressEvent struct {
 	SessionID        string `json:"session_id,omitempty"`
 	Connector        string `json:"connector,omitempty"`
 	AgentID          string `json:"agent_id,omitempty"`
+	CanonicalAgentID string `json:"canonical_agent_id,omitempty"`
 	RootAgentID      string `json:"root_agent_id,omitempty"`
 	ParentAgentID    string `json:"parent_agent_id,omitempty"`
 	RootSessionID    string `json:"root_session_id,omitempty"`
@@ -139,6 +140,7 @@ func (e *NetworkEgressEvent) toRow() NetworkEgressRow {
 		SessionID:        e.SessionID,
 		Connector:        e.Connector,
 		AgentID:          e.AgentID,
+		CanonicalAgentID: e.CanonicalAgentID,
 		RootAgentID:      e.RootAgentID,
 		ParentAgentID:    e.ParentAgentID,
 		RootSessionID:    e.RootSessionID,
@@ -221,8 +223,14 @@ func (l *Logger) LogNetworkEgress(ctx context.Context, e NetworkEgressEvent) err
 		Actor:     "defenseclaw",
 		Details: fmt.Sprintf("url=%s method=%s decision=%s outcome=%s",
 			redactedURL, e.HTTPMethod, e.DecisionCode, e.PolicyOutcome),
-		Severity: "HIGH",
-		RunID:    currentRunID(),
+		Severity:         "HIGH",
+		RunID:            currentRunID(),
+		SessionID:        e.SessionID,
+		AgentName:        e.Connector,
+		AgentID:          e.AgentID,
+		CanonicalAgentID: e.CanonicalAgentID,
+		Connector:        e.Connector,
+		ToolID:           e.ToolID,
 	})
 	if err := l.store.LogEvent(alert); err != nil {
 		// Non-fatal: the primary egress row is already persisted.

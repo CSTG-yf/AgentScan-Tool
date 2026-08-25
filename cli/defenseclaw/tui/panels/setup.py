@@ -5616,9 +5616,58 @@ def _watch_section(cfg: object | Mapping[str, Any] | None) -> ConfigSection:
             _field(cfg, "Auto Block", "watch.auto_block", "bool", hint="Block high findings automatically."),
             _field(cfg, "Allow List Bypass", "watch.allow_list_bypass_scan", "bool", hint="Skip allow-listed rescans."),
             _field(
+                cfg,
+                "Realtime Enabled",
+                "watch.realtime_enabled",
+                "bool",
+                hint="Trigger scans from filesystem/config changes as they happen.",
+            ),
+            _field(
                 cfg, "Rescan Enabled", "watch.rescan_enabled", "bool", hint="Periodically re-scan installed artifacts."
             ),
             _field(cfg, "Rescan Interval Min", "watch.rescan_interval_min", "int", hint="Minutes between rescans."),
+            _field(
+                cfg,
+                "Skill Rescan Min",
+                "watch.rescan_skill_interval_min",
+                "int",
+                hint="Minutes between skill rescans; 0 inherits the global interval.",
+            ),
+            _field(
+                cfg,
+                "Plugin Rescan Min",
+                "watch.rescan_plugin_interval_min",
+                "int",
+                hint="Minutes between plugin rescans; 0 inherits the global interval.",
+            ),
+            _field(
+                cfg,
+                "MCP Rescan Min",
+                "watch.rescan_mcp_interval_min",
+                "int",
+                hint="Minutes between MCP rescans; 0 inherits the global interval.",
+            ),
+            _field(
+                cfg,
+                "Prompt Rescan Min",
+                "watch.rescan_prompt_interval_min",
+                "int",
+                hint="Minutes between prompt/rule rescans; 0 inherits the global interval.",
+            ),
+            _field(
+                cfg,
+                "Credential Rescan Min",
+                "watch.rescan_credential_interval_min",
+                "int",
+                hint="Minutes between credential rescans; 0 inherits the global interval.",
+            ),
+            _field(
+                cfg,
+                "Environment Rescan Min",
+                "watch.rescan_environment_interval_min",
+                "int",
+                hint="Minutes between environment rescans; 0 inherits the global interval.",
+            ),
         ),
         "Filesystem-watch tuning shared across asset watchers.",
     )

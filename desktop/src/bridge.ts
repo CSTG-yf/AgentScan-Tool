@@ -1,7 +1,186 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentRuntimeCatalog, AgentSnapshot, AgentTraceSnapshot, EnvironmentSnapshot, GatewayAuditSnapshot, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus } from "./types";
+import type { AgentRuntimeCatalog, AgentSnapshot, AgentTraceSnapshot, AttackChainSnapshot, EnvironmentSnapshot, EventDetectionSnapshot, GatewayAuditSnapshot, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus, RuntimeDecisionDetail, RuntimeDecisionListResponse, RuntimeSecurityMode, ScanScheduleSettings, StaticAssetSnapshot, StaticResourceAgentsResponse, StaticResourceContentResponse, StaticResourceDetailResponse, StaticResourceFindingsResponse, StaticResourceListResponse, StaticResourceRelationsResponse, StaticResourceScanAccepted, StaticResourceScanSettings, StaticResourceSummaryResponse } from "./types";
 
 const inTauri = (): boolean => "__TAURI_INTERNALS__" in window;
+
+const defaultScanScheduleSettings = (): ScanScheduleSettings => ({
+  version: 1,
+  environment: { enabled: true, intervalSec: 30 },
+  agentDiscovery: { enabled: true, intervalSec: 15 },
+  staticAssets: { enabled: true, intervalSec: 300 },
+  behaviorTrace: { enabled: true, intervalSec: 5 },
+  eventDetection: { enabled: true, intervalSec: 15 },
+  processGuardAudit: { enabled: true, intervalSec: 10 },
+  gatewayAudit: { enabled: true, intervalSec: 10 },
+  rangeStatus: { enabled: true, intervalSec: 30 },
+});
+
+const defaultStaticResourceScanSettings = (): StaticResourceScanSettings => ({
+  version: 1,
+  realtimeEnabled: true,
+  rescanEnabled: true,
+  debounceMs: 500,
+  skillIntervalMin: 15,
+  pluginIntervalMin: 30,
+  mcpIntervalMin: 10,
+  promptIntervalMin: 15,
+  credentialIntervalMin: 5,
+  environmentIntervalMin: 30,
+});
+
+const defaultStaticAssetSnapshot = (): StaticAssetSnapshot => ({
+  capturedAt: new Date().toISOString(),
+  source: "desktop preview",
+  agents: [],
+  warning: "浏览器预览模式不会读取后端 audit.db；请在桌面应用中查看真实静态资源扫描结果。",
+});
+
+const defaultEventDetectionSnapshot = (): EventDetectionSnapshot => ({
+  capturedAt: new Date().toISOString(),
+  source: "desktop preview",
+  summary: { total: 0, security: 0, attack: 0, blocked: 0, critical: 0, high: 0, correlated: 0, agents: 0, sources: 0 },
+  sourceBreakdown: [],
+  agentBreakdown: [],
+  timeline: [],
+  events: [],
+  warning: "浏览器预览模式不会读取后端事件库；请在桌面应用中查看真实事件检测结果。",
+});
+
+const defaultAttackChainSnapshot = (): AttackChainSnapshot => ({
+  capturedAt: new Date().toISOString(),
+  source: "desktop preview",
+  chains: [],
+  warning: "浏览器预览模式不会读取后端事件库；请在桌面应用中查看真实攻击链重建结果。",
+});
+
+export async function getScanScheduleSettings(): Promise<ScanScheduleSettings> {
+  return inTauri() ? invoke<ScanScheduleSettings>("get_scan_schedule_settings") : defaultScanScheduleSettings();
+}
+
+export async function saveScanScheduleSettings(settings: ScanScheduleSettings): Promise<ScanScheduleSettings> {
+  if (!inTauri()) return settings;
+  return invoke<ScanScheduleSettings>("save_scan_schedule_settings", { settings });
+}
+
+export async function getStaticResourceScanSettings(): Promise<StaticResourceScanSettings> {
+  return inTauri() ? invoke<StaticResourceScanSettings>("get_static_resource_scan_settings") : defaultStaticResourceScanSettings();
+}
+
+export async function saveStaticResourceScanSettings(settings: StaticResourceScanSettings): Promise<StaticResourceScanSettings> {
+  if (!inTauri()) return settings;
+  return invoke<StaticResourceScanSettings>("save_static_resource_scan_settings", { settings });
+}
+
+export async function getStaticAssetInventory(limit = 600): Promise<StaticAssetSnapshot> {
+  return inTauri() ? invoke<StaticAssetSnapshot>("get_static_asset_inventory", { limit }) : defaultStaticAssetSnapshot();
+}
+
+// ---------------------------------------------------------------------------
+// Rule-driven static resource API. All calls go through the Tauri backend,
+// which forwards them to the Go gateway; in browser preview mode they
+// resolve to empty structures so the page still renders.
+// ---------------------------------------------------------------------------
+
+const emptyAgents = (): StaticResourceAgentsResponse => ({ items: [] });
+const emptySummary = (agentId: string): StaticResourceSummaryResponse => ({
+  agent: { agent_id: agentId, name: agentId },
+  total_resources: 0,
+  resource_type_count: 0,
+  risk_resource_count: 0,
+  malicious_resource_count: 0,
+  critical_resource_count: 0,
+  by_type: [],
+});
+const emptyList = (): StaticResourceListResponse => ({ total: 0, page: 1, page_size: 20, items: [] });
+
+export async function getStaticResourceAgents(): Promise<StaticResourceAgentsResponse> {
+  return inTauri() ? invoke<StaticResourceAgentsResponse>("get_static_resource_agents") : emptyAgents();
+}
+
+export async function getStaticResourceSummary(agentId: string): Promise<StaticResourceSummaryResponse> {
+  return inTauri() ? invoke<StaticResourceSummaryResponse>("get_static_resource_summary", { agentId }) : emptySummary(agentId);
+}
+
+export interface StaticResourceListQuery {
+  agentId?: string;
+  resourceType?: string;
+  riskLevel?: string;
+  malicious?: boolean;
+  scanStatus?: string;
+  status?: string;
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export async function getStaticResources(query: StaticResourceListQuery): Promise<StaticResourceListResponse> {
+  if (!inTauri()) return emptyList();
+  return invoke<StaticResourceListResponse>("get_static_resources", {
+    agentId: query.agentId,
+    resourceType: query.resourceType,
+    riskLevel: query.riskLevel,
+    malicious: query.malicious,
+    scanStatus: query.scanStatus,
+    status: query.status,
+    keyword: query.keyword,
+    page: query.page,
+    pageSize: query.pageSize,
+  });
+}
+
+export async function getStaticResourceDetail(resourceId: string): Promise<StaticResourceDetailResponse> {
+  return invoke<StaticResourceDetailResponse>("get_static_resource_detail", { resourceId });
+}
+
+export async function getStaticResourceFindings(resourceId: string): Promise<StaticResourceFindingsResponse> {
+  return invoke<StaticResourceFindingsResponse>("get_static_resource_findings", { resourceId });
+}
+
+export async function getStaticResourceContent(resourceId: string): Promise<StaticResourceContentResponse> {
+  return invoke<StaticResourceContentResponse>("get_static_resource_content", { resourceId });
+}
+
+export async function getStaticResourceRelations(resourceId: string): Promise<StaticResourceRelationsResponse> {
+  return invoke<StaticResourceRelationsResponse>("get_static_resource_relations", { resourceId });
+}
+
+export async function triggerStaticResourceScan(resourceId: string): Promise<StaticResourceScanAccepted> {
+  return invoke<StaticResourceScanAccepted>("trigger_static_resource_scan", { resourceId });
+}
+
+export async function triggerStaticResourceRescan(agentId?: string): Promise<StaticResourceScanAccepted> {
+  return invoke<StaticResourceScanAccepted>("trigger_static_resource_rescan", { agentId: agentId ?? null });
+}
+
+export async function getEventDetections(limit = 300): Promise<EventDetectionSnapshot> {
+  return inTauri() ? invoke<EventDetectionSnapshot>("get_event_detections", { limit }) : defaultEventDetectionSnapshot();
+}
+
+export async function getAttackChains(limit = 500): Promise<AttackChainSnapshot> {
+  return inTauri() ? invoke<AttackChainSnapshot>("get_attack_chains", { limit }) : defaultAttackChainSnapshot();
+}
+
+/** Phase-3 runtime decisions: list, detail, and security mode. */
+export async function getRuntimeDecisions(limit = 200): Promise<RuntimeDecisionListResponse> {
+  if (!inTauri()) {
+    return { decisions: [], summary: { total: 0, block: 0, confirm: 0, alert: 0, audit: 0, allow: 0, wouldBlock: 0 }, count: 0 };
+  }
+  return invoke<RuntimeDecisionListResponse>("get_runtime_decisions", { limit });
+}
+
+export async function getRuntimeDecisionDetail(decisionId: string): Promise<RuntimeDecisionDetail> {
+  return invoke<RuntimeDecisionDetail>("get_runtime_decision_detail", { decisionId });
+}
+
+export async function getRuntimeSecurityMode(): Promise<RuntimeSecurityMode> {
+  if (!inTauri()) return "observe";
+  return invoke<RuntimeSecurityMode>("get_runtime_security_mode");
+}
+
+export async function setRuntimeSecurityMode(mode: RuntimeSecurityMode): Promise<RuntimeSecurityMode> {
+  if (!inTauri()) return mode;
+  return invoke<RuntimeSecurityMode>("set_runtime_security_mode", { mode });
+}
 
 const browserEnvironment = (): EnvironmentSnapshot => ({
   capturedAt: new Date().toISOString(),
@@ -19,7 +198,7 @@ export async function getEnvironment(): Promise<EnvironmentSnapshot> {
 
 export async function getAgentProcesses(): Promise<AgentSnapshot> {
   if (!inTauri()) {
-    return { capturedAt: new Date().toISOString(), processes: [], warning: "浏览器预览模式不具备本机进程访问权限" };
+    return { capturedAt: new Date().toISOString(), agents: [], processes: [], warning: "浏览器预览模式不具备本机进程访问权限" };
   }
   return invoke<AgentSnapshot>("get_agent_processes");
 }
@@ -47,7 +226,7 @@ export async function getGuardPolicy(): Promise<GuardPolicy> {
 
 export async function getAgentTrace(limit = 300): Promise<AgentTraceSnapshot> {
   if (!inTauri()) {
-    return { capturedAt: new Date().toISOString(), databasePath: "本机受保护存储", events: [], warning: "浏览器预览模式不读取本机 Trace 库" };
+    return { capturedAt: new Date().toISOString(), databasePath: "audit.db:behavior_events", events: [], warning: "浏览器预览模式不读取 Go 后端行为事件库" };
   }
   return invoke<AgentTraceSnapshot>("get_agent_trace", { limit });
 }

@@ -39,4 +39,15 @@ type AgentIdentity struct {
 	// connector-agnostic scans (CLI file scans, background rescans), which
 	// record connector="unknown".
 	Connector string
+
+	// StaticResourceID is the pre-resolved static_resources row this scan
+	// belongs to (rule-driven enumeration). When set, InsertScanSummary uses
+	// it verbatim instead of re-deriving the resource via
+	// IsStaticResourceScan classification.
+	StaticResourceID string
+
+	// ResourceRuleID / ScanProfileID carry the agent_resource_rules lineage:
+	// which rule produced this target and which detection plan ran.
+	ResourceRuleID int64
+	ScanProfileID  int64
 }
