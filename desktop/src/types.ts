@@ -759,6 +759,37 @@ export interface StaticResourceDetailResponse {
   permission?: string;
   resource_rule?: { rule_id: number; name: string };
   scan_profile?: { profile_id: number; name: string };
+  scan_capabilities?: StaticResourceScanCapability[];
+}
+
+export interface StaticResourceScanCapability {
+  capability_id: number;
+  key?: string;
+  name: string;
+  scanner?: string;
+  description?: string;
+  enabled: boolean;
+}
+
+export interface StaticResourceScanHistoryItem {
+  scan_id: string;
+  scanner?: string;
+  scanned_at?: string;
+  finding_count: number;
+  max_severity?: string;
+  duration_ms?: number;
+  verdict?: string;
+}
+
+export interface StaticResourceScanHistoryResponse {
+  resource_id: string;
+  total: number;
+  items: StaticResourceScanHistoryItem[];
+}
+
+export interface StaticResourceStatusUpdateResponse {
+  resource_id: string;
+  status: string;
 }
 
 export interface StaticResourceFindingItem {
@@ -819,4 +850,262 @@ export interface StaticResourceScanAccepted {
   resource_id?: string;
   agent_id?: string;
   status: string;
+}
+
+// ---------------------------------------------------------------------------
+// Agent governance API (/api/v1/agent-governance*).
+// ---------------------------------------------------------------------------
+
+export interface GovernancePage<T> {
+  total: number;
+  page: number;
+  page_size: number;
+  items: T[];
+}
+
+export interface GovernanceAgentType {
+  id: number;
+  type_key: string;
+  name: string;
+  vendor: string;
+  kind: string;
+  runtime: string;
+  description: string;
+  enabled: boolean;
+  deleted: boolean;
+  created_at: string;
+  updated_at: string;
+  agent_count: number;
+  discovery_rule_count: number;
+  resource_rule_count: number;
+}
+
+export interface GovernanceAgentTypeInput {
+  type_key?: string;
+  name?: string;
+  vendor?: string;
+  kind?: string;
+  runtime?: string;
+  description?: string;
+  enabled?: boolean;
+}
+
+export interface GovernanceDiscoveryCondition {
+  id: number;
+  rule_id: number;
+  condition_type: string;
+  field: string;
+  operator: string;
+  value: string;
+  weight: number;
+  required: boolean;
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GovernanceDiscoveryConditionInput {
+  condition_type?: string;
+  field?: string;
+  operator?: string;
+  value?: string;
+  weight?: number;
+  required?: boolean;
+  enabled?: boolean;
+}
+
+export interface GovernanceDiscoveryRule {
+  id: number;
+  agent_type_id: number;
+  agent_type_key: string;
+  agent_type_name: string;
+  rule_name: string;
+  threshold: number;
+  enabled: boolean;
+  condition_count: number;
+  conditions?: GovernanceDiscoveryCondition[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GovernanceDiscoveryRuleInput {
+  agent_type_id?: number;
+  rule_name?: string;
+  threshold?: number;
+  enabled?: boolean;
+  conditions?: GovernanceDiscoveryConditionInput[];
+}
+
+export interface GovernanceResourceRule {
+  id: number;
+  agent_type_id: number;
+  agent_type_key: string;
+  agent_type_name: string;
+  name: string;
+  resource_type: string;
+  path_pattern: string;
+  enumeration_mode: string;
+  scan_profile_id?: number;
+  scan_profile_name?: string;
+  enabled: boolean;
+  priority: number;
+  resource_count: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GovernanceResourceRuleInput {
+  agent_type_id?: number;
+  name?: string;
+  resource_type?: string;
+  path_pattern?: string;
+  enumeration_mode?: string;
+  scan_profile_id?: number;
+  enabled?: boolean;
+  priority?: number;
+}
+
+export interface GovernanceProfileCapability {
+  profile_id?: number;
+  capability_id: number;
+  capability_key: string;
+  name?: string;
+  scanner_name?: string;
+  priority: number;
+  enabled: boolean;
+  config_json?: string;
+  description?: string;
+}
+
+export interface GovernanceScanProfile {
+  id: number;
+  name: string;
+  resource_type: string;
+  enabled: boolean;
+  description: string;
+  capability_count: number;
+  rule_count: number;
+  resource_count: number;
+  capabilities?: GovernanceProfileCapability[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GovernanceScanProfileInput {
+  name?: string;
+  resource_type?: string;
+  description?: string;
+  enabled?: boolean;
+  capabilities?: Array<{
+    capability_id?: number;
+    capability_key?: string;
+    priority?: number;
+    enabled?: boolean;
+    config_json?: string;
+  }>;
+}
+
+export interface GovernanceScanCapability {
+  id: number;
+  capability_key: string;
+  name: string;
+  scanner_name: string;
+  enabled: boolean;
+  description: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GovernanceActionState {
+  file?: string;
+  runtime?: string;
+  install?: string;
+}
+
+export interface GovernanceResourceAction {
+  id: string;
+  target_type: string;
+  target_name: string;
+  connector: string;
+  source_path: string;
+  actions: GovernanceActionState;
+  reason: string;
+  updated_at: string;
+}
+
+export interface GovernanceResourceActionInput {
+  target_type?: string;
+  target_name?: string;
+  connector?: string;
+  source_path?: string;
+  actions?: GovernanceActionState;
+  reason?: string;
+}
+
+export interface GovernanceAdmissionMatrixItem {
+  resource_type: string;
+  severity: string;
+  verdict: string;
+  install_action: string;
+  file_action: string;
+  runtime_action: string;
+  phase: string;
+  source: string;
+}
+
+export interface GovernanceAdmissionMatrixResponse {
+  items: GovernanceAdmissionMatrixItem[];
+}
+
+export interface GovernanceAdmissionEvaluateInput {
+  resource_type: string;
+  target_name: string;
+  path?: string;
+  scan_result?: {
+    max_severity: string;
+    total_findings: number;
+    scanner_name?: string;
+    exit_code?: number;
+    scan_error?: string;
+  };
+}
+
+export interface GovernanceAdmissionEvaluateResponse {
+  verdict: string;
+  reason: string;
+  file_action: string;
+  install_action: string;
+  runtime_action: string;
+}
+
+export interface GovernanceRiskModelResponse {
+  severity_mapping: Array<{ severity: string; risk_level: string }>;
+  malicious_indicators: Array<{ match_type: string; match_value: string }>;
+}
+
+export interface GovernanceRiskEvaluateInput {
+  resource_type: string;
+  findings: Array<{
+    rule_id?: string;
+    category?: string;
+    severity: string;
+    title?: string;
+    tags?: string[];
+  }>;
+}
+
+export interface GovernanceRiskEvaluateResponse {
+  risk_level: string;
+  malicious: boolean;
+  max_severity: string;
+  finding_count: number;
+  matched_indicators: Array<{ match_type: string; match_value: string }>;
+}
+
+export interface GovernanceResourcePreviewResponse {
+  agent_id: string;
+  agent_type_id: number;
+  agent_type_key: string;
+  expanded_paths: string[];
+  targets: Array<{ name: string; target: string; exists: boolean; type: string }>;
 }

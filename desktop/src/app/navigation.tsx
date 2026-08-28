@@ -15,6 +15,7 @@ export type PageKey =
   | "overview"
   | "range"
   | "agents"
+  | "governance"
   | "trace"
   | "staticAssets"
   | "events"
@@ -28,6 +29,7 @@ export const navigation: Array<{ key: PageKey; icon: React.ReactNode; label: str
   { key: "overview", icon: <DashboardOutlined />, label: "安全总览" },
   { key: "range", icon: <ExperimentOutlined />, label: "靶场控制" },
   { key: "agents", icon: <RadarChartOutlined />, label: "Agent 检测" },
+  { key: "governance", icon: <SafetyCertificateOutlined />, label: "Agent 治理中心" },
   { key: "staticAssets", icon: <DatabaseOutlined />, label: "静态资源检测" },
   { key: "events", icon: <BugOutlined />, label: "事件检测" },
   { key: "chain", icon: <AuditOutlined />, label: "攻击链" },

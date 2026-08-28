@@ -171,3 +171,75 @@ pub fn trigger_static_resource_rescan(
     )
     .map_err(|error| format!("触发重新扫描失败：{error}"))
 }
+
+#[tauri::command]
+pub fn get_static_resource_scans(
+    app: tauri::AppHandle,
+    resource_id: String,
+    limit: Option<i64>,
+) -> Result<Value, String> {
+    let limit = limit.unwrap_or(50).clamp(1, 200);
+    crate::commands::gateway_api::get_json::<Value>(
+        &app,
+        &format!(
+            "/api/v1/static-resources/{}/scans?limit={}",
+            urlencode(&resource_id),
+            limit
+        ),
+    )
+    .map_err(|error| format!("获取扫描历史失败：{error}"))
+}
+
+#[tauri::command]
+pub fn update_static_resource_status(
+    app: tauri::AppHandle,
+    resource_id: String,
+    status: String,
+) -> Result<Value, String> {
+    crate::commands::gateway_api::put_json::<Value, Value>(
+        &app,
+        &format!(
+            "/api/v1/static-resources/{}/status",
+            urlencode(&resource_id)
+        ),
+        &serde_json::json!({ "status": status }),
+    )
+    .map_err(|error| format!("更新资源状态失败：{error}"))
+}
+
+#[tauri::command]
+pub fn reveal_static_resource_path(path: String) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("资源路径为空".to_string());
+    }
+    if trimmed.contains("://") {
+        return Err("虚拟资源（运行时快照）没有对应的磁盘路径".to_string());
+    }
+    reveal_in_file_explorer(trimmed)
+}
+
+#[cfg(windows)]
+fn reveal_in_file_explorer(path: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    use std::path::Path;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let mut command = std::process::Command::new("explorer");
+    command.creation_flags(CREATE_NO_WINDOW);
+    if Path::new(path).is_dir() {
+        command.arg(path);
+    } else {
+        command.raw_arg(format!("/select,\"{}\"", path));
+    }
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("打开文件资源管理器失败：{error}"))
+}
+
+#[cfg(not(windows))]
+fn reveal_in_file_explorer(_path: &str) -> Result<(), String> {
+    Err("当前平台不支持在文件资源管理器中定位文件".to_string())
+}

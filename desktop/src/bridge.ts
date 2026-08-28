@@ -7,6 +7,27 @@ import type {
   AttackChainSnapshot,
   EnvironmentSnapshot,
   GatewayAuditSnapshot,
+  GovernanceAdmissionEvaluateInput,
+  GovernanceAdmissionEvaluateResponse,
+  GovernanceAdmissionMatrixResponse,
+  GovernanceAgentType,
+  GovernanceAgentTypeInput,
+  GovernanceDiscoveryCondition,
+  GovernanceDiscoveryConditionInput,
+  GovernanceDiscoveryRule,
+  GovernanceDiscoveryRuleInput,
+  GovernancePage,
+  GovernanceResourceAction,
+  GovernanceResourceActionInput,
+  GovernanceResourcePreviewResponse,
+  GovernanceResourceRule,
+  GovernanceResourceRuleInput,
+  GovernanceRiskEvaluateInput,
+  GovernanceRiskEvaluateResponse,
+  GovernanceRiskModelResponse,
+  GovernanceScanCapability,
+  GovernanceScanProfile,
+  GovernanceScanProfileInput,
   GuardAuditSnapshot,
   GuardPolicy,
   RangeMode,
@@ -33,7 +54,9 @@ import type {
   StaticResourceListResponse,
   StaticResourceRelationsResponse,
   StaticResourceScanAccepted,
+  StaticResourceScanHistoryResponse,
   StaticResourceScanSettings,
+  StaticResourceStatusUpdateResponse,
   StaticResourceSummaryResponse,
 } from "./types";
 
@@ -185,6 +208,255 @@ export async function triggerStaticResourceScan(resourceId: string): Promise<Sta
 
 export async function triggerStaticResourceRescan(agentId?: string): Promise<StaticResourceScanAccepted> {
   return invoke<StaticResourceScanAccepted>("trigger_static_resource_rescan", { agentId: agentId ?? null });
+}
+
+export async function getStaticResourceScans(resourceId: string, limit = 50): Promise<StaticResourceScanHistoryResponse> {
+  if (!inTauri()) return { resource_id: resourceId, total: 0, items: [] };
+  return invoke<StaticResourceScanHistoryResponse>("get_static_resource_scans", { resourceId, limit });
+}
+
+export async function updateStaticResourceStatus(resourceId: string, status: string): Promise<StaticResourceStatusUpdateResponse> {
+  if (!inTauri()) throw new Error("仅桌面应用可以修改资源状态");
+  return invoke<StaticResourceStatusUpdateResponse>("update_static_resource_status", { resourceId, status });
+}
+
+export async function revealStaticResourcePath(path: string): Promise<void> {
+  if (!inTauri()) throw new Error("仅桌面应用可以在资源管理器中定位文件");
+  await invoke("reveal_static_resource_path", { path });
+}
+
+// ---------------------------------------------------------------------------
+// Agent governance API.
+// ---------------------------------------------------------------------------
+
+export interface GovernanceListQuery {
+  keyword?: string;
+  enabled?: boolean;
+  kind?: string;
+  runtime?: string;
+  agentTypeId?: number;
+  typeKey?: string;
+  resourceType?: string;
+  scanProfileId?: number;
+  targetType?: string;
+  targetName?: string;
+  connector?: string;
+  actionField?: string;
+  actionValue?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+const emptyPage = <T>(): GovernancePage<T> => ({ total: 0, page: 1, page_size: 20, items: [] });
+
+function governanceQuery(query: GovernanceListQuery = {}): string {
+  const params = new URLSearchParams();
+  if (query.keyword) params.set("keyword", query.keyword);
+  if (query.enabled !== undefined) params.set("enabled", String(query.enabled));
+  if (query.kind) params.set("kind", query.kind);
+  if (query.runtime) params.set("runtime", query.runtime);
+  if (query.agentTypeId) params.set("agent_type_id", String(query.agentTypeId));
+  if (query.typeKey) params.set("type_key", query.typeKey);
+  if (query.resourceType) params.set("resource_type", query.resourceType);
+  if (query.scanProfileId) params.set("scan_profile_id", String(query.scanProfileId));
+  if (query.targetType) params.set("target_type", query.targetType);
+  if (query.targetName) params.set("target_name", query.targetName);
+  if (query.connector) params.set("connector", query.connector);
+  if (query.actionField) params.set("action_field", query.actionField);
+  if (query.actionValue) params.set("action_value", query.actionValue);
+  if (query.page) params.set("page", String(query.page));
+  if (query.pageSize) params.set("page_size", String(query.pageSize));
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
+
+async function governanceGet<T>(path: string): Promise<T> {
+  return invoke<T>("agent_governance_get", { path });
+}
+
+async function governancePost<T>(path: string, body: unknown): Promise<T> {
+  return invoke<T>("agent_governance_post", { path, body });
+}
+
+async function governancePatch<T>(path: string, body: unknown): Promise<T> {
+  return invoke<T>("agent_governance_patch", { path, body });
+}
+
+async function governancePut<T>(path: string, body: unknown): Promise<T> {
+  return invoke<T>("agent_governance_put", { path, body });
+}
+
+async function governanceDelete<T>(path: string): Promise<T> {
+  return invoke<T>("agent_governance_delete", { path });
+}
+
+export async function getGovernanceAgentTypes(query: GovernanceListQuery = {}): Promise<GovernancePage<GovernanceAgentType>> {
+  if (!inTauri()) return emptyPage();
+  return governanceGet(`/agent-types${governanceQuery(query)}`);
+}
+
+export async function createGovernanceAgentType(body: GovernanceAgentTypeInput): Promise<GovernanceAgentType> {
+  return governancePost("/agent-types", body);
+}
+
+export async function updateGovernanceAgentType(id: number, body: GovernanceAgentTypeInput): Promise<GovernanceAgentType> {
+  return governancePatch(`/agent-types/${id}`, body);
+}
+
+export async function deleteGovernanceAgentType(id: number): Promise<GovernanceAgentType> {
+  return governanceDelete(`/agent-types/${id}`);
+}
+
+export async function getGovernanceDiscoveryRules(query: GovernanceListQuery = {}): Promise<GovernancePage<GovernanceDiscoveryRule>> {
+  if (!inTauri()) return emptyPage();
+  return governanceGet(`/discovery-rules${governanceQuery(query)}`);
+}
+
+export async function getGovernanceDiscoveryRule(id: number): Promise<GovernanceDiscoveryRule> {
+  return governanceGet(`/discovery-rules/${id}`);
+}
+
+export async function createGovernanceDiscoveryRule(body: GovernanceDiscoveryRuleInput): Promise<GovernanceDiscoveryRule> {
+  return governancePost("/discovery-rules", body);
+}
+
+export async function updateGovernanceDiscoveryRule(id: number, body: GovernanceDiscoveryRuleInput): Promise<GovernanceDiscoveryRule> {
+  return governancePatch(`/discovery-rules/${id}`, body);
+}
+
+export async function deleteGovernanceDiscoveryRule(id: number): Promise<GovernanceDiscoveryRule> {
+  return governanceDelete(`/discovery-rules/${id}`);
+}
+
+export async function createGovernanceDiscoveryCondition(ruleId: number, body: GovernanceDiscoveryConditionInput): Promise<GovernanceDiscoveryCondition> {
+  return governancePost(`/discovery-rules/${ruleId}/conditions`, body);
+}
+
+export async function updateGovernanceDiscoveryCondition(id: number, body: GovernanceDiscoveryConditionInput): Promise<GovernanceDiscoveryCondition> {
+  return governancePatch(`/discovery-conditions/${id}`, body);
+}
+
+export async function deleteGovernanceDiscoveryCondition(id: number): Promise<{ status: string }> {
+  return governanceDelete(`/discovery-conditions/${id}`);
+}
+
+export async function getGovernanceResourceRules(query: GovernanceListQuery = {}): Promise<GovernancePage<GovernanceResourceRule>> {
+  if (!inTauri()) return emptyPage();
+  return governanceGet(`/resource-rules${governanceQuery(query)}`);
+}
+
+export async function createGovernanceResourceRule(body: GovernanceResourceRuleInput): Promise<GovernanceResourceRule> {
+  return governancePost("/resource-rules", body);
+}
+
+export async function updateGovernanceResourceRule(id: number, body: GovernanceResourceRuleInput): Promise<GovernanceResourceRule> {
+  return governancePatch(`/resource-rules/${id}`, body);
+}
+
+export async function deleteGovernanceResourceRule(id: number): Promise<GovernanceResourceRule> {
+  return governanceDelete(`/resource-rules/${id}`);
+}
+
+export async function previewGovernanceResourceRule(body: {
+  agent_id?: string;
+  agent_type_id?: number;
+  path_pattern: string;
+  enumeration_mode: string;
+}): Promise<GovernanceResourcePreviewResponse> {
+  return governancePost("/resource-rules/preview", body);
+}
+
+export async function getGovernanceScanProfiles(query: GovernanceListQuery = {}): Promise<GovernancePage<GovernanceScanProfile>> {
+  if (!inTauri()) return emptyPage();
+  return governanceGet(`/scan-profiles${governanceQuery(query)}`);
+}
+
+export async function createGovernanceScanProfile(body: GovernanceScanProfileInput): Promise<GovernanceScanProfile> {
+  return governancePost("/scan-profiles", body);
+}
+
+export async function updateGovernanceScanProfile(id: number, body: GovernanceScanProfileInput): Promise<GovernanceScanProfile> {
+  return governancePatch(`/scan-profiles/${id}`, body);
+}
+
+export async function deleteGovernanceScanProfile(id: number): Promise<GovernanceScanProfile> {
+  return governanceDelete(`/scan-profiles/${id}`);
+}
+
+export async function replaceGovernanceScanProfileCapabilities(id: number, capabilities: GovernanceScanProfileInput["capabilities"]): Promise<GovernanceScanProfile> {
+  return governancePut(`/scan-profiles/${id}/capabilities`, { capabilities: capabilities ?? [] });
+}
+
+export async function getGovernanceScanCapabilities(query: GovernanceListQuery = {}): Promise<{ items: GovernanceScanCapability[] }> {
+  if (!inTauri()) return { items: [] };
+  return governanceGet(`/scan-capabilities${governanceQuery(query)}`);
+}
+
+export async function getGovernanceResourceActions(query: GovernanceListQuery = {}): Promise<GovernancePage<GovernanceResourceAction>> {
+  if (!inTauri()) return emptyPage();
+  return governanceGet(`/resource-actions${governanceQuery(query)}`);
+}
+
+export async function createGovernanceResourceAction(body: GovernanceResourceActionInput): Promise<GovernanceResourceAction> {
+  return governancePost("/resource-actions", body);
+}
+
+export async function updateGovernanceResourceAction(id: string, body: GovernanceResourceActionInput): Promise<GovernanceResourceAction> {
+  return governancePatch(`/resource-actions/${id}`, body);
+}
+
+export async function deleteGovernanceResourceAction(id: string): Promise<{ status: string }> {
+  return governanceDelete(`/resource-actions/${id}`);
+}
+
+export async function getGovernanceAdmissionMatrix(): Promise<GovernanceAdmissionMatrixResponse> {
+  if (!inTauri()) return { items: [] };
+  return governanceGet("/admission-matrix");
+}
+
+export async function evaluateGovernanceAdmission(body: GovernanceAdmissionEvaluateInput): Promise<GovernanceAdmissionEvaluateResponse> {
+  if (!inTauri()) {
+    const max = body.scan_result?.max_severity ?? "INFO";
+    const blocked = max === "HIGH" || max === "CRITICAL";
+    return {
+      verdict: blocked ? "rejected" : body.scan_result ? "warning" : "scan",
+      reason: blocked ? "preview: high severity blocks" : "preview",
+      file_action: blocked ? "quarantine" : "none",
+      install_action: blocked ? "block" : "none",
+      runtime_action: blocked ? "block" : "allow",
+    };
+  }
+  return governancePost("/admission/evaluate", body);
+}
+
+export async function getGovernanceRiskModel(): Promise<GovernanceRiskModelResponse> {
+  if (!inTauri()) {
+    return {
+      severity_mapping: [
+        { severity: "CRITICAL", risk_level: "critical" },
+        { severity: "HIGH", risk_level: "high" },
+        { severity: "MEDIUM", risk_level: "medium" },
+        { severity: "LOW", risk_level: "low" },
+        { severity: "INFO", risk_level: "clean" },
+      ],
+      malicious_indicators: [{ match_type: "rule_id_prefix", match_value: "CS-MAL-" }],
+    };
+  }
+  return governanceGet("/risk-model");
+}
+
+export async function evaluateGovernanceRisk(body: GovernanceRiskEvaluateInput): Promise<GovernanceRiskEvaluateResponse> {
+  if (!inTauri()) {
+    const rank: Record<string, number> = { INFO: 0, LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 };
+    const max = body.findings.reduce((acc, finding) => {
+      const severity = String(finding.severity ?? "INFO").toUpperCase();
+      return (rank[severity] ?? 0) > (rank[acc] ?? 0) ? severity : acc;
+    }, "INFO");
+    const risk = max === "CRITICAL" ? "critical" : max === "HIGH" ? "high" : max === "MEDIUM" ? "medium" : max === "LOW" ? "low" : "clean";
+    const malicious = body.findings.some((finding) => finding.rule_id?.startsWith("CS-MAL-") || finding.category === "prompt_injection");
+    return { risk_level: risk, malicious, max_severity: max, finding_count: body.findings.length, matched_indicators: malicious ? [{ match_type: "rule_id_prefix", match_value: "CS-MAL-" }] : [] };
+  }
+  return governancePost("/risk/evaluate", body);
 }
 
 export async function getRuntimeSecuritySummary(agentId?: string): Promise<RuntimeSecuritySummary> {

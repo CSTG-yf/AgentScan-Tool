@@ -43,6 +43,14 @@ where
     request_with_body::<T, B>(app, "PUT", path, body)
 }
 
+pub(crate) fn patch_json<T, B>(app: &tauri::AppHandle, path: &str, body: &B) -> Result<T, String>
+where
+    T: DeserializeOwned,
+    B: Serialize + ?Sized,
+{
+    request_with_body::<T, B>(app, "PATCH", path, body)
+}
+
 pub(crate) fn post_json<T, B>(app: &tauri::AppHandle, path: &str, body: &B) -> Result<T, String>
 where
     T: DeserializeOwned,

@@ -46,8 +46,10 @@ func (a *APIServer) staticScanTriggers() (func(string) error, func(string) error
 //
 //	GET  /{id}                        drawer overview payload
 //	GET  /{id}/findings               latest-scan findings (risk tab)
+//	GET  /{id}/scans                  full scan history (history tab)
 //	GET  /{id}/content                redacted file content / dir listing
 //	GET  /{id}/relations              related resources (reserved)
+//	PUT  /{id}/status                 manual review status (review loop)
 //	POST /{id}/scan                   on-demand single-resource scan
 func (a *APIServer) handleStaticResourcesAPI(w http.ResponseWriter, r *http.Request) {
 	if a.store == nil {
@@ -76,8 +78,12 @@ func (a *APIServer) handleStaticResourcesAPI(w http.ResponseWriter, r *http.Requ
 			a.handleStaticResourceDetail(w, r, resourceID)
 		case len(parts) == 2 && parts[1] == "findings":
 			a.handleStaticResourceFindings(w, r, resourceID)
+		case len(parts) == 2 && parts[1] == "scans":
+			a.handleStaticResourceScans(w, r, resourceID)
 		case len(parts) == 2 && parts[1] == "content":
 			a.handleStaticResourceContent(w, r, resourceID)
+		case len(parts) == 2 && parts[1] == "status":
+			a.handleStaticResourceStatus(w, r, resourceID)
 		case len(parts) == 2 && parts[1] == "relations":
 			a.handleStaticResourceRelations(w, r, resourceID)
 		case len(parts) == 2 && parts[1] == "scan":
@@ -209,6 +215,74 @@ func (a *APIServer) handleStaticResourceFindings(w http.ResponseWriter, r *http.
 		return
 	}
 	a.writeJSON(w, http.StatusOK, findings)
+}
+
+// handleStaticResourceScans serves GET /api/v1/static-resources/{id}/scans —
+// the drawer history tab: every scan_results record of the resource, newest
+// first (first discovery, drift re-scans, manual rescans).
+func (a *APIServer) handleStaticResourceScans(w http.ResponseWriter, r *http.Request, resourceID string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, _, _, _, _, ok, err := a.store.GetStaticResourceTargetPath(resourceID); err != nil {
+		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	} else if !ok {
+		a.writeJSON(w, http.StatusNotFound, map[string]string{"error": "resource not found"})
+		return
+	}
+	history, err := a.store.ListStaticResourceScanHistory(resourceID, pageLimit(r, 50, 1, 200))
+	if err != nil {
+		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	a.writeJSON(w, http.StatusOK, history)
+}
+
+// staticResourceManualStatuses are the lifecycle statuses an operator may set
+// from the desktop drawer: the review outcomes plus the "undo" reset.
+var staticResourceManualStatuses = map[string]bool{
+	"discovered":   true,
+	"review":       true,
+	"needs_review": true,
+	"ignored":      true,
+}
+
+// handleStaticResourceStatus serves PUT /api/v1/static-resources/{id}/status —
+// the manual review loop. The operator marks a resource reviewed / needs
+// review / ignored after inspecting it in the file explorer; "discovered"
+// undoes the manual mark. Manual statuses survive enumeration and
+// disappearance sweeps; a completed scan verdict supersedes them.
+func (a *APIServer) handleStaticResourceStatus(w http.ResponseWriter, r *http.Request, resourceID string) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+	}
+	status := strings.ToLower(strings.TrimSpace(body.Status))
+	if !staticResourceManualStatuses[status] {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status must be one of: discovered, review, needs_review, ignored"})
+		return
+	}
+	ok, err := a.store.SetStaticResourceStatus(resourceID, status)
+	if err != nil {
+		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if !ok {
+		a.writeJSON(w, http.StatusNotFound, map[string]string{"error": "resource not found"})
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]string{"resource_id": resourceID, "status": status})
 }
 
 // handleStaticResourceContent serves GET /api/v1/static-resources/{id}/content

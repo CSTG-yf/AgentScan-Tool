@@ -31,6 +31,7 @@ import { defenseModeColors, defenseModeDescriptions, defenseModeLabels } from ".
 import { navigation, type PageKey } from "./app/navigation";
 import { defaultReplayCommand, replayCommandForScenario } from "./data/range";
 import { AgentsPage } from "./pages/AgentsPage";
+import { AgentGovernancePage } from "./pages/AgentGovernancePage";
 import { AlertsPage } from "./pages/AlertsPage";
 import { AttackChainPage } from "./pages/AttackChainPage";
 import { EventsPage } from "./pages/EventsPage";
@@ -406,6 +407,8 @@ export default function App() {
         );
       case "agents":
         return <AgentsPage agents={agents} warning={agentWarning} loading={loading} onRefresh={() => refreshTask("agentDiscovery")} />;
+      case "governance":
+        return <AgentGovernancePage />;
       case "trace":
         return <TracePage trace={trace} events={traceEvents} fileTraceCount={fileTraceCount} />;
       case "staticAssets":

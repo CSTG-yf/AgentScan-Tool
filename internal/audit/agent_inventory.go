@@ -517,6 +517,7 @@ FROM agent_discovery_rules r
 JOIN agent_types t ON t.id = r.agent_type_id
 WHERE COALESCE(r.enabled, 0) = 1
   AND COALESCE(t.enabled, 0) = 1
+  AND COALESCE(t."delete", 0) = 0
 ORDER BY lower(t.name), r.id`)
 	if err != nil {
 		return nil, fmt.Errorf("audit: list agent discovery rules: %w", err)

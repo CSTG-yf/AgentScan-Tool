@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CopyOutlined, DownloadOutlined, EyeOutlined, FileTextOutlined, ReloadOutlined, SearchOutlined, SecurityScanOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Descriptions, Drawer, Empty, Input, List, message, Select, Space, Spin, Table, Tabs, Tag, Typography } from "antd";
+import { CopyOutlined, DownloadOutlined, EyeOutlined, FileTextOutlined, FolderOpenOutlined, ReloadOutlined, SearchOutlined, SecurityScanOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Descriptions, Drawer, Dropdown, Empty, Input, List, message, Modal, Select, Space, Spin, Table, Tabs, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { staticRiskTag } from "../app/display";
-import { isRiskResource, staticRiskMeta, staticTypeMeta } from "../data/staticAssets";
+import { staticRiskMeta, staticTypeMeta } from "../data/staticAssets";
 import {
   getStaticResourceAgents,
   getStaticResourceContent,
   getStaticResourceDetail,
   getStaticResourceFindings,
-  getStaticResourceRelations,
+  getStaticResourceScans,
   getStaticResources,
+  revealStaticResourcePath,
   getStaticResourceSummary,
   triggerStaticResourceRescan,
   triggerStaticResourceScan,
+  updateStaticResourceStatus,
 } from "../bridge";
 import type {
   StaticResourceAgentSummary,
@@ -21,7 +23,7 @@ import type {
   StaticResourceDetailResponse,
   StaticResourceFindingItem,
   StaticResourceListItem,
-  StaticResourceRelationItem,
+  StaticResourceScanHistoryItem,
   StaticResourceSummaryResponse,
 } from "../types";
 
@@ -60,7 +62,16 @@ const STATUS_META: Record<string, { color: string; label: string }> = {
   missing: { color: "error", label: "已消失" },
   changed: { color: "warning", label: "已变更" },
   ignored: { color: "default", label: "已忽略" },
+  unknown: { color: "default", label: "未知" },
 };
+
+/** Manual review statuses an operator can set from the status dropdown. */
+const MANUAL_STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: "review", label: "标记为已复核" },
+  { value: "needs_review", label: "标记为待复核" },
+  { value: "ignored", label: "标记为已忽略" },
+  { value: "discovered", label: "恢复为已发现" },
+];
 
 const SCAN_STATUS_META: Record<string, { color: string; label: string }> = {
   completed: { color: "success", label: "已完成" },
@@ -149,8 +160,12 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
   const [findingsLoading, setFindingsLoading] = useState(false);
   const [content, setContent] = useState<StaticResourceContentResponse>();
   const [contentLoading, setContentLoading] = useState(false);
-  const [relations, setRelations] = useState<StaticResourceRelationItem[]>([]);
-  const [relationsLoading, setRelationsLoading] = useState(false);
+  const [scans, setScans] = useState<StaticResourceScanHistoryItem[]>([]);
+  const [scansTotal, setScansTotal] = useState(0);
+  const [scansLoading, setScansLoading] = useState(false);
+  const [revealOpen, setRevealOpen] = useState(false);
+  const [revealPath, setRevealPath] = useState("");
+  const [statusSaving, setStatusSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [rescanning, setRescanning] = useState(false);
 
@@ -308,16 +323,18 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
     }
   }, []);
 
-  const loadRelations = useCallback(async (resourceId: string) => {
-    setRelationsLoading(true);
+  const loadScans = useCallback(async (resourceId: string) => {
+    setScansLoading(true);
     try {
-      const response = await getStaticResourceRelations(resourceId);
-      setRelations(response.items ?? []);
+      const response = await getStaticResourceScans(resourceId);
+      setScans(response.items ?? []);
+      setScansTotal(response.total ?? 0);
     } catch (error) {
-      message.error(`加载关联资源失败：${String(error)}`);
-      setRelations([]);
+      message.error(`加载扫描历史失败：${String(error)}`);
+      setScans([]);
+      setScansTotal(0);
     } finally {
-      setRelationsLoading(false);
+      setScansLoading(false);
     }
   }, []);
 
@@ -328,9 +345,9 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
       if (!detailResourceId) return;
       if (tab === "risk") void loadFindings(detailResourceId);
       if (tab === "content") void loadContent(detailResourceId);
-      if (tab === "relations") void loadRelations(detailResourceId);
+      if (tab === "history") void loadScans(detailResourceId);
     },
-    [detailResourceId, loadContent, loadFindings, loadRelations],
+    [detailResourceId, loadContent, loadFindings, loadScans],
   );
 
   const handleOpenResource = useCallback(
@@ -341,7 +358,8 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
       setFindings([]);
       setFindingsSummary({});
       setContent(undefined);
-      setRelations([]);
+      setScans([]);
+      setScansTotal(0);
       void loadDetail(resource.resource_id);
     },
     [loadDetail],
@@ -396,6 +414,42 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
     }
   };
 
+  const handleStatusChange = useCallback(
+    async (resourceId: string, nextStatus: string) => {
+      setStatusSaving(true);
+      try {
+        await updateStaticResourceStatus(resourceId, nextStatus);
+        message.success("资源状态已更新");
+        await refreshListAndSummary();
+        if (detailResourceId === resourceId) void loadDetail(resourceId);
+      } catch (error) {
+        message.error(`更新资源状态失败：${String(error)}`);
+      } finally {
+        setStatusSaving(false);
+      }
+    },
+    [detailResourceId, loadDetail, refreshListAndSummary],
+  );
+
+  const openRevealDialog = (path?: string) => {
+    if (!path) {
+      message.warning("该资源没有可定位的磁盘路径");
+      return;
+    }
+    setRevealPath(path);
+    setRevealOpen(true);
+  };
+
+  const handleRevealInExplorer = async () => {
+    if (!revealPath) return;
+    try {
+      await revealStaticResourcePath(revealPath);
+      setRevealOpen(false);
+    } catch (error) {
+      message.error(`${String(error)}`);
+    }
+  };
+
   const copyResourcePath = async (path?: string) => {
     if (!path) return;
     try {
@@ -426,6 +480,24 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
     URL.revokeObjectURL(url);
     message.success("资源扫描摘要已导出");
   };
+
+  const renderStatusCell = (resource: StaticResourceListItem | StaticResourceDetailResponse) => (
+    <span className="static-status-cell" onClick={(event) => event.stopPropagation()}>
+      <Dropdown
+        trigger={["click"]}
+        menu={{
+          items: MANUAL_STATUS_OPTIONS.map((option) => ({
+            key: option.value,
+            label: option.label,
+            disabled: option.value === resource.status || statusSaving,
+          })),
+          onClick: ({ key }) => void handleStatusChange(resource.resource_id, key),
+        }}
+      >
+        <span title="点击修改审查状态" style={{ cursor: "pointer" }}>{statusTag(resource.status)}</span>
+      </Dropdown>
+    </span>
+  );
 
   const columns: ColumnsType<StaticResourceListItem> = [
     {
@@ -463,7 +535,7 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
       title: "状态",
       dataIndex: "status",
       width: 108,
-      render: (value) => statusTag(value),
+      render: (_, resource) => renderStatusCell(resource),
     },
     {
       title: "更新时间",
@@ -710,6 +782,7 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
               <Button icon={<SecurityScanOutlined />} loading={scanning} onClick={() => void handleScanOne()}>重新扫描</Button>
               <Button icon={<EyeOutlined />} onClick={() => handleDetailTabChange("content")}>查看内容</Button>
               <Button icon={<CopyOutlined />} onClick={() => void copyResourcePath(detail.path)}>复制路径</Button>
+              <Button icon={<FolderOpenOutlined />} onClick={() => openRevealDialog(detail.path)}>定位文件</Button>
               <Button icon={<DownloadOutlined />} onClick={() => downloadResourceSummary(detail)}>导出摘要</Button>
             </div>
           ) : null
@@ -738,11 +811,26 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
                         { key: "size", label: "大小", children: formatSize(detail.size) },
                         { key: "mtime", label: "最近扫描", children: formatTimestamp(detail.last_scan_at) },
                         { key: "permission", label: "文件权限", children: detail.permission ?? "-" },
-                        { key: "status", label: "状态", children: statusTag(detail.status) },
+                        { key: "status", label: "状态", children: renderStatusCell(detail) },
                         { key: "scan", label: "扫描状态", children: scanStatusTag(detail.scan_status) },
                         { key: "hash", label: "Hash", children: <Text className="mono static-detail-path">{detail.content_hash || "-"}</Text> },
                         ...(detail.resource_rule ? [{ key: "rule", label: "发现规则", children: `${detail.resource_rule.name} (#${detail.resource_rule.rule_id})` }] : []),
                         ...(detail.scan_profile ? [{ key: "profile", label: "检测方案", children: `${detail.scan_profile.name} (#${detail.scan_profile.profile_id})` }] : []),
+                        ...(detail.scan_capabilities?.length
+                          ? [{
+                              key: "capabilities",
+                              label: "检测能力",
+                              children: (
+                                <Space size={4} wrap>
+                                  {detail.scan_capabilities.map((capability) => (
+                                    <Tooltip key={capability.capability_id} title={capability.description || capability.scanner || undefined}>
+                                      <Tag color={capability.enabled ? "blue" : "default"}>{capability.name}</Tag>
+                                    </Tooltip>
+                                  ))}
+                                </Space>
+                              ),
+                            }]
+                          : []),
                       ]}
                     />
                     <div className="static-risk-summary">
@@ -827,33 +915,52 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
                 ),
               },
               {
-                key: "relations",
-                label: "关联资源",
-                children: relationsLoading ? (
+                key: "history",
+                label: "历史",
+                children: scansLoading ? (
                   <div style={{ padding: 32, textAlign: "center" }}><Spin /></div>
-                ) : relations.length ? (
-                  <div className="static-relation-list">
-                    {relations.map((relation) => (
-                      <div key={relation.resource_id} className="static-relation-item">
-                        <div>
-                          <Text strong>{relation.name}</Text>
-                          <Text type="secondary">{relation.relation_type}</Text>
-                        </div>
-                        <Space>
-                          {typeTag(relation.resource_type)}
-                          {staticRiskTag(apiRisk(relation.risk_level))}
-                        </Space>
-                      </div>
-                    ))}
+                ) : scans.length ? (
+                  <div className="static-history-list">
+                    <Text type="secondary">共 {scansTotal} 次扫描，展示最近 {scans.length} 次。</Text>
+                    <Table
+                      size="small"
+                      rowKey="scan_id"
+                      pagination={false}
+                      dataSource={scans}
+                      columns={[
+                        { title: "扫描时间", dataIndex: "scanned_at", width: 150, render: (value) => formatTimestamp(value) },
+                        { title: "扫描器", dataIndex: "scanner", render: (value) => value || "-" },
+                        { title: "发现数", dataIndex: "finding_count", width: 76 },
+                        { title: "最高风险", dataIndex: "max_severity", width: 100, render: (value) => (value ? staticRiskTag(apiRisk(value)) : "-") },
+                        { title: "耗时", dataIndex: "duration_ms", width: 88, render: (value) => (value === undefined || value === null ? "-" : `${value} ms`) },
+                        { title: "Scan ID", dataIndex: "scan_id", width: 120, render: (value) => <Text className="mono" style={{ fontSize: 12 }}>{value}</Text> },
+                      ]}
+                    />
                   </div>
                 ) : (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无关联资源" />
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无扫描历史" />
                 ),
               },
             ]}
           />
         ) : null}
       </Drawer>
+
+      <Modal
+        open={revealOpen}
+        title="资源文件位置"
+        okText="在资源管理器中显示"
+        cancelText="关闭"
+        onOk={() => void handleRevealInExplorer()}
+        onCancel={() => setRevealOpen(false)}
+      >
+        <Space direction="vertical" size={8} style={{ width: "100%" }}>
+          <Text type="secondary">
+            在文件资源管理器中打开该资源所在位置，人工审查文件内容后，可在资源状态处将结果标记为已复核 / 待复核 / 已忽略。
+          </Text>
+          <Text className="mono static-detail-path" copyable>{revealPath}</Text>
+        </Space>
+      </Modal>
     </section>
   );
 }

@@ -128,11 +128,31 @@ func TestStoreObservabilityPhase6ColumnsPresent(t *testing.T) {
 	}
 }
 
+// TestStoreBusinessTablesHaveSoftDeleteColumn pins the common soft-delete
+// marker across every persisted domain table in audit.db.
+func TestStoreBusinessTablesHaveSoftDeleteColumn(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+	if err := store.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	for _, table := range softDeleteBusinessTables {
+		ok, err := store.hasColumn(table, "delete")
+		if err != nil {
+			t.Fatalf("hasColumn(%s, delete): %v", table, err)
+		}
+		if !ok {
+			t.Fatalf("expected %s.delete to exist after migration", table)
+		}
+	}
+}
+
 // TestStoreLogEventRoundTripsPhase6Fields writes an Event with every
-// Phase 6 field populated and reads it back via ListEvents. All
-// fields must survive the sqlite round-trip unchanged — this is the
-// contract the audit bridge, Splunk HEC, and OTLP log sinks all rely
-// on.
+// Phase 6 field populated and reads it back via ListEvents.
 func TestStoreLogEventRoundTripsPhase6Fields(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "audit.db"))
 	if err != nil {

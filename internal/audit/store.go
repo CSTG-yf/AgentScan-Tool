@@ -400,6 +400,62 @@ type migration struct {
 	apply       func(ex dbExecer) error
 }
 
+// softDeleteBusinessTables are persisted domain tables that should carry the
+// common soft-delete marker. schema_version is intentionally excluded because it
+// is migration metadata, not user/domain data.
+var softDeleteBusinessTables = []string{
+	"audit_events",
+	"scan_results",
+	"findings",
+	"actions",
+	"network_egress_events",
+	"target_snapshots",
+	"judge_responses",
+	"scan_findings",
+	"activity_events",
+	"sink_health",
+	"agents",
+	"agent_aliases",
+	"static_resources",
+	"behavior_events",
+	"app_settings",
+	"agent_types",
+	"agent_discovery_rules",
+	"agent_discovery_conditions",
+	"agent_resource_rules",
+	"resource_scan_profiles",
+	"security_scan_capabilities",
+	"resource_scan_profile_capabilities",
+	"agent_runtime_sessions",
+	"runtime_detections",
+	"runtime_detection_events",
+	"runtime_decisions",
+	"runtime_response_actions",
+	"runtime_attack_chains",
+	"runtime_attack_chain_events",
+}
+
+func ensureSoftDeleteColumn(ex dbExecer, table string) error {
+	present, err := tableExists(ex, table)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return nil
+	}
+	exists, err := hasColumnDB(ex, table, "delete")
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	if _, err := ex.Exec(fmt.Sprintf(`ALTER TABLE "%s" ADD COLUMN "delete" INTEGER NOT NULL DEFAULT 0`, table)); err != nil {
+		return fmt.Errorf("alter %s.delete: %w", table, err)
+	}
+	return nil
+}
+
 // migrations is the ordered list of schema changes. Append new entries at the
 // end; never reorder or remove existing entries.
 var migrations = []migration{
@@ -1599,6 +1655,7 @@ var migrations = []migration{
 				runtime TEXT NOT NULL DEFAULT '',
 				description TEXT NOT NULL DEFAULT '',
 				enabled INTEGER NOT NULL DEFAULT 1,
+				"delete" INTEGER NOT NULL DEFAULT 0,
 				created_at DATETIME NOT NULL,
 				updated_at DATETIME NOT NULL
 			);
@@ -2250,6 +2307,29 @@ WHERE id = ?`,
 			return nil
 		},
 	},
+	{
+		description: "agent governance: soft delete marker for agent types",
+		apply: func(ex dbExecer) error {
+			if err := ensureSoftDeleteColumn(ex, "agent_types"); err != nil {
+				return err
+			}
+			if _, err := ex.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_types_delete ON agent_types("delete")`); err != nil {
+				return err
+			}
+			return nil
+		},
+	},
+	{
+		description: "soft delete marker for audit business tables",
+		apply: func(ex dbExecer) error {
+			for _, table := range softDeleteBusinessTables {
+				if err := ensureSoftDeleteColumn(ex, table); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 type agentDiscoverySeed struct {
@@ -2863,6 +2943,14 @@ var knownTables = map[string]bool{
 	"resource_scan_profiles":             true,
 	"security_scan_capabilities":         true,
 	"resource_scan_profile_capabilities": true,
+	// runtime detection and response tables
+	"agent_runtime_sessions":      true,
+	"runtime_detections":          true,
+	"runtime_detection_events":    true,
+	"runtime_decisions":           true,
+	"runtime_response_actions":    true,
+	"runtime_attack_chains":       true,
+	"runtime_attack_chain_events": true,
 }
 
 func (s *Store) hasColumn(table, column string) (bool, error) {

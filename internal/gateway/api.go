@@ -815,6 +815,8 @@ func (a *APIServer) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/agents/discovery", a.handleAgentDiscovery)
 	mux.HandleFunc("/api/v1/agents", a.handleAgentsAPI)
 	mux.HandleFunc("/api/v1/agents/", a.handleAgentsAPI)
+	mux.HandleFunc("/api/v1/agent-governance", a.handleAgentGovernanceAPI)
+	mux.HandleFunc("/api/v1/agent-governance/", a.handleAgentGovernanceAPI)
 	mux.HandleFunc("/api/v1/scans/agents", a.handleAgentScan)
 	mux.HandleFunc("/api/v1/scans/", a.handleScanStatus)
 	// Rule-driven static resource API for the desktop inventory page.

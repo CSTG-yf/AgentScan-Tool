@@ -26,15 +26,15 @@ import (
 // desktop agent list: how many resources, how many risky, malicious, and
 // critical ones. Backed by agents LEFT JOIN static_resources.
 type AgentResourceSummary struct {
-	AgentID                 string `json:"agent_id"`
-	AgentType               string `json:"agent_type"`
-	AgentTypeID             int64  `json:"-"`
-	Name                    string `json:"name"`
-	Kind                    string `json:"kind"`
-	ResourceCount           int    `json:"resource_count"`
-	RiskResourceCount       int    `json:"risk_resource_count"`
-	MaliciousResourceCount  int    `json:"malicious_resource_count"`
-	CriticalResourceCount   int    `json:"critical_resource_count"`
+	AgentID                string `json:"agent_id"`
+	AgentType              string `json:"agent_type"`
+	AgentTypeID            int64  `json:"-"`
+	Name                   string `json:"name"`
+	Kind                   string `json:"kind"`
+	ResourceCount          int    `json:"resource_count"`
+	RiskResourceCount      int    `json:"risk_resource_count"`
+	MaliciousResourceCount int    `json:"malicious_resource_count"`
+	CriticalResourceCount  int    `json:"critical_resource_count"`
 }
 
 // ResourceTypeSummary is one row of the per-type aggregation on the summary
@@ -51,7 +51,7 @@ type AgentResourceTypeSummary struct {
 	Agent                  AgentResourceSummary  `json:"agent"`
 	TotalResources         int                   `json:"total_resources"`
 	ResourceTypeCount      int                   `json:"resource_type_count"`
-	RiskResourceCount      int    `json:"risk_resource_count"`
+	RiskResourceCount      int                   `json:"risk_resource_count"`
 	MaliciousResourceCount int                   `json:"malicious_resource_count"`
 	CriticalResourceCount  int                   `json:"critical_resource_count"`
 	ByType                 []ResourceTypeSummary `json:"by_type"`
@@ -73,41 +73,42 @@ type StaticResourceFilter struct {
 
 // StaticResourceRow is one row of the paginated resource table.
 type StaticResourceRow struct {
-	ID            string `json:"resource_id"`
-	AgentID       string `json:"agent_id"`
-	AgentName     string `json:"-"`
-	ResourceType  string `json:"resource_type"`
-	Name          string `json:"name"`
-	Target        string `json:"path"`
-	RiskLevel     string `json:"risk_level"`
-	Malicious     bool   `json:"malicious"`
-	FindingCount  int    `json:"finding_count"`
-	Status        string `json:"status"`
-	LastScanID    string `json:"-"`
-	LastScanAt    string `json:"last_scan_at,omitempty"`
-	LastSeenAt    string `json:"updated_at"`
+	ID           string `json:"resource_id"`
+	AgentID      string `json:"agent_id"`
+	AgentName    string `json:"-"`
+	ResourceType string `json:"resource_type"`
+	Name         string `json:"name"`
+	Target       string `json:"path"`
+	RiskLevel    string `json:"risk_level"`
+	Malicious    bool   `json:"malicious"`
+	FindingCount int    `json:"finding_count"`
+	Status       string `json:"status"`
+	LastScanID   string `json:"-"`
+	LastScanAt   string `json:"last_scan_at,omitempty"`
+	LastSeenAt   string `json:"updated_at"`
 }
 
 // StaticResourcePage is the paginated list response.
 type StaticResourcePage struct {
-	Total    int                   `json:"total"`
-	Page     int                   `json:"page"`
-	PageSize int                   `json:"page_size"`
-	Items    []StaticResourceRow   `json:"items"`
+	Total    int                 `json:"total"`
+	Page     int                 `json:"page"`
+	PageSize int                 `json:"page_size"`
+	Items    []StaticResourceRow `json:"items"`
 }
 
 // StaticResourceDetail is the drawer "overview" payload: the resource row
 // joined with its agent, rule, and scan-profile lineage.
 type StaticResourceDetail struct {
 	StaticResourceRow
-	Agent          StaticResourceAgentRef    `json:"agent"`
-	ContentHash    string                    `json:"content_hash,omitempty"`
-	FirstSeenAt    string                    `json:"first_seen_at,omitempty"`
-	ScanStatus     string                    `json:"scan_status"` // completed / pending / never_scanned
-	Size           int64                     `json:"size,omitempty"`
-	Permission     string                    `json:"permission,omitempty"`
-	ResourceRule   *StaticResourceRuleRef    `json:"resource_rule,omitempty"`
-	ScanProfile    *StaticResourceProfileRef `json:"scan_profile,omitempty"`
+	Agent            StaticResourceAgentRef     `json:"agent"`
+	ContentHash      string                     `json:"content_hash,omitempty"`
+	FirstSeenAt      string                     `json:"first_seen_at,omitempty"`
+	ScanStatus       string                     `json:"scan_status"` // completed / pending / never_scanned
+	Size             int64                      `json:"size,omitempty"`
+	Permission       string                     `json:"permission,omitempty"`
+	ResourceRule     *StaticResourceRuleRef     `json:"resource_rule,omitempty"`
+	ScanProfile      *StaticResourceProfileRef  `json:"scan_profile,omitempty"`
+	ScanCapabilities []StaticResourceCapability `json:"scan_capabilities,omitempty"`
 }
 
 // StaticResourceAgentRef identifies the owning agent on detail payloads.
@@ -129,6 +130,39 @@ type StaticResourceRuleRef struct {
 type StaticResourceProfileRef struct {
 	ProfileID int64  `json:"profile_id"`
 	Name      string `json:"name"`
+}
+
+// StaticResourceCapability is one security capability configured on the
+// resource's scan profile, resolved through resource_scan_profile_capabilities
+// → security_scan_capabilities. Rendered as tags next to the 检测方案 row.
+type StaticResourceCapability struct {
+	CapabilityID int64  `json:"capability_id"`
+	Key          string `json:"key,omitempty"`
+	Name         string `json:"name"`
+	Scanner      string `json:"scanner,omitempty"`
+	Description  string `json:"description,omitempty"`
+	Enabled      bool   `json:"enabled"`
+}
+
+// StaticResourceScanRecord is one historical scan of a static resource
+// (scan_results row). A resource can be scanned many times; every run is a
+// separate record so the history survives content drift and re-scans.
+type StaticResourceScanRecord struct {
+	ScanID       string `json:"scan_id"`
+	Scanner      string `json:"scanner,omitempty"`
+	ScannedAt    string `json:"scanned_at,omitempty"`
+	FindingCount int    `json:"finding_count"`
+	MaxSeverity  string `json:"max_severity,omitempty"`
+	DurationMs   *int64 `json:"duration_ms,omitempty"`
+	Verdict      string `json:"verdict,omitempty"`
+}
+
+// StaticResourceScanHistory is the drawer "history" payload: every recorded
+// scan of one resource, newest first.
+type StaticResourceScanHistory struct {
+	ResourceID string                     `json:"resource_id"`
+	Total      int                        `json:"total"`
+	Items      []StaticResourceScanRecord `json:"items"`
 }
 
 // ListAgentResourceSummaries aggregates the resource posture per agent for
@@ -409,6 +443,10 @@ WHERE r.id = ?`, resourceID)
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	// The pool is capped at a single connection (SetMaxOpenConns(1)); the
+	// nested capability query below would deadlock on the still-open outer
+	// rows, so release the connection explicitly before fanning out.
+	rows.Close()
 	d.Malicious = malicious != 0
 	d.Agent.AgentID = d.AgentID
 	d.Agent.Name = d.AgentName
@@ -424,8 +462,54 @@ WHERE r.id = ?`, resourceID)
 	}
 	if profileID > 0 {
 		d.ScanProfile = &StaticResourceProfileRef{ProfileID: profileID, Name: profileName}
+		caps, err := s.listProfileCapabilities(profileID)
+		if err != nil {
+			return nil, err
+		}
+		d.ScanCapabilities = caps
 	}
 	return &d, nil
+}
+
+// listProfileCapabilities resolves the security capabilities configured on
+// one scan profile (resource_scan_profile_capabilities →
+// security_scan_capabilities), priority-ordered. A capability counts as
+// enabled only when both the profile binding and the capability itself are
+// enabled.
+func (s *Store) listProfileCapabilities(profileID int64) ([]StaticResourceCapability, error) {
+	if s == nil || s.db == nil || profileID <= 0 {
+		return nil, nil
+	}
+	rows, err := s.queryDB(context.Background(), "static_resource_profile_capabilities", `
+SELECT c.id,
+       COALESCE(c.capability_key, ''),
+       COALESCE(c.name, ''),
+       COALESCE(c.scanner_name, ''),
+       COALESCE(c.description, ''),
+       COALESCE(c.enabled, 1),
+       COALESCE(pc.enabled, 1)
+FROM resource_scan_profile_capabilities pc
+JOIN security_scan_capabilities c ON c.id = pc.capability_id
+WHERE pc.profile_id = ?
+ORDER BY COALESCE(pc.priority, 100), c.id`, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("audit: profile capabilities %d: %w", profileID, err)
+	}
+	defer rows.Close()
+	var out []StaticResourceCapability
+	for rows.Next() {
+		var item StaticResourceCapability
+		var capabilityEnabled, bindingEnabled int
+		if err := rows.Scan(
+			&item.CapabilityID, &item.Key, &item.Name, &item.Scanner,
+			&item.Description, &capabilityEnabled, &bindingEnabled,
+		); err != nil {
+			return nil, fmt.Errorf("audit: profile capability row %d: %w", profileID, err)
+		}
+		item.Enabled = capabilityEnabled != 0 && bindingEnabled != 0
+		out = append(out, item)
+	}
+	return out, rows.Err()
 }
 
 // GetStaticResourceTargetPath returns the on-disk target of one resource row
@@ -469,12 +553,12 @@ type StaticResourceFindingRow struct {
 // StaticResourceFindings bundles the latest-scan findings with the severity
 // summary the risk tab renders.
 type StaticResourceFindings struct {
-	ResourceID string                       `json:"resource_id"`
-	ScanID     string                       `json:"scan_id"`
-	ScannedAt  string                       `json:"scanned_at,omitempty"`
-	Scanner    string                       `json:"scanner,omitempty"`
-	Severity   map[string]int               `json:"summary"`
-	Items      []StaticResourceFindingRow   `json:"items"`
+	ResourceID string                     `json:"resource_id"`
+	ScanID     string                     `json:"scan_id"`
+	ScannedAt  string                     `json:"scanned_at,omitempty"`
+	Scanner    string                     `json:"scanner,omitempty"`
+	Severity   map[string]int             `json:"summary"`
+	Items      []StaticResourceFindingRow `json:"items"`
 }
 
 // ListStaticResourceLatestFindings returns the findings of the resource's
@@ -569,6 +653,75 @@ ORDER BY CASE UPPER(COALESCE(f.severity,'INFO'))
 		}
 	}
 	return out, nil
+}
+
+// ListStaticResourceScanHistory returns every scan_results record of one
+// resource, newest first — the drawer history tab. A resource can be scanned
+// many times (first discovery, content drift, manual rescan); each run is a
+// separate row and the history is never overwritten.
+func (s *Store) ListStaticResourceScanHistory(resourceID string, limit int) (*StaticResourceScanHistory, error) {
+	if s == nil || s.db == nil || strings.TrimSpace(resourceID) == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	out := &StaticResourceScanHistory{
+		ResourceID: resourceID,
+		Items:      []StaticResourceScanRecord{},
+	}
+	if err := s.queryRowDB(context.Background(), "static_resource_scan_history_total",
+		`SELECT COUNT(*) FROM scan_results WHERE static_resource_id = ?`, resourceID,
+	).Scan(&out.Total); err != nil {
+		return nil, fmt.Errorf("audit: scan history total for %q: %w", resourceID, err)
+	}
+	rows, err := s.queryDB(context.Background(), "static_resource_scan_history", `
+SELECT COALESCE(id, ''),
+       COALESCE(scanner, ''),
+       COALESCE(CAST(timestamp AS TEXT), ''),
+       COALESCE(finding_count, 0),
+       COALESCE(max_severity, ''),
+       duration_ms,
+       COALESCE(verdict, '')
+FROM scan_results
+WHERE static_resource_id = ?
+ORDER BY timestamp DESC, id DESC
+LIMIT ?`, resourceID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("audit: scan history for %q: %w", resourceID, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item StaticResourceScanRecord
+		if err := rows.Scan(
+			&item.ScanID, &item.Scanner, &item.ScannedAt, &item.FindingCount,
+			&item.MaxSeverity, &item.DurationMs, &item.Verdict,
+		); err != nil {
+			return nil, fmt.Errorf("audit: scan history row for %q: %w", resourceID, err)
+		}
+		out.Items = append(out.Items, item)
+	}
+	return out, rows.Err()
+}
+
+// SetStaticResourceStatus records the manual review decision on one resource
+// (the API layer validates the allowed status set). Returns ok=false when the
+// resource does not exist. Manual statuses survive enumeration sweeps and
+// disappearances; a completed scan verdict supersedes them via the upsert.
+func (s *Store) SetStaticResourceStatus(resourceID, status string) (bool, error) {
+	if s == nil || s.db == nil || strings.TrimSpace(resourceID) == "" || strings.TrimSpace(status) == "" {
+		return false, nil
+	}
+	res, err := s.execDB(context.Background(), "static_resource_status_set",
+		`UPDATE static_resources SET status = ? WHERE id = ?`, status, resourceID)
+	if err != nil {
+		return false, fmt.Errorf("audit: set resource status %q: %w", resourceID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("audit: set resource status rows for %q: %w", resourceID, err)
+	}
+	return n > 0, nil
 }
 
 // ListAgentResourceIDs returns every resource id of one agent (the rescan

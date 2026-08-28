@@ -94,12 +94,12 @@ type AgentResourceRecord struct {
 // ResourceRiskUpdate is the post-scan risk payload written back onto a
 // static_resources row.
 type ResourceRiskUpdate struct {
-	RiskLevel  string    // clean / low / medium / high / critical
-	Malicious  bool      // category-driven, independent of severity
-	MaxSeverity string   // mirrored for legacy views
+	RiskLevel    string // clean / low / medium / high / critical
+	Malicious    bool   // category-driven, independent of severity
+	MaxSeverity  string // mirrored for legacy views
 	FindingCount int
-	LastScanID string    // empty keeps the previous scan reference
-	LastSeenAt time.Time
+	LastScanID   string // empty keeps the previous scan reference
+	LastSeenAt   time.Time
 }
 
 // ListActiveAgents returns discovered agents eligible for rule-driven
@@ -120,6 +120,7 @@ SELECT a.id,
 FROM agents a
 LEFT JOIN agent_types t ON t.id = a.agent_type_id
 WHERE COALESCE(a.status, 'observed') NOT IN ('gone', 'removed', 'disabled', 'retired')
+  AND COALESCE(t."delete", 0) = 0
 ORDER BY a.id`)
 	if err != nil {
 		return nil, fmt.Errorf("audit: list active agents: %w", err)
@@ -315,8 +316,9 @@ func ResourceRiskLevel(maxSeverity string) string {
 // the active/missing history stays intact for drift analysis and incident
 // investigation. Only resource_rule_id-bearing rows participate: legacy and
 // auxiliary resources are enumerated through other paths and must not be
-// marked missing by a rule-driven sweep. Returns the number of rows that
-// transitioned to missing.
+// marked missing by a rule-driven sweep. Rows the operator manually marked
+// 'ignored' keep their review decision and are skipped. Returns the number
+// of rows that transitioned to missing.
 func (s *Store) MarkMissingResources(agentID string, observedAt time.Time) (int, error) {
 	if s == nil || s.db == nil || strings.TrimSpace(agentID) == "" || observedAt.IsZero() {
 		return 0, nil
@@ -326,6 +328,7 @@ UPDATE static_resources SET status = 'missing'
 WHERE canonical_agent_id = ?
   AND resource_rule_id IS NOT NULL
   AND status <> 'missing'
+  AND COALESCE(status, '') <> 'ignored'
   AND julianday(last_seen_at) < julianday(?)`,
 		agentID,
 		observedAt.UTC().Format(time.RFC3339Nano),
@@ -340,14 +343,16 @@ WHERE canonical_agent_id = ?
 // MarkResourceMissingByPath flags one agent's resource at a specific target
 // path as missing (fsnotify Remove on a rule-produced resource). Precise,
 // timestamp-independent counterpart to the enumeration-wide
-// MarkMissingResources sweep.
+// MarkMissingResources sweep. Manually 'ignored' rows keep their review
+// decision.
 func (s *Store) MarkResourceMissingByPath(agentID, target string) error {
 	if s == nil || s.db == nil || strings.TrimSpace(agentID) == "" || strings.TrimSpace(target) == "" {
 		return nil
 	}
 	if _, err := s.execDB(context.Background(), "static_resource_missing_by_path", `
 UPDATE static_resources SET status = 'missing'
-WHERE canonical_agent_id = ? AND target = ? AND status <> 'missing'`,
+WHERE canonical_agent_id = ? AND target = ? AND status <> 'missing'
+  AND COALESCE(status, '') <> 'ignored'`,
 		agentID, target,
 	); err != nil {
 		return fmt.Errorf("audit: mark resource missing %q/%q: %w", agentID, target, err)

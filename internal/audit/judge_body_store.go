@@ -185,7 +185,8 @@ var judgeBodyMigrations = []migration{
 				binary_version TEXT,
 				agent_id TEXT,
 				canonical_agent_id TEXT,
-				sidecar_instance_id TEXT
+				sidecar_instance_id TEXT,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE INDEX IF NOT EXISTS idx_jb_timestamp  ON judge_responses(timestamp);
 			CREATE INDEX IF NOT EXISTS idx_jb_kind       ON judge_responses(kind);
@@ -216,6 +217,12 @@ var judgeBodyMigrations = []migration{
 				return fmt.Errorf("create idx_jb_canonical_agent: %w", err)
 			}
 			return nil
+		},
+	},
+	{
+		description: "v3: soft delete marker for judge responses",
+		apply: func(ex dbExecer) error {
+			return ensureSoftDeleteColumn(ex, "judge_responses")
 		},
 	},
 }
