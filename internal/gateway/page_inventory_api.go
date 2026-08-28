@@ -49,30 +49,41 @@ type pageConfigRoot struct {
 }
 
 type pageAgent struct {
-	ID                    string              `json:"id"`
-	Product               string              `json:"product"`
-	Vendor                string              `json:"vendor"`
-	Kind                  string              `json:"kind"`
-	InventoryState        string              `json:"inventoryState,omitempty"`
-	Confidence            int                 `json:"confidence,omitempty"`
-	Status                string              `json:"status"`
-	Running               bool                `json:"running"`
-	ProcessCount          int                 `json:"processCount"`
-	PIDs                  []uint32            `json:"pids"`
-	PrimaryPID            *uint32             `json:"primaryPid,omitempty"`
-	Processes             []pageProcess       `json:"processes,omitempty"`
-	ExecutableNames       []string            `json:"executableNames"`
-	StartedAt             *string             `json:"startedAt,omitempty"`
-	UptimeSec             *uint64             `json:"uptimeSec,omitempty"`
-	Source                string              `json:"source"`
-	InstallPaths          []string            `json:"installPaths,omitempty"`
-	ConfigRoots           []pageConfigRoot    `json:"configRoots"`
-	Evidence              []pageAgentEvidence `json:"evidence,omitempty"`
-	StaticResourceCount   uint64              `json:"staticResourceCount"`
-	RiskResourceCount     uint64              `json:"riskResourceCount"`
-	CriticalResourceCount uint64              `json:"criticalResourceCount"`
-	LastStaticScanAt      *string             `json:"lastStaticScanAt,omitempty"`
-	Description           string              `json:"description"`
+	ID                      string              `json:"id"`
+	Product                 string              `json:"product"`
+	Vendor                  string              `json:"vendor"`
+	Kind                    string              `json:"kind"`
+	InventoryState          string              `json:"inventoryState,omitempty"`
+	Confidence              int                 `json:"confidence,omitempty"`
+	Status                  string              `json:"status"`
+	RuntimeStatus           string              `json:"runtimeStatus"`
+	Running                 bool                `json:"running"`
+	ProcessCount            int                 `json:"processCount"`
+	PIDs                    []uint32            `json:"pids"`
+	PrimaryPID              *uint32             `json:"primaryPid,omitempty"`
+	Processes               []pageProcess       `json:"processes,omitempty"`
+	ExecutableNames         []string            `json:"executableNames"`
+	Version                 string              `json:"version,omitempty"`
+	DiscoveryStatus         string              `json:"discoveryStatus,omitempty"`
+	PrimaryPath             string              `json:"primaryPath,omitempty"`
+	FirstSeenScanAt         *string             `json:"firstSeenScanAt,omitempty"`
+	LastSeenScanAt          *string             `json:"lastSeenScanAt,omitempty"`
+	StartedAt               *string             `json:"startedAt,omitempty"`
+	UptimeSec               *uint64             `json:"uptimeSec,omitempty"`
+	Source                  string              `json:"source"`
+	InstallPaths            []string            `json:"installPaths,omitempty"`
+	ConfigRoots             []pageConfigRoot    `json:"configRoots"`
+	Evidence                []pageAgentEvidence `json:"evidence,omitempty"`
+	StaticResourceCount     uint64              `json:"staticResourceCount"`
+	RiskResourceCount       uint64              `json:"riskResourceCount"`
+	CriticalResourceCount   uint64              `json:"criticalResourceCount"`
+	LastStaticScanAt        *string             `json:"lastStaticScanAt,omitempty"`
+	RuntimeDetectionCount   int                 `json:"runtimeDetectionCount,omitempty"`
+	RuntimeAttackCount      int                 `json:"runtimeAttackCount,omitempty"`
+	RuntimeBlockedCount     int                 `json:"runtimeBlockedCount,omitempty"`
+	RuntimeHighOrAboveCount int                 `json:"runtimeHighOrAboveCount,omitempty"`
+	RuntimeLatestAt         *string             `json:"runtimeLatestAt,omitempty"`
+	Description             string              `json:"description"`
 }
 
 type pageAgentEvidence struct {
@@ -237,6 +248,10 @@ type pageAttackChainSnapshot struct {
 	CapturedAt string            `json:"capturedAt"`
 	Source     string            `json:"source"`
 	Chains     []pageAttackChain `json:"chains"`
+	Items      []pageAttackChain `json:"items,omitempty"`
+	Total      int               `json:"total,omitempty"`
+	Page       int               `json:"page,omitempty"`
+	PageSize   int               `json:"page_size,omitempty"`
 	Warning    string            `json:"warning,omitempty"`
 }
 
@@ -366,6 +381,7 @@ type pageAgentDraft struct {
 type pageAgentMetadata struct {
 	InventoryState string              `json:"inventory_state,omitempty"`
 	Confidence     int                 `json:"confidence,omitempty"`
+	Version        string              `json:"version,omitempty"`
 	Evidence       []pageAgentEvidence `json:"evidence,omitempty"`
 	InstallPaths   []string            `json:"install_paths,omitempty"`
 	ConfigPaths    []string            `json:"config_paths,omitempty"`
@@ -390,48 +406,18 @@ type pageAgentDetection struct {
 	RequiredMatched bool
 }
 
-func (a *APIServer) handleAgentInventory(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	snap, err := a.buildPageAgentInventory(pageLimit(r, 600, 50, 2000))
-	if err != nil {
-		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	a.writeJSON(w, http.StatusOK, snap)
-}
-
-func (a *APIServer) handleStaticResourceInventory(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	snap, err := a.buildPageStaticInventory(pageLimit(r, 600, 50, 2000))
-	if err != nil {
-		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	a.writeJSON(w, http.StatusOK, snap)
-}
-
-func (a *APIServer) handleEventDetections(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	snap, err := a.buildPageEventDetections(pageLimit(r, 300, 50, 1000))
-	if err != nil {
-		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	a.writeJSON(w, http.StatusOK, snap)
-}
-
 func (a *APIServer) handleAttackChains(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/attack-chains"), "/")
+	if rest != "" {
+		if rest == "summary" {
+			a.handleAttackChainsSummary(w, r)
+			return
+		}
+		a.handleAttackChainDetail(w, r, strings.Split(rest, "/")[0])
 		return
 	}
 	// Phase 3: persisted attack chains (runtime_attack_chains) are the
@@ -440,10 +426,15 @@ func (a *APIServer) handleAttackChains(w http.ResponseWriter, r *http.Request) {
 	// reconstruction below stays as a legacy fallback.
 	if a.store != nil {
 		if chains := a.backendAttackChains(r); len(chains) > 0 {
+			page, pageSize := requestPage(r, 1, 100, 200)
 			a.writeJSON(w, http.StatusOK, pageAttackChainSnapshot{
 				CapturedAt: time.Now().UTC().Format(time.RFC3339Nano),
 				Source:     "runtime-attack-chains",
 				Chains:     chains,
+				Items:      chains,
+				Total:      len(chains),
+				Page:       page,
+				PageSize:   pageSize,
 			})
 			return
 		}
@@ -461,8 +452,99 @@ func (a *APIServer) handleAttackChains(w http.ResponseWriter, r *http.Request) {
 		CapturedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Source:     events.Source,
 		Chains:     chains,
+		Items:      chains,
+		Total:      len(chains),
+		Page:       1,
+		PageSize:   len(chains),
 		Warning:    events.Warning,
 	})
+}
+
+func (a *APIServer) handleAttackChainDetail(w http.ResponseWriter, r *http.Request, chainID string) {
+	chainID = strings.TrimSpace(chainID)
+	if chainID == "" || strings.ContainsAny(chainID, `/\`) {
+		http.NotFound(w, r)
+		return
+	}
+	if a.store != nil {
+		chain, events, err := a.store.GetRuntimeAttackChainDetail(chainID)
+		if err != nil {
+			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if chain.AttackChainID != "" {
+			pageChain := pageAttackChainFromRuntime(chain)
+			pageChain.Steps, pageChain.Evidence, pageChain.Sources = pageChainStepsFromRuntime(events)
+			pageChain.StepCount = len(pageChain.Steps)
+			pageChain.EvidenceCount = len(pageChain.Evidence)
+			detections, decision, responses := a.attackChainSecurityContext(chain)
+			a.writeJSON(w, http.StatusOK, map[string]any{
+				"attack_chain": chain,
+				"events":       events,
+				"chain":        pageChain,
+				"nodes":        pageChain.Steps,
+				"edges":        pageAttackChainEdges(pageChain.Steps),
+				"evidence":     pageChain.Evidence,
+				"detections":   detections,
+				"decision":     decision,
+				"response":     firstRuntimeResponse(responses),
+				"responses":    responses,
+			})
+			return
+		}
+	}
+	events, err := a.buildPageEventDetections(pageLimit(r, 500, 100, 1000))
+	if err != nil {
+		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	for _, chain := range pageCorrelateAttackChains(events.Events) {
+		if chain.ID == chainID {
+			a.writeJSON(w, http.StatusOK, map[string]any{
+				"chain":    chain,
+				"nodes":    chain.Steps,
+				"edges":    pageAttackChainEdges(chain.Steps),
+				"evidence": chain.Evidence,
+				"source":   events.Source,
+			})
+			return
+		}
+	}
+	a.writeJSON(w, http.StatusNotFound, map[string]string{"error": "attack chain not found"})
+}
+
+func (a *APIServer) handleAttackChainsSummary(w http.ResponseWriter, r *http.Request) {
+	chains := []pageAttackChain{}
+	if a.store != nil {
+		q := r.URL.Query()
+		rows, err := a.store.ListRuntimeAttackChains(audit.AttackChainFilter{
+			AgentID:    strings.TrimSpace(q.Get("agent_id")),
+			SessionID:  strings.TrimSpace(q.Get("session_id")),
+			TraceID:    strings.TrimSpace(q.Get("trace_id")),
+			AttackType: strings.TrimSpace(q.Get("attack_type")),
+			Severity:   strings.ToUpper(strings.TrimSpace(q.Get("severity"))),
+			Status:     attackChainStatusFilter(q.Get("status")),
+			StartTime:  parseAPITime(q.Get("start_time")),
+			EndTime:    parseAPITime(q.Get("end_time")),
+			Limit:      1000,
+		})
+		if err != nil {
+			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		for _, row := range rows {
+			chains = append(chains, pageAttackChainFromRuntime(row))
+		}
+	}
+	if len(chains) == 0 {
+		events, err := a.buildPageEventDetections(pageLimit(r, 500, 100, 1000))
+		if err != nil {
+			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		chains = pageCorrelateAttackChains(events.Events)
+	}
+	a.writeJSON(w, http.StatusOK, summarizeAttackChains(chains))
 }
 
 // backendAttackChains loads persisted attack chains with their event
@@ -470,18 +552,30 @@ func (a *APIServer) handleAttackChains(w http.ResponseWriter, r *http.Request) {
 // both sources identically.
 func (a *APIServer) backendAttackChains(r *http.Request) []pageAttackChain {
 	q := r.URL.Query()
-	limit := 50
+	page, pageSize := requestPage(r, 1, 100, 200)
+	limit := pageSize
 	if v := strings.TrimSpace(q.Get("limit")); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 200 {
 			limit = parsed
 		}
 	}
+	offset := (page - 1) * pageSize
+	if v := strings.TrimSpace(q.Get("offset")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
 	rows, err := a.store.ListRuntimeAttackChains(audit.AttackChainFilter{
-		AgentID:   strings.TrimSpace(q.Get("agent_id")),
-		SessionID: strings.TrimSpace(q.Get("session_id")),
-		Severity:  strings.ToUpper(strings.TrimSpace(q.Get("severity"))),
-		Status:    strings.ToLower(strings.TrimSpace(q.Get("status"))),
-		Limit:     limit,
+		AgentID:    strings.TrimSpace(q.Get("agent_id")),
+		SessionID:  strings.TrimSpace(q.Get("session_id")),
+		TraceID:    strings.TrimSpace(q.Get("trace_id")),
+		AttackType: strings.TrimSpace(q.Get("attack_type")),
+		Severity:   strings.ToUpper(strings.TrimSpace(q.Get("severity"))),
+		Status:     attackChainStatusFilter(q.Get("status")),
+		StartTime:  parseAPITime(q.Get("start_time")),
+		EndTime:    parseAPITime(q.Get("end_time")),
+		Limit:      limit,
+		Offset:     offset,
 	})
 	if err != nil || len(rows) == 0 {
 		return nil
@@ -497,6 +591,94 @@ func (a *APIServer) backendAttackChains(r *http.Request) []pageAttackChain {
 		chains = append(chains, chain)
 	}
 	return chains
+}
+
+func (a *APIServer) attackChainSecurityContext(chain audit.RuntimeAttackChain) ([]audit.RuntimeDetection, audit.RuntimeDecision, []audit.ResponseAction) {
+	detections := []audit.RuntimeDetection{}
+	if chain.DetectionID != "" {
+		if detection, _, err := a.store.GetRuntimeDetectionDetail(chain.DetectionID); err == nil && detection.DetectionID != "" {
+			detections = append(detections, detection)
+		}
+	}
+	var decision audit.RuntimeDecision
+	var responses []audit.ResponseAction
+	if chain.DecisionID != "" {
+		if d, r, err := a.store.GetRuntimeDecisionDetail(chain.DecisionID); err == nil {
+			decision = d
+			responses = r
+		}
+	}
+	return detections, decision, responses
+}
+
+func firstRuntimeResponse(responses []audit.ResponseAction) audit.ResponseAction {
+	if len(responses) == 0 {
+		return audit.ResponseAction{}
+	}
+	return responses[0]
+}
+
+func pageAttackChainEdges(steps []pageAttackChainStep) []map[string]any {
+	if len(steps) < 2 {
+		return []map[string]any{}
+	}
+	edges := make([]map[string]any, 0, len(steps)-1)
+	for i := 1; i < len(steps); i++ {
+		edges = append(edges, map[string]any{
+			"id":     fmt.Sprintf("%s-%s", steps[i-1].ID, steps[i].ID),
+			"source": steps[i-1].ID,
+			"target": steps[i].ID,
+			"order":  i,
+		})
+	}
+	return edges
+}
+
+func summarizeAttackChains(chains []pageAttackChain) map[string]any {
+	agents := map[string]bool{}
+	latest := ""
+	summary := map[string]any{
+		"total_chains":    len(chains),
+		"active_chains":   0,
+		"blocked_chains":  0,
+		"critical_chains": 0,
+		"involved_agents": 0,
+		"latest_at":       "",
+	}
+	active, blocked, critical := 0, 0, 0
+	for _, chain := range chains {
+		if chain.Agent != "" {
+			agents[chain.Agent] = true
+		}
+		switch strings.ToLower(chain.Status) {
+		case "blocked", "contained", "mitigated":
+			blocked++
+		default:
+			active++
+		}
+		if strings.EqualFold(chain.Risk, "critical") {
+			critical++
+		}
+		if chain.EndedAt > latest {
+			latest = chain.EndedAt
+		}
+	}
+	summary["active_chains"] = active
+	summary["blocked_chains"] = blocked
+	summary["critical_chains"] = critical
+	summary["involved_agents"] = len(agents)
+	summary["latest_at"] = latest
+	return summary
+}
+
+func attackChainStatusFilter(raw string) string {
+	status := strings.ToLower(strings.TrimSpace(raw))
+	switch status {
+	case "blocked", "mitigated":
+		return audit.AttackChainStatusContained
+	default:
+		return status
+	}
 }
 
 func pageAttackChainFromRuntime(c audit.RuntimeAttackChain) pageAttackChain {
@@ -684,6 +866,97 @@ func (a pageAgent) ProcessesForSnapshot() []pageProcess {
 	return out
 }
 
+func pageRuntimeStatusFromRunning(running bool) string {
+	if running {
+		return "running"
+	}
+	return "stopped"
+}
+
+func pagePIDsFromProcesses(processes []pageProcess) []uint32 {
+	if len(processes) == 0 {
+		return []uint32{}
+	}
+	out := make([]uint32, 0, len(processes))
+	for _, proc := range processes {
+		out = append(out, proc.PID)
+	}
+	return pageNormalizePIDs(out)
+}
+
+func pageNormalizePIDs(pids []uint32) []uint32 {
+	if len(pids) == 0 {
+		return []uint32{}
+	}
+	seen := map[uint32]bool{}
+	out := make([]uint32, 0, len(pids))
+	for _, pid := range pids {
+		if pid == 0 || seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		out = append(out, pid)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	if out == nil {
+		return []uint32{}
+	}
+	return out
+}
+
+func pageNormalizeRuntimeStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running":
+		return "running"
+	case "stopped", "installed", "missing":
+		return "stopped"
+	case "unknown":
+		return "unknown"
+	default:
+		return ""
+	}
+}
+
+func pageDiscoveryStatus(status, inventoryState string) string {
+	if value := strings.TrimSpace(inventoryState); value != "" {
+		return value
+	}
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "installed", "observed", "discovered":
+		return "discovered"
+	case "missing":
+		return "missing"
+	case "stopped":
+		return "installed"
+	case "":
+		return "unknown"
+	default:
+		return status
+	}
+}
+
+func pageStringPtr(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func pageAgentPrimaryPath(roots []pageConfigRoot, installPaths []string, source string) string {
+	for _, root := range roots {
+		if strings.TrimSpace(root.Path) != "" {
+			return root.Path
+		}
+	}
+	for _, path := range installPaths {
+		if strings.TrimSpace(path) != "" {
+			return path
+		}
+	}
+	return strings.TrimSpace(source)
+}
+
 func (a *APIServer) refreshAgentInventoryFromScanner() []string {
 	if a == nil || a.store == nil {
 		return nil
@@ -721,7 +994,9 @@ func (a *APIServer) refreshAgentInventoryFromScanner() []string {
 			Runtime:         rule.AgentType.Runtime,
 			Source:          "agent-scanner",
 			Status:          status,
+			RuntimeStatus:   pageRuntimeStatusFromRunning(d.Running),
 			Confidence:      d.Score,
+			PIDs:            pagePIDsFromProcesses(d.Processes),
 			ObservedAt:      now,
 			Metadata:        meta.toMap(),
 		}); err != nil {
@@ -1014,6 +1289,12 @@ func pageAgentFromCanonical(row audit.CanonicalAgent) pageAgent {
 	sort.Slice(roots, func(i, j int) bool { return roots[i].Path < roots[j].Path })
 
 	processes := append([]pageProcess(nil), meta.Processes...)
+	rangeServices := append([]string(nil), meta.RangeServices...)
+	storedRuntimeStatus := pageNormalizeRuntimeStatus(row.RuntimeStatus)
+	if storedRuntimeStatus == "stopped" {
+		processes = nil
+		rangeServices = nil
+	}
 	pids := make([]uint32, 0, len(processes))
 	exes := map[string]bool{}
 	var primaryPID *uint32
@@ -1049,22 +1330,46 @@ func pageAgentFromCanonical(row audit.CanonicalAgent) pageAgent {
 		}
 		return processes[i].PID < processes[j].PID
 	})
-	sort.Slice(pids, func(i, j int) bool { return pids[i] < pids[j] })
+	if len(pids) == 0 && storedRuntimeStatus == "running" {
+		pids = append(pids, row.PIDs...)
+		if len(pids) > 0 && primaryPID == nil {
+			pid := pids[0]
+			primaryPID = &pid
+		}
+	}
+	pids = pageNormalizePIDs(pids)
+	if len(pids) > 0 && primaryPID == nil {
+		pid := pids[0]
+		primaryPID = &pid
+	}
 
 	installPaths := append([]string(nil), meta.InstallPaths...)
 	sort.Strings(installPaths)
-	running := strings.EqualFold(row.Status, "running") || len(processes) > 0 || len(meta.RangeServices) > 0
-	status := "stopped"
-	if running {
-		status = "running"
+	running := storedRuntimeStatus == "running" || len(processes) > 0 || len(rangeServices) > 0 || len(pids) > 0
+	runtimeStatus := storedRuntimeStatus
+	if runtimeStatus == "" || runtimeStatus == "unknown" {
+		switch {
+		case running:
+			runtimeStatus = "running"
+		case len(roots) > 0 || row.StaticResourceCount > 0 || strings.EqualFold(row.Status, "installed") || strings.EqualFold(row.Status, "missing"):
+			runtimeStatus = "stopped"
+		default:
+			runtimeStatus = "unknown"
+		}
 	}
 	var last *string
 	if row.LastStaticScanAt != "" {
 		last = &row.LastStaticScanAt
 	}
+	firstSeen := pageStringPtr(row.FirstSeenAt)
+	lastSeen := pageStringPtr(row.LastSeenAt)
 	description := pageFirstNonEmpty(row.TypeDescription, fmt.Sprintf("%s unified Agent Inventory record from agents table.", pageFirstNonEmpty(row.DisplayName, row.ID)))
 	if confidence > 0 {
 		description = fmt.Sprintf("%s Confidence %d based on %d evidence item(s).", description, confidence, len(meta.Evidence))
+	}
+	processCount := len(processes) + len(rangeServices)
+	if len(processes) == 0 && len(pids) > 0 {
+		processCount += len(pids)
 	}
 	return pageAgent{
 		ID:                    pageCanonicalAgentID(row.ID),
@@ -1073,13 +1378,19 @@ func pageAgentFromCanonical(row audit.CanonicalAgent) pageAgent {
 		Kind:                  pageFirstNonEmpty(row.Kind, "agent"),
 		InventoryState:        meta.InventoryState,
 		Confidence:            confidence,
-		Status:                status,
+		Status:                runtimeStatus,
+		RuntimeStatus:         runtimeStatus,
 		Running:               running,
-		ProcessCount:          len(processes) + len(meta.RangeServices),
+		ProcessCount:          processCount,
 		PIDs:                  pids,
 		PrimaryPID:            primaryPID,
 		Processes:             processes,
 		ExecutableNames:       pageSortedKeys(exes),
+		Version:               strings.TrimSpace(meta.Version),
+		DiscoveryStatus:       pageDiscoveryStatus(row.Status, meta.InventoryState),
+		PrimaryPath:           pageAgentPrimaryPath(roots, installPaths, row.Source),
+		FirstSeenScanAt:       firstSeen,
+		LastSeenScanAt:        lastSeen,
 		StartedAt:             startedAt,
 		UptimeSec:             uptime,
 		Source:                pageFirstNonEmpty(row.Source, "agents"),
@@ -1163,7 +1474,7 @@ func pageLookPath(command string) (string, bool) {
 }
 
 func (a *APIServer) buildPageStaticInventory(limit int) (pageStaticSnapshot, error) {
-	source := "gateway:/api/v1/static-resource-inventory"
+	source := "gateway:/api/v1/static-resources"
 	agents := []pageStaticAgent{}
 	agentIndex := map[string]int{}
 	seen := map[string]bool{}
@@ -1489,12 +1800,15 @@ func pageFinalizeAgent(d *pageAgentDraft) pageAgent {
 	for _, proc := range d.Processes {
 		pids = append(pids, proc.PID)
 	}
+	pids = pageNormalizePIDs(pids)
 	var primaryPID *uint32
 	var startedAt *string
 	var uptime *uint64
-	if len(d.Processes) > 0 {
-		pid := d.Processes[0].PID
+	if len(pids) > 0 {
+		pid := pids[0]
 		primaryPID = &pid
+	}
+	if len(d.Processes) > 0 {
 		startedAt = d.Processes[0].StartedAt
 		up := d.Processes[0].UptimeSec
 		uptime = &up
@@ -1517,6 +1831,7 @@ func pageFinalizeAgent(d *pageAgentDraft) pageAgent {
 	if d.LastStaticScanAt != "" {
 		last = &d.LastStaticScanAt
 	}
+	runtimeStatus := pageRuntimeStatusFromRunning(running)
 	description := d.Description
 	if description == "" {
 		if running {
@@ -1530,12 +1845,16 @@ func pageFinalizeAgent(d *pageAgentDraft) pageAgent {
 		Product:               d.Product,
 		Vendor:                d.Vendor,
 		Kind:                  d.Kind,
-		Status:                status,
+		Status:                runtimeStatus,
+		RuntimeStatus:         runtimeStatus,
 		Running:               running,
 		ProcessCount:          len(d.Processes) + len(d.RangeServices),
 		PIDs:                  pids,
 		PrimaryPID:            primaryPID,
 		ExecutableNames:       exes,
+		DiscoveryStatus:       pageDiscoveryStatus(status, ""),
+		PrimaryPath:           pageAgentPrimaryPath(configRoots, nil, strings.Join(sources, ", ")),
+		LastSeenScanAt:        last,
 		StartedAt:             startedAt,
 		UptimeSec:             uptime,
 		Source:                strings.Join(sources, ", "),
@@ -1621,7 +1940,7 @@ func pageDescriptorFromCanonicalAgent(row audit.CanonicalAgent) pageAgentDescrip
 		Vendor:      pageFirstNonEmpty(row.Vendor, "Unknown"),
 		Kind:        pageFirstNonEmpty(row.Kind, "agent"),
 		Runtime:     pageFirstNonEmpty(row.Runtime, pageRuntimeLabel(row.Kind)),
-		Source:      pageFirstNonEmpty(row.Source, "agent-inventory"),
+		Source:      pageFirstNonEmpty(row.Source, "agents"),
 		Description: pageFirstNonEmpty(row.DisplayName, row.ID) + " unified backend inventory record.",
 	}
 }

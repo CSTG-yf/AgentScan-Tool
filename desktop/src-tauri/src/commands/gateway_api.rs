@@ -23,6 +23,18 @@ pub(crate) fn get_json<T: DeserializeOwned>(
     serde_json::from_slice(&body).map_err(|error| format!("parse gateway response: {error}"))
 }
 
+pub(crate) fn delete_json<T: DeserializeOwned>(
+    app: &tauri::AppHandle,
+    path: &str,
+) -> Result<T, String> {
+    let home = desktop_defenseclaw_home(app)?;
+    let token = gateway_token(&home).unwrap_or_else(|| DEFAULT_GATEWAY_TOKEN.to_owned());
+    let port = gateway_port(&home).unwrap_or(DEFAULT_GATEWAY_PORT);
+    let body = request_bytes("DELETE", port, path, &token, None)?;
+
+    serde_json::from_slice(&body).map_err(|error| format!("parse gateway response: {error}"))
+}
+
 pub(crate) fn put_json<T, B>(app: &tauri::AppHandle, path: &str, body: &B) -> Result<T, String>
 where
     T: DeserializeOwned,
@@ -39,7 +51,12 @@ where
     request_with_body::<T, B>(app, "POST", path, body)
 }
 
-fn request_with_body<T, B>(app: &tauri::AppHandle, method: &str, path: &str, body: &B) -> Result<T, String>
+fn request_with_body<T, B>(
+    app: &tauri::AppHandle,
+    method: &str,
+    path: &str,
+    body: &B,
+) -> Result<T, String>
 where
     T: DeserializeOwned,
     B: Serialize + ?Sized,

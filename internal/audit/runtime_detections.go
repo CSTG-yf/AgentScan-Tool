@@ -27,8 +27,8 @@ const (
 // detection: the "trigger" event fired the rule, "supporting" events
 // complete the correlated chain, "corroborating" events add context.
 const (
-	DetectionRoleTrigger      = "trigger"
-	DetectionRoleSupporting   = "supporting"
+	DetectionRoleTrigger       = "trigger"
+	DetectionRoleSupporting    = "supporting"
 	DetectionRoleCorroborating = "corroborating"
 )
 
@@ -144,13 +144,13 @@ func (s *Store) RecordRuntimeDetection(in RuntimeDetectionInput) (RuntimeDetecti
 	// Find the most recent matching open detection inside the reopen
 	// window. NULL-safe session comparison keeps the WHERE tight.
 	var (
-		existingID  string
-		firstSeen   string
-		lastSeen    string
-		severity    string
-		confidence  float64
-		status      string
-		eventCount  int
+		existingID string
+		firstSeen  string
+		lastSeen   string
+		severity   string
+		confidence float64
+		status     string
+		eventCount int
 	)
 	err := s.db.QueryRowContext(context.Background(), `
 SELECT detection_id, first_seen_at, last_seen_at, severity, confidence, status, event_count
@@ -307,17 +307,15 @@ type RuntimeDetectionFilter struct {
 	Category      string
 	Severity      string
 	Status        string
+	Keyword       string
+	StartTime     time.Time
+	EndTime       time.Time
+	Offset        int
+	Sort          string
 	Limit         int
 }
 
-// ListRuntimeDetections returns detections newest-first.
-func (s *Store) ListRuntimeDetections(f RuntimeDetectionFilter) ([]RuntimeDetection, error) {
-	if s == nil || s.db == nil {
-		return nil, nil
-	}
-	if f.Limit <= 0 {
-		f.Limit = 200
-	}
+func runtimeDetectionWhereClause(f RuntimeDetectionFilter) (string, []any) {
 	var conds []string
 	var args []any
 	if f.AgentID != "" {
@@ -332,27 +330,126 @@ func (s *Store) ListRuntimeDetections(f RuntimeDetectionFilter) ([]RuntimeDetect
 		conds = append(conds, "trace_id = ?")
 		args = append(args, f.TraceID)
 	}
-	if f.DetectionType != "" {
-		conds = append(conds, "detection_type = ?")
-		args = append(args, f.DetectionType)
+	if values := runtimeDetectionFilterValues(f.DetectionType, strings.ToLower); len(values) > 0 {
+		conds = append(conds, "LOWER(detection_type) IN ("+runtimeDetectionPlaceholders(len(values))+")")
+		for _, value := range values {
+			args = append(args, value)
+		}
 	}
-	if f.Category != "" {
-		conds = append(conds, "category = ?")
-		args = append(args, strings.ToLower(f.Category))
+	if values := runtimeDetectionFilterValues(f.Category, strings.ToLower); len(values) > 0 {
+		conds = append(conds, "LOWER(category) IN ("+runtimeDetectionPlaceholders(len(values))+")")
+		for _, value := range values {
+			args = append(args, value)
+		}
 	}
-	if f.Severity != "" {
-		conds = append(conds, "severity = ?")
-		args = append(args, strings.ToUpper(f.Severity))
+	if values := runtimeDetectionFilterValues(f.Severity, strings.ToUpper); len(values) > 0 {
+		conds = append(conds, "UPPER(severity) IN ("+runtimeDetectionPlaceholders(len(values))+")")
+		for _, value := range values {
+			args = append(args, value)
+		}
 	}
-	if f.Status != "" {
-		conds = append(conds, "status = ?")
-		args = append(args, strings.ToLower(f.Status))
+	if values := runtimeDetectionFilterValues(f.Status, strings.ToLower); len(values) > 0 {
+		conds = append(conds, "LOWER(status) IN ("+runtimeDetectionPlaceholders(len(values))+")")
+		for _, value := range values {
+			args = append(args, value)
+		}
 	}
-	where := ""
-	if len(conds) > 0 {
-		where = "WHERE " + strings.Join(conds, " AND ")
+	if keyword := strings.ToLower(strings.TrimSpace(f.Keyword)); keyword != "" {
+		like := "%" + keyword + "%"
+		conds = append(conds, `(
+LOWER(detection_id) LIKE ? OR LOWER(agent_id) LIKE ? OR LOWER(COALESCE(agent_name, '')) LIKE ?
+OR LOWER(COALESCE(session_id, '')) LIKE ? OR LOWER(COALESCE(trace_id, '')) LIKE ?
+OR LOWER(detection_type) LIKE ? OR LOWER(category) LIKE ? OR LOWER(rule_id) LIKE ?
+OR LOWER(title) LIKE ? OR LOWER(COALESCE(detail, '')) LIKE ? OR LOWER(COALESCE(remediation, '')) LIKE ?
+)`)
+		for i := 0; i < 11; i++ {
+			args = append(args, like)
+		}
 	}
-	args = append(args, f.Limit)
+	if !f.StartTime.IsZero() {
+		conds = append(conds, "last_seen_at >= ?")
+		args = append(args, f.StartTime.UTC().Format(time.RFC3339Nano))
+	}
+	if !f.EndTime.IsZero() {
+		conds = append(conds, "first_seen_at <= ?")
+		args = append(args, f.EndTime.UTC().Format(time.RFC3339Nano))
+	}
+	if len(conds) == 0 {
+		return "", args
+	}
+	return "WHERE " + strings.Join(conds, " AND "), args
+}
+
+func runtimeDetectionFilterValues(raw string, normalize func(string) string) []string {
+	if strings.TrimSpace(raw) == "" || strings.EqualFold(strings.TrimSpace(raw), "all") {
+		return nil
+	}
+	seen := map[string]bool{}
+	var values []string
+	for _, part := range strings.Split(raw, ",") {
+		value := normalize(strings.TrimSpace(part))
+		if value == "" || strings.EqualFold(value, "all") || seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	return values
+}
+
+func runtimeDetectionPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	parts := make([]string, n)
+	for i := range parts {
+		parts[i] = "?"
+	}
+	return strings.Join(parts, ",")
+}
+
+func runtimeDetectionOrderBy(sortValue string) string {
+	switch strings.ToLower(strings.TrimSpace(sortValue)) {
+	case "oldest", "last_seen_at:asc", "created_at:asc", "first_seen_at:asc":
+		return "last_seen_at ASC, detection_id ASC"
+	case "severity", "severity:desc", "severity_desc":
+		return "CASE UPPER(severity) WHEN 'CRITICAL' THEN 5 WHEN 'HIGH' THEN 4 WHEN 'MEDIUM' THEN 3 WHEN 'LOW' THEN 2 ELSE 1 END DESC, last_seen_at DESC"
+	case "agent", "agent:asc":
+		return "LOWER(COALESCE(agent_name, agent_id)), last_seen_at DESC"
+	case "type", "type:asc":
+		return "LOWER(detection_type), last_seen_at DESC"
+	default:
+		return "last_seen_at DESC, detection_id DESC"
+	}
+}
+
+// CountRuntimeDetections returns the total number of detections that match
+// the non-pagination fields in the filter.
+func (s *Store) CountRuntimeDetections(f RuntimeDetectionFilter) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, nil
+	}
+	where, args := runtimeDetectionWhereClause(f)
+	var total int
+	if err := s.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM runtime_detections `+where, args...).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+// ListRuntimeDetections returns detections newest-first.
+func (s *Store) ListRuntimeDetections(f RuntimeDetectionFilter) ([]RuntimeDetection, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	if f.Limit <= 0 {
+		f.Limit = 200
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+	where, args := runtimeDetectionWhereClause(f)
+	args = append(args, f.Limit, f.Offset)
 	rows, err := s.queryDB(context.Background(), "runtime_detections_list", `
 SELECT detection_id, agent_id, COALESCE(agent_name, ''), COALESCE(session_id, ''),
        COALESCE(trace_id, ''), detection_type, category, severity, confidence,
@@ -360,8 +457,8 @@ SELECT detection_id, agent_id, COALESCE(agent_name, ''), COALESCE(session_id, ''
        COALESCE(attributes_json, ''), first_seen_at, last_seen_at, event_count
 FROM runtime_detections
 `+where+`
-ORDER BY last_seen_at DESC
-LIMIT ?`, args...)
+ORDER BY `+runtimeDetectionOrderBy(f.Sort)+`
+LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -393,6 +490,116 @@ LIMIT ?`, args...)
 			_ = json.Unmarshal([]byte(attrs), &d.Attributes)
 		}
 		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// RuntimeSecuritySummary is the aggregate card model for the runtime security
+// page. Counts are detection-backed, not raw behavior event counts.
+type RuntimeSecuritySummary struct {
+	TotalDetections    int    `json:"total_detections"`
+	SecurityDetections int    `json:"security_detections"`
+	AttackDetections   int    `json:"attack_detections"`
+	Blocked            int    `json:"blocked"`
+	HighOrAbove        int    `json:"high_or_above"`
+	CoveredAgents      int    `json:"covered_agents"`
+	LatestAt           string `json:"latest_at,omitempty"`
+	WindowStart        string `json:"window_start,omitempty"`
+	WindowEnd          string `json:"window_end,omitempty"`
+}
+
+// RuntimeSecuritySummary aggregates runtime_detections for the global page or
+// one selected agent when AgentID is present in the filter.
+func (s *Store) RuntimeSecuritySummary(f RuntimeDetectionFilter) (RuntimeSecuritySummary, error) {
+	if s == nil || s.db == nil {
+		return RuntimeSecuritySummary{}, nil
+	}
+	where, args := runtimeDetectionWhereClause(f)
+	var summary RuntimeSecuritySummary
+	if err := s.db.QueryRowContext(context.Background(), `
+SELECT COUNT(*),
+       COALESCE(SUM(CASE WHEN LOWER(category) = 'attack' THEN 1 ELSE 0 END), 0),
+       COALESCE(SUM(CASE WHEN LOWER(status) IN ('blocked', 'mitigated') THEN 1 ELSE 0 END), 0),
+       COALESCE(SUM(CASE WHEN UPPER(severity) IN ('CRITICAL', 'HIGH') THEN 1 ELSE 0 END), 0),
+       COUNT(DISTINCT NULLIF(agent_id, '')),
+       COALESCE(MIN(first_seen_at), ''),
+       COALESCE(MAX(last_seen_at), '')
+FROM runtime_detections `+where, args...).Scan(
+		&summary.TotalDetections,
+		&summary.AttackDetections,
+		&summary.Blocked,
+		&summary.HighOrAbove,
+		&summary.CoveredAgents,
+		&summary.WindowStart,
+		&summary.WindowEnd,
+	); err != nil {
+		return RuntimeSecuritySummary{}, err
+	}
+	summary.SecurityDetections = summary.TotalDetections - summary.AttackDetections
+	summary.LatestAt = summary.WindowEnd
+	return summary, nil
+}
+
+// RuntimeSecurityAgent summarizes detections per canonical agent for the page
+// left rail.
+type RuntimeSecurityAgent struct {
+	AgentID          string `json:"agent_id"`
+	AgentName        string `json:"agent_name"`
+	AgentType        string `json:"agent_type"`
+	DetectionCount   int    `json:"detection_count"`
+	AttackCount      int    `json:"attack_count"`
+	BlockedCount     int    `json:"blocked_count"`
+	HighOrAboveCount int    `json:"high_or_above_count"`
+	LatestAt         string `json:"latest_at,omitempty"`
+	RuntimeStatus    string `json:"runtime_status"`
+}
+
+// ListRuntimeSecurityAgents returns agent rows backed by runtime_detections.
+func (s *Store) ListRuntimeSecurityAgents(limit int) ([]RuntimeSecurityAgent, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.queryDB(context.Background(), "runtime_security_agents", `
+SELECT d.agent_id,
+       COALESCE(NULLIF(MAX(d.agent_name), ''), NULLIF(MAX(a.display_name), ''), d.agent_id),
+       COALESCE(NULLIF(MAX(a.kind), ''), 'Agent'),
+       COUNT(*),
+       COALESCE(SUM(CASE WHEN LOWER(d.category) = 'attack' THEN 1 ELSE 0 END), 0),
+       COALESCE(SUM(CASE WHEN LOWER(d.status) IN ('blocked', 'mitigated') THEN 1 ELSE 0 END), 0),
+       COALESCE(SUM(CASE WHEN UPPER(d.severity) IN ('CRITICAL', 'HIGH') THEN 1 ELSE 0 END), 0),
+       COALESCE(MAX(d.last_seen_at), ''),
+       COALESCE(NULLIF(MAX(a.runtime_status), ''), 'unknown')
+FROM runtime_detections d
+LEFT JOIN agents a ON a.id = d.agent_id
+WHERE d.agent_id != ''
+GROUP BY d.agent_id
+ORDER BY MAX(d.last_seen_at) DESC, LOWER(COALESCE(NULLIF(MAX(d.agent_name), ''), NULLIF(MAX(a.display_name), ''), d.agent_id))
+LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RuntimeSecurityAgent
+	for rows.Next() {
+		var agent RuntimeSecurityAgent
+		if err := rows.Scan(
+			&agent.AgentID,
+			&agent.AgentName,
+			&agent.AgentType,
+			&agent.DetectionCount,
+			&agent.AttackCount,
+			&agent.BlockedCount,
+			&agent.HighOrAboveCount,
+			&agent.LatestAt,
+			&agent.RuntimeStatus,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, agent)
 	}
 	return out, rows.Err()
 }
@@ -467,13 +674,13 @@ ORDER BY l.sequence ASC, b.timestamp ASC`, detectionID)
 	var out []DetectionEvidence
 	for rows.Next() {
 		var (
-			link    DetectionEvidenceLink
-			linkedAt string
-			e       BehaviorEvent
-			ts      string
-			ppid    int64
+			link       DetectionEvidenceLink
+			linkedAt   string
+			e          BehaviorEvent
+			ts         string
+			ppid       int64
 			confidence float64
-			attrs   string
+			attrs      string
 		)
 		if err := rows.Scan(
 			&link.DetectionID, &link.EventID, &link.Role, &link.Sequence, &linkedAt,
@@ -536,10 +743,10 @@ WHERE l.event_id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 
 	for rows.Next() {
 		var (
-			eventID   int64
-			d         RuntimeDetection
-			firstSeen string
-			lastSeen  string
+			eventID    int64
+			d          RuntimeDetection
+			firstSeen  string
+			lastSeen   string
 			confidence float64
 			eventCount int64
 		)

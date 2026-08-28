@@ -486,14 +486,19 @@ LIMIT ?`, args...)
 // Since) — the detection engine uses it to load the recent
 // same-session chain around a triggering event.
 type RuntimeEventFilter struct {
-	AgentID     string
-	SessionID   string
-	TraceID     string
-	EventType   string
-	EventSource string
-	Severity    string
-	Since       time.Time
-	Limit       int
+	AgentID       string
+	SessionID     string
+	TraceID       string
+	EventType     string
+	EventCategory string
+	EventSource   string
+	Severity      string
+	PID           uint32
+	Keyword       string
+	Since         time.Time
+	Until         time.Time
+	Offset        int
+	Limit         int
 }
 
 // ListRuntimeEvents returns unified runtime events in chronological
@@ -532,19 +537,48 @@ func (s *Store) ListRuntimeEvents(f RuntimeEventFilter) ([]BehaviorEvent, error)
 		conds = append(conds, "event_type = ?")
 		args = append(args, f.EventType)
 	}
+	if f.EventCategory != "" {
+		conds = append(conds, "event_category = ?")
+		args = append(args, f.EventCategory)
+	}
 	if f.Severity != "" {
 		conds = append(conds, "severity = ?")
 		args = append(args, f.Severity)
+	}
+	if f.PID > 0 {
+		conds = append(conds, "agent_pid = ?")
+		args = append(args, f.PID)
 	}
 	if !f.Since.IsZero() {
 		conds = append(conds, "timestamp >= ?")
 		args = append(args, f.Since.UTC().Format(time.RFC3339Nano))
 	}
+	if !f.Until.IsZero() {
+		conds = append(conds, "timestamp <= ?")
+		args = append(args, f.Until.UTC().Format(time.RFC3339Nano))
+	}
+	if keyword := strings.ToLower(strings.TrimSpace(f.Keyword)); keyword != "" {
+		like := "%" + keyword + "%"
+		conds = append(conds, `(
+LOWER(event_type) LIKE ? OR LOWER(COALESCE(event_category, '')) LIKE ?
+OR LOWER(COALESCE(event_source, '')) LIKE ? OR LOWER(COALESCE(agent_name, '')) LIKE ?
+OR LOWER(COALESCE(canonical_agent_id, '')) LIKE ? OR LOWER(COALESCE(session_id, '')) LIKE ?
+OR LOWER(COALESCE(trace_id, '')) LIKE ? OR LOWER(COALESCE(operation, '')) LIKE ?
+OR LOWER(COALESCE(target, '')) LIKE ? OR LOWER(COALESCE(tool_name, '')) LIKE ?
+OR LOWER(COALESCE(mcp_server, '')) LIKE ? OR LOWER(COALESCE(detail, '')) LIKE ?
+)`)
+		for i := 0; i < 12; i++ {
+			args = append(args, like)
+		}
+	}
 	where := ""
 	if len(conds) > 0 {
 		where = "WHERE " + strings.Join(conds, " AND ")
 	}
-	args = append(args, f.Limit)
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+	args = append(args, f.Limit, f.Offset)
 	rows, err := s.queryDB(context.Background(), "runtime_events_list", `
 SELECT id, timestamp, event_type, source,
        COALESCE(event_source, ''), COALESCE(event_category, ''),
@@ -557,7 +591,7 @@ SELECT id, timestamp, event_type, source,
 FROM behavior_events
 `+where+`
 ORDER BY timestamp ASC, id ASC
-LIMIT ?`, args...)
+LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err
 	}

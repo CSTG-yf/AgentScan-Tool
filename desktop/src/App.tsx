@@ -3,18 +3,17 @@ import { EyeInvisibleOutlined, EyeOutlined, MenuFoldOutlined, MenuUnfoldOutlined
 import { Badge, Button, Layout, Menu, message, Modal, Segmented, Space, Tag, Tooltip, Typography } from "antd";
 import {
   applyProcessGuardPolicy,
-  getAgentProcesses,
+  getAgents,
   getAgentTrace,
   getAttackChains,
   getEnvironment,
-  getEventDetections,
   getGatewayAudit,
   getGuardPolicy,
   getProcessGuardAudit,
   getRangeReplayStatus,
   getRangeStatus,
   getScanScheduleSettings,
-  getStaticAssetInventory,
+  getStaticResourceAgents,
   getStaticResourceScanSettings,
   installProcessGuard,
   saveDefenseMode,
@@ -42,7 +41,7 @@ import { RangePage } from "./pages/RangePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { StaticAssetsPage } from "./pages/StaticAssetsPage";
 import { TracePage } from "./pages/TracePage";
-import type { AgentInventory, AgentTraceSnapshot, AttackChainSnapshot, EnvironmentSnapshot, EventDetectionSnapshot, GatewayAuditSnapshot, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus, ScanScheduleSettings, ScanTaskKey, StaticAssetSnapshot, StaticResourceScanSettings } from "./types";
+import type { AgentInventory, AgentTraceSnapshot, AttackChainSnapshot, EnvironmentSnapshot, GatewayAuditSnapshot, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus, ScanScheduleSettings, ScanTaskKey, StaticResourceScanSettings } from "./types";
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title } = Typography;
@@ -64,9 +63,7 @@ export default function App() {
   const [audit, setAudit] = useState<GuardAuditSnapshot>();
   const [trace, setTrace] = useState<AgentTraceSnapshot>();
   const [gatewayAudit, setGatewayAudit] = useState<GatewayAuditSnapshot>();
-  const [eventDetections, setEventDetections] = useState<EventDetectionSnapshot>();
   const [attackChains, setAttackChains] = useState<AttackChainSnapshot>();
-  const [staticAssets, setStaticAssets] = useState<StaticAssetSnapshot>();
   const [scanSettings, setScanSettings] = useState<ScanScheduleSettings>();
   const [staticScanSettings, setStaticScanSettings] = useState<StaticResourceScanSettings>();
   const [loading, setLoading] = useState(false);
@@ -138,7 +135,7 @@ export default function App() {
         setEnvironment(await getEnvironment());
         return;
       case "agentDiscovery": {
-        const snapshot = await getAgentProcesses();
+        const snapshot = await getAgents();
         setAgents(snapshot.agents);
         setAgentWarning(snapshot.warning ?? "");
         return;
@@ -153,13 +150,11 @@ export default function App() {
         setGatewayAudit(await getGatewayAudit());
         return;
       case "eventDetection": {
-        const [events, chains] = await Promise.all([getEventDetections(), getAttackChains()]);
-        setEventDetections(events);
-        setAttackChains(chains);
+        setAttackChains(await getAttackChains());
         return;
       }
       case "staticAssets":
-        setStaticAssets(await getStaticAssetInventory());
+        await getStaticResourceAgents();
         return;
       case "rangeStatus": {
         const status = await getRangeStatus();
@@ -179,7 +174,7 @@ export default function App() {
 
   const refresh = async () => {
     setLoading(true);
-    const results = await Promise.allSettled([getEnvironment(), getAgentProcesses(), getGuardPolicy(), getRangeStatus(), getProcessGuardAudit(), getAgentTrace(), getGatewayAudit(), getRangeReplayStatus(), getStaticAssetInventory(), getEventDetections(), getAttackChains()]);
+    const results = await Promise.allSettled([getEnvironment(), getAgents(), getGuardPolicy(), getRangeStatus(), getProcessGuardAudit(), getAgentTrace(), getGatewayAudit(), getRangeReplayStatus(), getStaticResourceAgents(), getAttackChains()]);
     if (results[0].status === "fulfilled") setEnvironment(results[0].value);
     if (results[1].status === "fulfilled") {
       setAgents(results[1].value.agents);
@@ -195,9 +190,7 @@ export default function App() {
     if (results[5].status === "fulfilled") setTrace(results[5].value);
     if (results[6].status === "fulfilled") setGatewayAudit(results[6].value);
     if (results[7].status === "fulfilled") setReplayStatus(results[7].value);
-    if (results[8].status === "fulfilled") setStaticAssets(results[8].value);
-    if (results[9].status === "fulfilled") setEventDetections(results[9].value);
-    if (results[10].status === "fulfilled") setAttackChains(results[10].value);
+    if (results[9].status === "fulfilled") setAttackChains(results[9].value);
     setLoading(false);
   };
 
@@ -418,7 +411,7 @@ export default function App() {
       case "staticAssets":
         return <StaticAssetsPage loading={loading} onRefresh={() => refreshTask("staticAssets")} />;
       case "events":
-        return <EventsPage snapshot={eventDetections} loading={loading} onRefresh={() => refreshTask("eventDetection")} />;
+        return <EventsPage loading={loading} onRefresh={() => refreshTask("eventDetection")} />;
       case "policies":
         return (
           <PoliciesPage

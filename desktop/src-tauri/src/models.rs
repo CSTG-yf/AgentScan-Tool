@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+fn vec_or_default<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentSnapshot {
@@ -24,7 +32,9 @@ pub struct EnvironmentComponent {
 #[serde(rename_all = "camelCase")]
 pub struct AgentSnapshot {
     pub captured_at: String,
+    #[serde(default, deserialize_with = "vec_or_default")]
     pub agents: Vec<AgentInventory>,
+    #[serde(default, deserialize_with = "vec_or_default")]
     pub processes: Vec<AgentProcess>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
@@ -43,7 +53,7 @@ pub struct AgentProcess {
     pub source: String,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentConfigRoot {
     pub path: String,
@@ -51,31 +61,87 @@ pub struct AgentConfigRoot {
     pub exists: bool,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentEvidence {
+    #[serde(default)]
+    pub r#type: String,
+    #[serde(default)]
+    pub value: String,
+    #[serde(default)]
+    pub weight: i32,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInventory {
+    #[serde(default)]
     pub id: String,
+    #[serde(default, alias = "name")]
     pub product: String,
+    #[serde(default)]
     pub vendor: String,
+    #[serde(default)]
     pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inventory_state: Option<String>,
+    #[serde(default)]
     pub status: String,
+    #[serde(default, alias = "runtime_status")]
+    pub runtime_status: String,
+    #[serde(default, alias = "discovery_status")]
+    pub discovery_status: String,
+    #[serde(default, alias = "primary_path")]
+    pub primary_path: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
     pub running: bool,
+    #[serde(default)]
     pub process_count: usize,
+    #[serde(default, deserialize_with = "vec_or_default")]
     pub pids: Vec<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary_pid: Option<u32>,
+    #[serde(default, deserialize_with = "vec_or_default")]
+    pub processes: Vec<AgentProcess>,
+    #[serde(default, deserialize_with = "vec_or_default")]
     pub executable_names: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uptime_sec: Option<u64>,
+    #[serde(default)]
     pub source: String,
+    #[serde(default, deserialize_with = "vec_or_default")]
+    pub install_paths: Vec<String>,
+    #[serde(default, deserialize_with = "vec_or_default")]
     pub config_roots: Vec<AgentConfigRoot>,
+    #[serde(default, deserialize_with = "vec_or_default")]
+    pub evidence: Vec<AgentEvidence>,
+    #[serde(default)]
     pub static_resource_count: u64,
+    #[serde(default)]
     pub risk_resource_count: u64,
+    #[serde(default)]
     pub critical_resource_count: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_static_scan_at: Option<String>,
+    #[serde(default, alias = "first_seen_at", alias = "first_seen_scan_at")]
+    pub first_seen_scan_at: Option<String>,
+    #[serde(default, alias = "last_seen_at", alias = "last_seen_scan_at")]
+    pub last_seen_scan_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_detection_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_attack_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_blocked_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_high_or_above_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_latest_at: Option<String>,
+    #[serde(default)]
     pub description: String,
 }
 

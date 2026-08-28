@@ -30,12 +30,12 @@ const (
 // engine always picks the SMALLEST point that contains the risk — a
 // proxy-level network block is preferred over killing an agent.
 const (
-	EnforcementPointGuardrail = "guardrail" // prompt layer
+	EnforcementPointGuardrail = "guardrail"  // prompt layer
 	EnforcementPointAgentHook = "agent_hook" // PreToolUse tool layer
-	EnforcementPointMCP       = "mcp"       // MCP server layer
-	EnforcementPointProxy     = "proxy"     // network egress layer
-	EnforcementPointFile      = "file"      // filesystem layer
-	EnforcementPointProcess   = "process"   // OS process layer (last resort)
+	EnforcementPointMCP       = "mcp"        // MCP server layer
+	EnforcementPointProxy     = "proxy"      // network egress layer
+	EnforcementPointFile      = "file"       // filesystem layer
+	EnforcementPointProcess   = "process"    // OS process layer (last resort)
 )
 
 // Runtime Security Mode: observe records would-block decisions without
@@ -47,9 +47,9 @@ const (
 
 // Response action status values.
 const (
-	ResponseStatusExecuted   = "executed"   // enforcement really ran
+	ResponseStatusExecuted   = "executed"    // enforcement really ran
 	ResponseStatusWouldBlock = "would_block" // observe mode: decision says block, nothing enforced
-	ResponseStatusDispatched = "dispatched" // handed to an existing enforcement module
+	ResponseStatusDispatched = "dispatched"  // handed to an existing enforcement module
 	ResponseStatusFailed     = "failed"
 )
 
@@ -234,16 +234,16 @@ LIMIT ?`, args...)
 	var detections []RuntimeDetection
 	for rows.Next() {
 		var (
-			v            RuntimeDecision
-			d            RuntimeDetection
-			createdAt    string
-			wouldBlock   int
-			confidence   float64
-			riskScore    float64
-			dConfidence  float64
-			eventCount   int64
-			firstSeen    string
-			lastSeen     string
+			v           RuntimeDecision
+			d           RuntimeDetection
+			createdAt   string
+			wouldBlock  int
+			confidence  float64
+			riskScore   float64
+			dConfidence float64
+			eventCount  int64
+			firstSeen   string
+			lastSeen    string
 		)
 		if err := rows.Scan(
 			&v.DecisionID, &v.DetectionID, &v.AgentID, &v.AgentName,
@@ -379,7 +379,7 @@ ORDER BY executed_at ASC`, decisionID)
 	var out []ResponseAction
 	for rows.Next() {
 		var (
-			a         ResponseAction
+			a          ResponseAction
 			executedAt string
 		)
 		if err := rows.Scan(
@@ -505,11 +505,16 @@ VALUES (?, ?, ?, ?)`, chainID, ev.EventID, ev.Sequence, ev.Relation)
 
 // AttackChainFilter selects chains for the API.
 type AttackChainFilter struct {
-	AgentID   string
-	SessionID string
-	Severity  string
-	Status    string
-	Limit     int
+	AgentID    string
+	SessionID  string
+	TraceID    string
+	AttackType string
+	Severity   string
+	Status     string
+	StartTime  time.Time
+	EndTime    time.Time
+	Offset     int
+	Limit      int
 }
 
 // ListRuntimeAttackChains returns chains newest-first.
@@ -530,6 +535,14 @@ func (s *Store) ListRuntimeAttackChains(f AttackChainFilter) ([]RuntimeAttackCha
 		conds = append(conds, "session_id = ?")
 		args = append(args, f.SessionID)
 	}
+	if f.TraceID != "" {
+		conds = append(conds, "trace_id = ?")
+		args = append(args, f.TraceID)
+	}
+	if f.AttackType != "" {
+		conds = append(conds, "attack_type = ?")
+		args = append(args, f.AttackType)
+	}
 	if f.Severity != "" {
 		conds = append(conds, "severity = ?")
 		args = append(args, strings.ToUpper(f.Severity))
@@ -538,11 +551,22 @@ func (s *Store) ListRuntimeAttackChains(f AttackChainFilter) ([]RuntimeAttackCha
 		conds = append(conds, "status = ?")
 		args = append(args, strings.ToLower(f.Status))
 	}
+	if !f.StartTime.IsZero() {
+		conds = append(conds, "end_time >= ?")
+		args = append(args, f.StartTime.UTC().Format(time.RFC3339Nano))
+	}
+	if !f.EndTime.IsZero() {
+		conds = append(conds, "start_time <= ?")
+		args = append(args, f.EndTime.UTC().Format(time.RFC3339Nano))
+	}
 	where := ""
 	if len(conds) > 0 {
 		where = "WHERE " + strings.Join(conds, " AND ")
 	}
-	args = append(args, f.Limit)
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+	args = append(args, f.Limit, f.Offset)
 	rows, err := s.queryDB(context.Background(), "runtime_attack_chains_list", `
 SELECT attack_chain_id, agent_id, COALESCE(agent_name, ''),
        COALESCE(session_id, ''), COALESCE(trace_id, ''),
@@ -551,7 +575,7 @@ SELECT attack_chain_id, agent_id, COALESCE(agent_name, ''),
 FROM runtime_attack_chains
 `+where+`
 ORDER BY start_time DESC
-LIMIT ?`, args...)
+LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -628,12 +652,12 @@ ORDER BY l.sequence ASC, b.timestamp ASC`, chainID)
 	var events []AttackChainEvent
 	for rows.Next() {
 		var (
-			link      AttackChainEvent
-			e         BehaviorEvent
-			ts        string
-			ppid      int64
+			link       AttackChainEvent
+			e          BehaviorEvent
+			ts         string
+			ppid       int64
 			confidence float64
-			attrs     string
+			attrs      string
 		)
 		if err := rows.Scan(
 			&link.AttackChainID, &link.EventID, &link.Sequence, &link.Relation,

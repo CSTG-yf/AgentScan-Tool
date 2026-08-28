@@ -523,8 +523,8 @@ body { min-height: 100vh; background: #f5f8fc; }
 .agent-stat-orange { background: linear-gradient(135deg, #ffbd57, #ff8a00); }
 .agent-green-text { color: #16a35f !important; }
 .agent-orange-text { color: #f97316 !important; }
-.agent-workbench { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; transition: grid-template-columns .18s ease; }
-.agent-workbench-collapsed { grid-template-columns: 64px minmax(0, 1fr); }
+.agent-workbench { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; transition: grid-template-columns .18s ease; }
+.agent-workbench-collapsed { grid-template-columns: minmax(0, 1fr); }
 .agent-list-panel { position: sticky; top: 18px; min-width: 0; max-height: calc(100vh - 172px); overflow: hidden; border: 1px solid #e7ebf3; border-radius: 8px; background: #ffffff; box-shadow: 0 14px 36px rgba(15, 23, 42, .07); }
 .agent-list-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 58px; padding: 12px 14px; border-bottom: 1px solid #edf1f7; }
 .agent-list-header > div { display: grid; gap: 2px; }
@@ -546,7 +546,7 @@ body { min-height: 100vh; background: #f5f8fc; }
 .agent-list-rail .ant-typography { display: grid; place-items: center; width: 34px; height: 34px; color: #1677ff !important; font-weight: 800; border: 1px solid #b9d8ff; border-radius: 50%; background: #eef6ff; }
 .agent-table-card { border: 1px solid #e7ebf3 !important; border-radius: 8px !important; background: #ffffff !important; box-shadow: 0 14px 36px rgba(15, 23, 42, .07) !important; }
 .agent-table-card .ant-card-body { padding: 0; }
-.agent-toolbar { display: grid; grid-template-columns: minmax(260px, 1fr) 126px 136px 154px 146px 42px; gap: 14px; padding: 20px 22px; border-bottom: 1px solid #edf1f7; }
+.agent-toolbar { display: grid; grid-template-columns: minmax(260px, 1fr) 150px 178px 178px; gap: 14px; padding: 20px 22px; border-bottom: 1px solid #edf1f7; }
 .agent-toolbar .ant-input-affix-wrapper, .agent-toolbar .ant-select-selector, .agent-toolbar .ant-btn { height: 38px !important; border-color: #d9e1ee !important; border-radius: 6px !important; background: #fff !important; }
 .agent-management-page .ant-table-wrapper { background: #fff; }
 .agent-management-page .ant-table { background: #fff !important; }
@@ -571,6 +571,7 @@ body { min-height: 100vh; background: #f5f8fc; }
 .agent-detail-stack { width: 100%; }
 .agent-config-list { width: 100%; }
 .agent-config-list .mono { white-space: normal; word-break: break-word; }
+.agent-detail-drawer .mono { font-family: 'Cascadia Code', Consolas, monospace; white-space: normal; word-break: break-word; }
 
 @media (max-width: 1380px) {
   .static-assets-page .static-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

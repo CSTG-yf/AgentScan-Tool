@@ -33,7 +33,9 @@ type AgentIdentityInput struct {
 	Runtime          string
 	Source           string
 	Status           string
+	RuntimeStatus    string
 	Confidence       int
+	PIDs             []uint32
 	ObservedAt       time.Time
 	LastStaticScanAt time.Time
 	Metadata         map[string]any
@@ -52,7 +54,9 @@ type CanonicalAgent struct {
 	TypeDescription       string `json:"typeDescription,omitempty"`
 	Source                string `json:"source"`
 	Status                string `json:"status"`
+	RuntimeStatus         string `json:"runtimeStatus"`
 	Confidence            int    `json:"confidence,omitempty"`
+	PIDs                  []uint32
 	FirstSeenAt           string `json:"firstSeenAt"`
 	LastSeenAt            string `json:"lastSeenAt"`
 	LastStaticScanAt      string `json:"lastStaticScanAt,omitempty"`
@@ -154,6 +158,10 @@ func CanonicalizeAgentIdentity(in AgentIdentityInput) CanonicalAgent {
 	runtime := firstNonEmpty(in.Runtime, profile.Runtime, runtimeLabel(kind))
 	source := firstNonEmpty(in.Source, profile.Source, in.Scanner, in.Connector, "gateway")
 	status := firstNonEmpty(in.Status, "observed")
+	runtimeStatus := normalizeAgentRuntimeStatus(firstNonEmpty(in.RuntimeStatus, runtimeStatusFromAgentStatus(status)))
+	if runtimeStatus == "" {
+		runtimeStatus = "unknown"
+	}
 	if id == "unclassified-agent" && !known {
 		display = "Unclassified Agent"
 		vendor = firstNonEmpty(vendor, "Unknown")
@@ -163,15 +171,16 @@ func CanonicalizeAgentIdentity(in AgentIdentityInput) CanonicalAgent {
 
 	ts := observed.UTC().Format(time.RFC3339Nano)
 	agent := CanonicalAgent{
-		ID:          id,
-		DisplayName: display,
-		Vendor:      vendor,
-		Kind:        kind,
-		Runtime:     runtime,
-		Source:      source,
-		Status:      status,
-		FirstSeenAt: ts,
-		LastSeenAt:  ts,
+		ID:            id,
+		DisplayName:   display,
+		Vendor:        vendor,
+		Kind:          kind,
+		Runtime:       runtime,
+		Source:        source,
+		Status:        status,
+		RuntimeStatus: runtimeStatus,
+		FirstSeenAt:   ts,
+		LastSeenAt:    ts,
 	}
 	if !in.LastStaticScanAt.IsZero() {
 		agent.LastStaticScanAt = in.LastStaticScanAt.UTC().Format(time.RFC3339Nano)
@@ -184,6 +193,7 @@ func CanonicalizeAgentIdentity(in AgentIdentityInput) CanonicalAgent {
 	agent.AgentTypeID = in.AgentTypeID
 	agent.MatchedRuleID = in.DiscoveryRuleID
 	agent.Confidence = in.Confidence
+	agent.PIDs = normalizeAgentPIDs(in.PIDs)
 	if agent.Confidence < 0 {
 		agent.Confidence = 0
 	}
@@ -194,6 +204,71 @@ func CanonicalizeAgentIdentity(in AgentIdentityInput) CanonicalAgent {
 		agent.MetadataJSON = "{}"
 	}
 	return agent
+}
+
+func runtimeStatusFromAgentStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running":
+		return "running"
+	case "installed", "stopped", "missing":
+		return "stopped"
+	default:
+		return ""
+	}
+}
+
+func normalizeAgentRuntimeStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running":
+		return "running"
+	case "stopped", "installed", "missing":
+		return "stopped"
+	case "unknown":
+		return "unknown"
+	default:
+		return ""
+	}
+}
+
+func normalizeAgentPIDs(pids []uint32) []uint32 {
+	if len(pids) == 0 {
+		return nil
+	}
+	seen := map[uint32]bool{}
+	out := make([]uint32, 0, len(pids))
+	for _, pid := range pids {
+		if pid == 0 || seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		out = append(out, pid)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func agentPIDsJSON(pids []uint32) string {
+	pids = normalizeAgentPIDs(pids)
+	if len(pids) == 0 {
+		return "[]"
+	}
+	b, err := json.Marshal(pids)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
+func agentPIDsFromJSON(raw string) []uint32 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var pids []uint32
+	if err := json.Unmarshal([]byte(raw), &pids); err == nil {
+		return normalizeAgentPIDs(pids)
+	}
+	return nil
 }
 
 // EnsureAgent upserts the canonical Agent row and all observed aliases. It is
@@ -220,8 +295,8 @@ func (s *Store) EnsureAgent(in AgentIdentityInput) (CanonicalAgent, error) {
 	if _, err := s.execDB(context.Background(), "agent_inventory_upsert", `
 INSERT INTO agents (
   id, agent_type_id, matched_rule_id, display_name, vendor, kind, runtime, source, status,
-  confidence, first_seen_at, last_seen_at, last_static_scan_at, metadata_json
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  runtime_status, pids_json, confidence, first_seen_at, last_seen_at, last_static_scan_at, metadata_json
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   agent_type_id = CASE WHEN excluded.agent_type_id IS NOT NULL THEN excluded.agent_type_id ELSE agents.agent_type_id END,
   matched_rule_id = CASE WHEN excluded.matched_rule_id IS NOT NULL THEN excluded.matched_rule_id ELSE agents.matched_rule_id END,
@@ -236,6 +311,15 @@ ON CONFLICT(id) DO UPDATE SET
     ELSE agents.source || ', ' || excluded.source
   END,
   status = CASE WHEN excluded.status <> '' THEN excluded.status ELSE agents.status END,
+  runtime_status = CASE
+    WHEN excluded.runtime_status IN ('running', 'stopped') THEN excluded.runtime_status
+    WHEN COALESCE(agents.runtime_status, '') = '' THEN excluded.runtime_status
+    ELSE agents.runtime_status
+  END,
+  pids_json = CASE
+    WHEN excluded.runtime_status IN ('running', 'stopped') THEN excluded.pids_json
+    ELSE agents.pids_json
+  END,
   confidence = CASE WHEN excluded.confidence > 0 THEN excluded.confidence ELSE agents.confidence END,
   last_seen_at = excluded.last_seen_at,
   last_static_scan_at = COALESCE(excluded.last_static_scan_at, agents.last_static_scan_at),
@@ -249,6 +333,8 @@ ON CONFLICT(id) DO UPDATE SET
 		agent.Runtime,
 		agent.Source,
 		agent.Status,
+		agent.RuntimeStatus,
+		agentPIDsJSON(agent.PIDs),
 		agent.Confidence,
 		agent.FirstSeenAt,
 		agent.LastSeenAt,
@@ -369,6 +455,8 @@ SELECT a.id,
        COALESCE(t.description, ''),
        COALESCE(a.source, ''),
        COALESCE(a.status, ''),
+       COALESCE(a.runtime_status, ''),
+       COALESCE(a.pids_json, '[]'),
        COALESCE(a.confidence, 0),
        COALESCE(a.first_seen_at, ''),
        COALESCE(a.last_seen_at, ''),
@@ -391,15 +479,18 @@ LIMIT ?`, limit)
 	var out []CanonicalAgent
 	for rows.Next() {
 		var a CanonicalAgent
+		var pidsJSON string
 		if err := rows.Scan(
 			&a.ID, &a.AgentTypeID, &a.AgentTypeKey, &a.MatchedRuleID,
 			&a.DisplayName, &a.Vendor, &a.Kind, &a.Runtime, &a.TypeDescription,
-			&a.Source, &a.Status, &a.Confidence,
+			&a.Source, &a.Status, &a.RuntimeStatus, &pidsJSON, &a.Confidence,
 			&a.FirstSeenAt, &a.LastSeenAt, &a.LastStaticScanAt, &a.MetadataJSON,
 			&a.StaticResourceCount, &a.RiskResourceCount, &a.CriticalResourceCount,
 		); err != nil {
 			return nil, fmt.Errorf("audit: scan agent row: %w", err)
 		}
+		a.RuntimeStatus = normalizeAgentRuntimeStatus(firstNonEmpty(a.RuntimeStatus, runtimeStatusFromAgentStatus(a.Status), "unknown"))
+		a.PIDs = agentPIDsFromJSON(pidsJSON)
 		out = append(out, a)
 	}
 	return out, rows.Err()
@@ -519,7 +610,7 @@ func (s *Store) MarkMissingAgentDiscoveries(activeIDs []string, observedAt time.
 	}
 	query := `
 UPDATE agents
-SET status = ?
+SET status = ?, runtime_status = 'stopped', pids_json = '[]'
 WHERE status <> 'missing'
   AND (matched_rule_id IS NOT NULL OR source LIKE '%agent-scanner%')`
 	if len(predicates) > 0 {

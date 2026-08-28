@@ -3244,14 +3244,14 @@ func TestAPIEnforceBlockListAndUnblock(t *testing.T) {
 	api := &APIServer{health: NewSidecarHealth(), store: store, logger: logger}
 
 	blockBody := []byte(`{"target_type":"skill","target_name":"bad-skill","reason":"malware"}`)
-	blockReq := httptest.NewRequest(http.MethodPost, "/enforce/block", bytes.NewReader(blockBody))
+	blockReq := httptest.NewRequest(http.MethodPost, "/api/v1/test-policy-actions/block", bytes.NewReader(blockBody))
 	blockW := httptest.NewRecorder()
 	api.handleEnforceBlock(blockW, blockReq)
 	if blockW.Result().StatusCode != http.StatusOK {
 		t.Fatalf("block status = %d, want %d", blockW.Result().StatusCode, http.StatusOK)
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/enforce/blocked", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/test-policy-actions/blocked", nil)
 	listW := httptest.NewRecorder()
 	api.handleEnforceBlocked(listW, listReq)
 	if listW.Result().StatusCode != http.StatusOK {
@@ -3269,7 +3269,7 @@ func TestAPIEnforceBlockListAndUnblock(t *testing.T) {
 		t.Errorf("target_name = %q, want bad-skill", blocked[0].TargetName)
 	}
 
-	unblockReq := httptest.NewRequest(http.MethodDelete, "/enforce/block", bytes.NewReader([]byte(`{"target_type":"skill","target_name":"bad-skill"}`)))
+	unblockReq := httptest.NewRequest(http.MethodDelete, "/api/v1/test-policy-actions/block", bytes.NewReader([]byte(`{"target_type":"skill","target_name":"bad-skill"}`)))
 	unblockW := httptest.NewRecorder()
 	api.handleEnforceBlock(unblockW, unblockReq)
 	if unblockW.Result().StatusCode != http.StatusOK {
@@ -3291,14 +3291,14 @@ func TestAPIEnforceAllowList(t *testing.T) {
 	api := &APIServer{health: NewSidecarHealth(), store: store, logger: logger}
 
 	body := []byte(`{"target_type":"mcp","target_name":"trusted-mcp","reason":"reviewed"}`)
-	req := httptest.NewRequest(http.MethodPost, "/enforce/allow", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/test-policy-actions/allow", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	api.handleEnforceAllow(w, req)
 	if w.Result().StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Result().StatusCode, http.StatusOK)
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/enforce/allowed", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/test-policy-actions/allowed", nil)
 	listW := httptest.NewRecorder()
 	api.handleEnforceAllowed(listW, listReq)
 
@@ -3327,7 +3327,7 @@ func TestAPIEnforceAllowSkillReenablesRuntimeDisable(t *testing.T) {
 	}
 
 	body := []byte(`{"target_type":"skill","target_name":"blocked-skill","reason":"reviewed"}`)
-	req := httptest.NewRequest(http.MethodPost, "/enforce/allow", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/test-policy-actions/allow", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	api.handleEnforceAllow(w, req)
 	if w.Result().StatusCode != http.StatusOK {
@@ -3382,7 +3382,7 @@ func TestAPIEnforceAllowSkillFailsWhenGatewayEnableFails(t *testing.T) {
 	}
 
 	body := []byte(`{"target_type":"skill","target_name":"blocked-skill","reason":"reviewed"}`)
-	req := httptest.NewRequest(http.MethodPost, "/enforce/allow", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/test-policy-actions/allow", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	api.handleEnforceAllow(w, req)
 	if w.Result().StatusCode != http.StatusBadGateway {
@@ -3447,7 +3447,7 @@ func TestAPIPolicyEvaluateFallback(t *testing.T) {
 	store, logger := testStoreAndLogger(t)
 	api := &APIServer{health: NewSidecarHealth(), store: store, logger: logger}
 
-	blockReq := httptest.NewRequest(http.MethodPost, "/enforce/block", bytes.NewReader([]byte(`{"target_type":"plugin","target_name":"evil-plugin","reason":"malicious"}`)))
+	blockReq := httptest.NewRequest(http.MethodPost, "/api/v1/test-policy-actions/block", bytes.NewReader([]byte(`{"target_type":"plugin","target_name":"evil-plugin","reason":"malicious"}`)))
 	blockW := httptest.NewRecorder()
 	api.handleEnforceBlock(blockW, blockReq)
 	if blockW.Result().StatusCode != http.StatusOK {
@@ -6005,7 +6005,7 @@ func TestCSRFProtectBlocksWrongContentType(t *testing.T) {
 	})
 	handler := csrfProtect(inner)
 
-	req := httptest.NewRequest(http.MethodPost, "/enforce/block", bytes.NewBufferString(`data`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-detections/test/actions/block", bytes.NewBufferString(`data`))
 	req.Header.Set("X-DefenseClaw-Client", "test-client")
 	req.Header.Set("Content-Type", "text/plain")
 	w := httptest.NewRecorder()
@@ -6048,7 +6048,7 @@ func TestCSRFProtectAllowsLocalhostOrigin(t *testing.T) {
 		"http://localhost:18790",
 		"http://[::1]:18790",
 	} {
-		req := httptest.NewRequest(http.MethodPost, "/enforce/block", bytes.NewBufferString(`{}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-detections/test/actions/block", bytes.NewBufferString(`{}`))
 		req.Header.Set("X-DefenseClaw-Client", "test-client")
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Origin", origin)
@@ -6091,7 +6091,7 @@ func TestCSRFProtectAllowsDELETEWithHeaders(t *testing.T) {
 	})
 	handler := csrfProtect(inner)
 
-	req := httptest.NewRequest(http.MethodDelete, "/enforce/block", bytes.NewBufferString(`{}`))
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/enforcements/test", bytes.NewBufferString(`{}`))
 	req.Header.Set("X-DefenseClaw-Client", "openclaw-plugin")
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -6164,7 +6164,6 @@ func TestAPIMuxCSRFIntegration(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", api.handleHealth)
 	mux.HandleFunc("/skill/disable", api.handleSkillDisable)
-	mux.HandleFunc("/enforce/block", api.handleEnforceBlock)
 	mux.HandleFunc("/v1/guardrail/event", api.handleGuardrailEvent)
 	wrapped := csrfProtect(mux)
 
@@ -6212,15 +6211,15 @@ func TestAPIMuxCSRFIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("POST /enforce/block with non-localhost Origin gets 403", func(t *testing.T) {
+	t.Run("POST runtime detection block with non-localhost Origin gets 403", func(t *testing.T) {
 		body := bytes.NewBufferString(`{"target_type":"skill","target_name":"x","reason":"test"}`)
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/enforce/block", body)
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/runtime-detections/test/actions/block", body)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-DefenseClaw-Client", "python-cli")
 		req.Header.Set("Origin", "https://evil.example.com")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			t.Fatalf("POST /enforce/block: %v", err)
+			t.Fatalf("POST runtime detection block: %v", err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusForbidden {
@@ -6820,12 +6819,14 @@ func TestHandleToolCallQueuesJudgeWhenConcurrencyIsFull(t *testing.T) {
 }
 
 func TestMaxBodyMiddleware_RejectsOversizedBody(t *testing.T) {
-	store, logger := testStoreAndLogger(t)
-	health := NewSidecarHealth()
-	api := NewAPIServer(":0", health, nil, store, logger)
-
 	inner := http.NewServeMux()
-	inner.HandleFunc("/enforce/block", api.handleEnforceBlock)
+	inner.HandleFunc("/api/v1/runtime-detections/test/actions/block", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.ReadAll(r.Body); err != nil {
+			http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 	handler := csrfProtect(maxBodyMiddleware(inner, 1<<20))
 
 	ts := httptest.NewServer(handler)
@@ -6834,7 +6835,7 @@ func TestMaxBodyMiddleware_RejectsOversizedBody(t *testing.T) {
 	oversized := strings.Repeat("A", 2<<20)
 	body := fmt.Sprintf(`{"target_type":"skill","target_name":"%s","reason":"test"}`, oversized)
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/enforce/block", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/runtime-detections/test/actions/block", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-DefenseClaw-Client", "test")
 

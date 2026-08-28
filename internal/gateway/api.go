@@ -85,10 +85,12 @@ type APIServer struct {
 	// staticScanOne / staticRescan are the watcher's on-demand scan entry
 	// points, wired in by the sidecar via SetStaticScanTrigger after the
 	// watcher is constructed. They back POST /api/v1/static-resources/{id}/scan
-	// and POST /api/v1/static-resources/rescan.
+	// and POST /api/v1/agents/{id}/static-resources/scan.
 	staticScanMu  sync.RWMutex
 	staticScanOne func(resourceID string) error
 	staticRescan  func(agentID string) error
+	scanStatusMu  sync.RWMutex
+	scanStatuses  map[string]apiScanStatus
 
 	// otlpPathTokenMu guards otlpPathTokens — the in-memory map of
 	// per-source OTLP path tokens loaded from
@@ -765,10 +767,6 @@ func (a *APIServer) Run(ctx context.Context) error {
 	mux.HandleFunc("/plugin/enable", a.handlePluginEnable)
 	mux.HandleFunc("/config/patch", a.handleConfigPatch)
 	mux.HandleFunc("/scan/result", a.handleScanResult)
-	mux.HandleFunc("/enforce/block", a.handleEnforceBlock)
-	mux.HandleFunc("/enforce/allow", a.handleEnforceAllow)
-	mux.HandleFunc("/enforce/blocked", a.handleEnforceBlocked)
-	mux.HandleFunc("/enforce/allowed", a.handleEnforceAllowed)
 	mux.HandleFunc("/alerts", a.handleAlerts)
 	mux.HandleFunc("/audit/event", a.handleAuditEvent)
 	mux.HandleFunc("/policy/evaluate", a.handlePolicyEvaluate)
@@ -815,25 +813,27 @@ func (a *APIServer) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/traces", a.handleOTLPTraces)
 	mux.HandleFunc("/otlp/", a.handleOTLPPathToken)
 	mux.HandleFunc("/api/v1/agents/discovery", a.handleAgentDiscovery)
-	mux.HandleFunc("/api/v1/agent-inventory", a.handleAgentInventory)
-	mux.HandleFunc("/api/v1/static-resource-inventory", a.handleStaticResourceInventory)
-	// Rule-driven static resource API for the desktop inventory page:
-	// /api/v1/static-resources (paginated list) and the /…/ subtree
-	// (agents, summary, {id}, {id}/findings|content|relations|scan, rescan).
-	// Longest-prefix routing keeps these clear of the legacy
-	// /api/v1/static-resource-inventory and /…-scan-settings endpoints.
+	mux.HandleFunc("/api/v1/agents", a.handleAgentsAPI)
+	mux.HandleFunc("/api/v1/agents/", a.handleAgentsAPI)
+	mux.HandleFunc("/api/v1/scans/agents", a.handleAgentScan)
+	mux.HandleFunc("/api/v1/scans/", a.handleScanStatus)
+	// Rule-driven static resource API for the desktop inventory page.
 	mux.HandleFunc("/api/v1/static-resources", a.handleStaticResourcesAPI)
 	mux.HandleFunc("/api/v1/static-resources/", a.handleStaticResourcesAPI)
-	mux.HandleFunc("/api/v1/event-detections", a.handleEventDetections)
 	mux.HandleFunc("/api/v1/attack-chains", a.handleAttackChains)
+	mux.HandleFunc("/api/v1/attack-chains/", a.handleAttackChains)
 	mux.HandleFunc("/api/v1/behavior-events", a.handleBehaviorEvents)
 	// Phase-1 unified runtime event timeline: /api/v1/runtime-events
 	// (filter by agent_id / session_id / trace_id / event_type /
 	// source / severity) and /api/v1/runtime-sessions (per-agent
 	// session inventory). Backs the "who did what, in which run,
 	// through which pipeline" query over behavior_events.
+	mux.HandleFunc("/api/v1/runtime-events/timeline", a.handleRuntimeEventsTimeline)
 	mux.HandleFunc("/api/v1/runtime-events", a.handleRuntimeEvents)
+	mux.HandleFunc("/api/v1/runtime-events/", a.handleRuntimeEvents)
 	mux.HandleFunc("/api/v1/runtime-sessions", a.handleRuntimeSessions)
+	mux.HandleFunc("/api/v1/runtime-security/summary", a.handleRuntimeSecuritySummary)
+	mux.HandleFunc("/api/v1/runtime-security/mode", a.handleRuntimeSecurityMode)
 	// Phase-2 runtime detections: structured risk findings derived
 	// from unified runtime events by generic (agent-agnostic) rules.
 	// /{id} subpaths serve detail + evidence chain and status
@@ -845,7 +845,8 @@ func (a *APIServer) Run(ctx context.Context) error {
 	// mode switch (observe | action).
 	mux.HandleFunc("/api/v1/runtime-decisions", a.handleRuntimeDecisions)
 	mux.HandleFunc("/api/v1/runtime-decisions/", a.handleRuntimeDecisions)
-	mux.HandleFunc("/api/v1/runtime-security-mode", a.handleRuntimeSecurityMode)
+	mux.HandleFunc("/api/v1/enforcements", a.handleRuntimeEnforcements)
+	mux.HandleFunc("/api/v1/enforcements/", a.handleRuntimeEnforcements)
 	mux.HandleFunc("/api/v1/process-guard-audit", a.handleProcessGuardAudit)
 	mux.HandleFunc("/api/v1/desktop-scan-schedule", a.handleDesktopScanSchedule)
 	mux.HandleFunc("/api/v1/static-resource-scan-settings", a.handleStaticResourceScanSettings)

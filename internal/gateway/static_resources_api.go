@@ -44,14 +44,11 @@ func (a *APIServer) staticScanTriggers() (func(string) error, func(string) error
 
 // handleStaticResourcesAPI dispatches the /api/v1/static-resources/ subtree:
 //
-//	GET  /agents                      per-agent resource summaries
-//	GET  /summary?agent_id=           one agent's totals + by-type breakdown
 //	GET  /{id}                        drawer overview payload
 //	GET  /{id}/findings               latest-scan findings (risk tab)
 //	GET  /{id}/content                redacted file content / dir listing
 //	GET  /{id}/relations              related resources (reserved)
 //	POST /{id}/scan                   on-demand single-resource scan
-//	POST /rescan                      on-demand agent/global rescan
 func (a *APIServer) handleStaticResourcesAPI(w http.ResponseWriter, r *http.Request) {
 	if a.store == nil {
 		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit store unavailable"})
@@ -67,8 +64,6 @@ func (a *APIServer) handleStaticResourcesAPI(w http.ResponseWriter, r *http.Requ
 		a.handleStaticResourceAgents(w, r)
 	case rest == "summary":
 		a.handleStaticResourceSummary(w, r)
-	case rest == "rescan":
-		a.handleStaticResourceRescan(w, r)
 	default:
 		parts := strings.Split(strings.Trim(rest, "/"), "/")
 		resourceID := parts[0]
@@ -339,13 +334,11 @@ func (a *APIServer) handleStaticResourceScan(w http.ResponseWriter, r *http.Requ
 		a.writeJSON(w, http.StatusConflict, map[string]string{"error": "another manual scan is already running"})
 		return
 	}
-	go func() {
+	status := a.startAPIScan("static-resources", "resource", "", resourceID, func() error {
 		defer staticScanInFlight.Store(false)
-		if err := scanOne(resourceID); err != nil {
-			fmt.Fprintf(os.Stderr, "[api] on-demand scan %s: %v\n", resourceID, err)
-		}
-	}()
-	a.writeJSON(w, http.StatusAccepted, map[string]any{"resource_id": resourceID, "status": "queued"})
+		return scanOne(resourceID)
+	})
+	a.writeJSON(w, http.StatusAccepted, status)
 }
 
 // handleStaticResourceRescan serves POST /api/v1/static-resources/rescan —

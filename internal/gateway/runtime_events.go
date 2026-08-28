@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,9 +41,9 @@ import (
 //	                                                   │
 //	                              runtime_detection_events (证据链)
 //
-// audit_events keeps its legacy role (审计记录) and remains the primary
-// data source for buildPageEventDetections in Phase 1, so the frontend
-// needs no changes yet.
+// audit_events keeps its audit-log role. Runtime security pages now read
+// behavior_events, runtime_detections, runtime_decisions, and
+// runtime_response_actions through the /api/v1 runtime-security surface.
 
 var (
 	runtimeEventStoreMu sync.RWMutex
@@ -183,17 +184,17 @@ func (a *APIServer) recordHookRuntimeEvent(ctx context.Context, req agentHookReq
 
 	eventType := hookRuntimeEventType(req.HookEventName)
 	in := audit.RuntimeEventInput{
-		EventType:     eventType,
-		EventSource:   audit.RuntimeSourceAgentHook,
-		SessionID:     firstNonEmpty(req.SessionID, env.SessionID),
-		TraceID:       firstNonEmpty(env.TraceID, TraceIDFromContext(ctx)),
-		AgentName:     firstNonEmpty(req.AgentName, identity.AgentName, req.ConnectorName),
-		ToolName:      req.ToolName,
-		Target:        hookToolTargetText(req.ToolName, req.ToolArgs),
-		Operation:     firstNonEmpty(req.ToolName, req.HookEventName),
-		Severity:      resp.Severity,
-		Outcome:       hookOutcomeFromAction(resp.Action),
-		Timestamp:     time.Now().UTC(),
+		EventType:   eventType,
+		EventSource: audit.RuntimeSourceAgentHook,
+		SessionID:   firstNonEmpty(req.SessionID, env.SessionID),
+		TraceID:     firstNonEmpty(env.TraceID, TraceIDFromContext(ctx)),
+		AgentName:   firstNonEmpty(req.AgentName, identity.AgentName, req.ConnectorName),
+		ToolName:    req.ToolName,
+		Target:      hookToolTargetText(req.ToolName, req.ToolArgs),
+		Operation:   firstNonEmpty(req.ToolName, req.HookEventName),
+		Severity:    resp.Severity,
+		Outcome:     hookOutcomeFromAction(resp.Action),
+		Timestamp:   time.Now().UTC(),
 		Attributes: map[string]any{
 			"connector":     req.ConnectorName,
 			"hook_event":    req.HookEventName,
@@ -339,17 +340,17 @@ func recordGuardrailRuntimeEvent(ctx context.Context, direction, model string, v
 	}
 
 	in := audit.RuntimeEventInput{
-		EventType:       eventType,
-		EventSource:     audit.RuntimeSourceGuardrail,
-		SessionID:       env.SessionID,
-		TraceID:         env.TraceID,
+		EventType:        eventType,
+		EventSource:      audit.RuntimeSourceGuardrail,
+		SessionID:        env.SessionID,
+		TraceID:          env.TraceID,
 		CanonicalAgentID: env.AgentID,
-		AgentName:       env.AgentName,
-		Target:          model,
-		Severity:        verdict.Severity,
-		Outcome:         outcome,
-		Timestamp:       time.Now().UTC(),
-		Attributes:      attrs,
+		AgentName:        env.AgentName,
+		Target:           model,
+		Severity:         verdict.Severity,
+		Outcome:          outcome,
+		Timestamp:        time.Now().UTC(),
+		Attributes:       attrs,
 	}
 	if verdict.Reason != "" {
 		in.Detail = truncate(redaction.ForSinkReason(verdict.Reason), 200)
@@ -395,9 +396,9 @@ func recordEgressRuntimeEvent(ctx context.Context, p gatewaylog.EgressPayload) {
 		target += p.TargetPath
 	}
 	attrs := map[string]any{
-		"branch":       p.Branch,
-		"decision":     p.Decision,
-		"body_shape":   p.BodyShape,
+		"branch":         p.Branch,
+		"decision":       p.Decision,
+		"body_shape":     p.BodyShape,
 		"looks_like_llm": p.LooksLikeLLM,
 	}
 	if p.Source != "" {
@@ -453,6 +454,225 @@ type runtimeEventPostRequest struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
+type runtimeDetectionListItem struct {
+	DetectionID   string         `json:"detection_id"`
+	AgentID       string         `json:"agent_id"`
+	AgentName     string         `json:"agent_name,omitempty"`
+	SessionID     string         `json:"session_id,omitempty"`
+	TraceID       string         `json:"trace_id,omitempty"`
+	Type          string         `json:"type"`
+	DetectionType string         `json:"detection_type"`
+	Category      string         `json:"category"`
+	Severity      string         `json:"severity"`
+	Confidence    float64        `json:"confidence"`
+	RuleID        string         `json:"rule_id"`
+	Status        string         `json:"status"`
+	Title         string         `json:"title"`
+	Description   string         `json:"description,omitempty"`
+	Detail        string         `json:"detail,omitempty"`
+	Remediation   string         `json:"remediation,omitempty"`
+	Source        string         `json:"source"`
+	CreatedAt     string         `json:"created_at,omitempty"`
+	FirstSeenAt   string         `json:"first_seen_at,omitempty"`
+	LastSeenAt    string         `json:"last_seen_at,omitempty"`
+	EventCount    int            `json:"event_count"`
+	Attributes    map[string]any `json:"attributes,omitempty"`
+}
+
+type runtimeDetectionAgentContext struct {
+	AgentID string `json:"agent_id"`
+	Name    string `json:"name"`
+}
+
+type runtimeDetectionSessionContext struct {
+	SessionID string `json:"session_id,omitempty"`
+	TraceID   string `json:"trace_id,omitempty"`
+}
+
+type runtimeDetectionDetailResponse struct {
+	runtimeDetectionListItem
+	Detection      runtimeDetectionListItem       `json:"detection"`
+	Evidence       []runtimeDetectionEvidenceItem `json:"evidence"`
+	Agent          runtimeDetectionAgentContext   `json:"agent"`
+	RuntimeSession runtimeDetectionSessionContext `json:"runtime_session"`
+	Trace          runtimeDetectionSessionContext `json:"trace"`
+}
+
+type runtimeDetectionEvidenceItem struct {
+	DetectionID   string         `json:"detection_id,omitempty"`
+	EventID       int64          `json:"event_id"`
+	EventType     string         `json:"event_type"`
+	EventSource   string         `json:"event_source,omitempty"`
+	EventCategory string         `json:"event_category,omitempty"`
+	Timestamp     string         `json:"timestamp,omitempty"`
+	Sequence      int            `json:"sequence"`
+	Role          string         `json:"role,omitempty"`
+	AgentID       string         `json:"agent_id,omitempty"`
+	AgentName     string         `json:"agent_name,omitempty"`
+	SessionID     string         `json:"session_id,omitempty"`
+	TraceID       string         `json:"trace_id,omitempty"`
+	ToolName      string         `json:"tool_name,omitempty"`
+	Target        string         `json:"target,omitempty"`
+	Operation     string         `json:"operation,omitempty"`
+	Outcome       string         `json:"outcome,omitempty"`
+	Severity      string         `json:"severity,omitempty"`
+	Detail        string         `json:"detail,omitempty"`
+	Attributes    map[string]any `json:"attributes,omitempty"`
+}
+
+type runtimeTimelineBucket struct {
+	Time    string `json:"time"`
+	Bucket  string `json:"bucket"`
+	Total   int    `json:"total"`
+	Prompt  int    `json:"prompt"`
+	Tool    int    `json:"tool"`
+	Process int    `json:"process"`
+	File    int    `json:"file"`
+	Network int    `json:"network"`
+	Content int    `json:"content"`
+}
+
+func runtimeDetectionFilterFromQuery(r *http.Request, limitDefault, limitMax int) audit.RuntimeDetectionFilter {
+	q := r.URL.Query()
+	page, pageSize := requestPage(r, 1, limitDefault, limitMax)
+	limit := pageSize
+	if v := strings.TrimSpace(q.Get("limit")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= limitMax {
+			limit = parsed
+		}
+	}
+	offset := (page - 1) * pageSize
+	if v := strings.TrimSpace(q.Get("offset")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			offset = parsed
+		}
+	}
+	status := strings.TrimSpace(q.Get("status"))
+	switch strings.ToLower(status) {
+	case "detected", "pending":
+		status = audit.RuntimeDetectionStatusOpen
+	case "blocked":
+		status = audit.RuntimeDetectionStatusMitigated + ",blocked"
+	case "audited":
+		status = audit.RuntimeDetectionStatusResolved
+	}
+	return audit.RuntimeDetectionFilter{
+		AgentID:       strings.TrimSpace(q.Get("agent_id")),
+		SessionID:     strings.TrimSpace(q.Get("session_id")),
+		TraceID:       strings.TrimSpace(q.Get("trace_id")),
+		DetectionType: firstNonEmpty(strings.TrimSpace(q.Get("detection_type")), strings.TrimSpace(q.Get("type"))),
+		Category:      strings.TrimSpace(q.Get("category")),
+		Severity:      strings.TrimSpace(q.Get("severity")),
+		Status:        status,
+		Keyword:       strings.TrimSpace(q.Get("keyword")),
+		StartTime:     parseAPITime(q.Get("start_time")),
+		EndTime:       parseAPITime(q.Get("end_time")),
+		Sort:          strings.TrimSpace(q.Get("sort")),
+		Limit:         limit,
+		Offset:        offset,
+	}
+}
+
+func runtimeDetectionListItemFromAudit(d audit.RuntimeDetection) runtimeDetectionListItem {
+	return runtimeDetectionListItem{
+		DetectionID:   d.DetectionID,
+		AgentID:       d.AgentID,
+		AgentName:     d.AgentName,
+		SessionID:     d.SessionID,
+		TraceID:       d.TraceID,
+		Type:          d.DetectionType,
+		DetectionType: d.DetectionType,
+		Category:      d.Category,
+		Severity:      strings.ToLower(d.Severity),
+		Confidence:    d.Confidence,
+		RuleID:        d.RuleID,
+		Status:        d.Status,
+		Title:         d.Title,
+		Description:   firstNonEmpty(d.Detail, d.Remediation),
+		Detail:        d.Detail,
+		Remediation:   d.Remediation,
+		Source:        runtimeDetectionSource(d),
+		CreatedAt:     runtimeTimeString(d.LastSeenAt),
+		FirstSeenAt:   runtimeTimeString(d.FirstSeenAt),
+		LastSeenAt:    runtimeTimeString(d.LastSeenAt),
+		EventCount:    d.EventCount,
+		Attributes:    d.Attributes,
+	}
+}
+
+func runtimeDetectionSource(d audit.RuntimeDetection) string {
+	if source, ok := runtimeStringFromAttributes(d.Attributes, "source"); ok {
+		return source
+	}
+	if d.EventCount > 1 ||
+		strings.Contains(strings.ToLower(d.RuleID), "exfiltration") ||
+		strings.Contains(strings.ToLower(d.DetectionType), "exfiltration") ||
+		strings.Contains(strings.ToLower(d.DetectionType), "exploit") {
+		return "correlation_engine"
+	}
+	return "runtime_detection"
+}
+
+func runtimeStringFromAttributes(attrs map[string]any, key string) (string, bool) {
+	if len(attrs) == 0 {
+		return "", false
+	}
+	if value, ok := attrs[key]; ok {
+		if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s), true
+		}
+	}
+	return "", false
+}
+
+func runtimeTimeString(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+func runtimeDetectionEvidenceItems(evidence []audit.DetectionEvidence) []runtimeDetectionEvidenceItem {
+	items := make([]runtimeDetectionEvidenceItem, 0, len(evidence))
+	for _, row := range evidence {
+		ev := row.Event
+		items = append(items, runtimeDetectionEvidenceItem{
+			DetectionID:   row.DetectionID,
+			EventID:       row.EventID,
+			EventType:     ev.EventType,
+			EventSource:   ev.EventSource,
+			EventCategory: ev.EventCategory,
+			Timestamp:     runtimeTimeString(ev.Timestamp),
+			Sequence:      row.Sequence,
+			Role:          row.Role,
+			AgentID:       ev.CanonicalAgentID,
+			AgentName:     ev.AgentName,
+			SessionID:     ev.SessionID,
+			TraceID:       ev.TraceID,
+			ToolName:      ev.ToolName,
+			Target:        ev.Target,
+			Operation:     ev.Operation,
+			Outcome:       ev.Outcome,
+			Severity:      strings.ToLower(ev.Severity),
+			Detail:        ev.Detail,
+			Attributes:    ev.Attributes,
+		})
+	}
+	return items
+}
+
+func runtimeDetectionSourceMatches(source string, filter string) bool {
+	values := strings.Split(strings.ToLower(filter), ",")
+	source = strings.ToLower(strings.TrimSpace(source))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || value == "all" || value == source {
+			return true
+		}
+	}
+	return false
+}
+
 // handleRuntimeEvents serves the unified runtime event surface:
 //
 //	GET  /api/v1/runtime-events?agent_id=&session_id=&trace_id=
@@ -467,6 +687,15 @@ func (a *APIServer) handleRuntimeEvents(w http.ResponseWriter, r *http.Request) 
 		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit store unavailable"})
 		return
 	}
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/runtime-events"), "/")
+	if rest != "" {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		a.handleRuntimeEventDetail(w, r, rest)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		a.handleRuntimeEventsGet(w, r)
@@ -477,30 +706,158 @@ func (a *APIServer) handleRuntimeEvents(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+func (a *APIServer) handleRuntimeEventsTimeline(w http.ResponseWriter, r *http.Request) {
+	if a.store == nil {
+		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit store unavailable"})
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	q := r.URL.Query()
+	bucketSize := 5 * time.Minute
+	if raw := strings.TrimSpace(q.Get("bucket")); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil && parsed >= time.Minute && parsed <= 24*time.Hour {
+			bucketSize = parsed
+		}
+	}
+	since := time.Now().UTC().Add(-24 * time.Hour)
+	if raw := strings.TrimSpace(q.Get("start_time")); raw != "" {
+		if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+			since = parsed.UTC()
+		} else if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			since = parsed.UTC()
+		}
+	}
+	var until time.Time
+	if raw := strings.TrimSpace(q.Get("end_time")); raw != "" {
+		if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+			until = parsed.UTC()
+		} else if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			until = parsed.UTC()
+		}
+	}
+	events, err := a.store.ListRuntimeEvents(audit.RuntimeEventFilter{
+		AgentID:   strings.TrimSpace(q.Get("agent_id")),
+		SessionID: strings.TrimSpace(q.Get("session_id")),
+		TraceID:   strings.TrimSpace(q.Get("trace_id")),
+		Since:     since,
+		Limit:     2000,
+	})
+	if err != nil {
+		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	byBucket := map[string]*runtimeTimelineBucket{}
+	for _, event := range events {
+		if !until.IsZero() && event.Timestamp.After(until) {
+			continue
+		}
+		bucketTime := event.Timestamp.UTC().Truncate(bucketSize)
+		key := bucketTime.Format(time.RFC3339Nano)
+		item := byBucket[key]
+		if item == nil {
+			item = &runtimeTimelineBucket{
+				Time:   bucketTime.Format("15:04"),
+				Bucket: key,
+			}
+			byBucket[key] = item
+		}
+		item.Total++
+		switch runtimeTimelineCategory(event) {
+		case audit.RuntimeCategoryPrompt:
+			item.Prompt++
+		case audit.RuntimeCategoryTool:
+			item.Tool++
+		case audit.RuntimeCategoryProcess:
+			item.Process++
+		case audit.RuntimeCategoryFile:
+			item.File++
+		case audit.RuntimeCategoryNetwork:
+			item.Network++
+		case audit.RuntimeCategoryContent:
+			item.Content++
+		}
+	}
+	buckets := make([]runtimeTimelineBucket, 0, len(byBucket))
+	for _, item := range byBucket {
+		buckets = append(buckets, *item)
+	}
+	sort.Slice(buckets, func(i, j int) bool { return buckets[i].Bucket < buckets[j].Bucket })
+	a.writeJSON(w, http.StatusOK, map[string]any{"buckets": buckets})
+}
+
+func runtimeTimelineCategory(event audit.BehaviorEvent) string {
+	if strings.TrimSpace(event.EventCategory) != "" {
+		return event.EventCategory
+	}
+	switch {
+	case strings.HasPrefix(event.EventType, "prompt."):
+		return audit.RuntimeCategoryPrompt
+	case strings.HasPrefix(event.EventType, "tool."):
+		return audit.RuntimeCategoryTool
+	case strings.HasPrefix(event.EventType, "process."):
+		return audit.RuntimeCategoryProcess
+	case strings.HasPrefix(event.EventType, "file."):
+		return audit.RuntimeCategoryFile
+	case strings.HasPrefix(event.EventType, "network."):
+		return audit.RuntimeCategoryNetwork
+	case strings.HasPrefix(event.EventType, "content."):
+		return audit.RuntimeCategoryContent
+	default:
+		return audit.RuntimeCategoryLifecycle
+	}
+}
+
 func (a *APIServer) handleRuntimeEventsGet(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := 300
+	page, pageSize := requestPage(r, 1, 300, 2000)
+	limit := pageSize
 	if v := strings.TrimSpace(q.Get("limit")); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 2000 {
 			limit = parsed
 		}
 	}
+	offset := (page - 1) * pageSize
+	if v := strings.TrimSpace(q.Get("offset")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			offset = parsed
+		}
+	}
+	var pid uint32
+	if v := strings.TrimSpace(q.Get("pid")); v != "" {
+		if parsed, err := strconv.ParseUint(v, 10, 32); err == nil {
+			pid = uint32(parsed)
+		}
+	}
 	events, err := a.store.ListRuntimeEvents(audit.RuntimeEventFilter{
-		AgentID:     strings.TrimSpace(q.Get("agent_id")),
-		SessionID:   strings.TrimSpace(q.Get("session_id")),
-		TraceID:     strings.TrimSpace(q.Get("trace_id")),
-		EventType:   strings.TrimSpace(q.Get("event_type")),
-		EventSource: strings.TrimSpace(q.Get("source")),
-		Severity:    strings.ToUpper(strings.TrimSpace(q.Get("severity"))),
-		Limit:       limit,
+		AgentID:       strings.TrimSpace(q.Get("agent_id")),
+		SessionID:     strings.TrimSpace(q.Get("session_id")),
+		TraceID:       strings.TrimSpace(q.Get("trace_id")),
+		EventType:     strings.TrimSpace(q.Get("event_type")),
+		EventCategory: strings.TrimSpace(q.Get("event_category")),
+		EventSource:   strings.TrimSpace(q.Get("source")),
+		Severity:      strings.ToUpper(strings.TrimSpace(q.Get("severity"))),
+		PID:           pid,
+		Keyword:       strings.TrimSpace(q.Get("keyword")),
+		Since:         parseAPITime(q.Get("start_time")),
+		Until:         parseAPITime(q.Get("end_time")),
+		Limit:         limit,
+		Offset:        offset,
 	})
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{
-		"events": events,
-		"count":  len(events),
+		"events":    events,
+		"items":     events,
+		"count":     len(events),
+		"page":      page,
+		"page_size": pageSize,
+		"limit":     limit,
+		"offset":    offset,
 	})
 }
 
@@ -524,21 +881,21 @@ func (a *APIServer) handleRuntimeEventsPost(w http.ResponseWriter, r *http.Reque
 	// accepted as agent.* lifecycle shapes so sensors can extend
 	// without gateway round-trips.
 	in := audit.RuntimeEventInput{
-		EventType:       req.EventType,
-		EventSource:     audit.RuntimeSourceOSSensor,
+		EventType:        req.EventType,
+		EventSource:      audit.RuntimeSourceOSSensor,
 		CanonicalAgentID: req.AgentID,
-		AgentName:       req.AgentName,
-		SessionID:       req.SessionID,
-		TraceID:         req.TraceID,
-		PID:             req.PID,
-		PPID:            req.PPID,
-		Operation:       req.Operation,
-		Target:          truncate(redaction.ForSinkString(firstNonEmpty(req.Target, req.Command)), 300),
-		ToolName:        req.ToolName,
-		Severity:        strings.ToUpper(req.Severity),
-		Outcome:         firstNonEmpty(req.Outcome, "observed"),
-		Detail:          truncate(redaction.ForSinkString(req.Detail), 300),
-		Timestamp:       time.Now().UTC(),
+		AgentName:        req.AgentName,
+		SessionID:        req.SessionID,
+		TraceID:          req.TraceID,
+		PID:              req.PID,
+		PPID:             req.PPID,
+		Operation:        req.Operation,
+		Target:           truncate(redaction.ForSinkString(firstNonEmpty(req.Target, req.Command)), 300),
+		ToolName:         req.ToolName,
+		Severity:         strings.ToUpper(req.Severity),
+		Outcome:          firstNonEmpty(req.Outcome, "observed"),
+		Detail:           truncate(redaction.ForSinkString(req.Detail), 300),
+		Timestamp:        time.Now().UTC(),
 	}
 	if len(req.Metadata) > 0 {
 		in.Attributes = req.Metadata
@@ -577,8 +934,25 @@ func (a *APIServer) handleRuntimeDetections(w http.ResponseWriter, r *http.Reque
 		a.handleRuntimeDetectionsList(w, r)
 		return
 	}
-	detectionID := strings.Split(rest, "/")[0]
+	parts := strings.Split(rest, "/")
+	detectionID := parts[0]
 	if detectionID == "" || strings.ContainsAny(detectionID, `/\`) {
+		http.NotFound(w, r)
+		return
+	}
+	if len(parts) > 1 {
+		if len(parts) == 2 && parts[1] == "events" {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			a.handleRuntimeDetectionEvents(w, r, detectionID)
+			return
+		}
+		if len(parts) == 3 && parts[1] == "actions" && parts[2] == "block" {
+			a.handleRuntimeDetectionBlockAction(w, r, detectionID)
+			return
+		}
 		http.NotFound(w, r)
 		return
 	}
@@ -593,9 +967,17 @@ func (a *APIServer) handleRuntimeDetections(w http.ResponseWriter, r *http.Reque
 			a.writeJSON(w, http.StatusNotFound, map[string]string{"error": "detection not found"})
 			return
 		}
-		a.writeJSON(w, http.StatusOK, map[string]any{
-			"detection": d,
-			"evidence":  evidence,
+		item := runtimeDetectionListItemFromAudit(d)
+		a.writeJSON(w, http.StatusOK, runtimeDetectionDetailResponse{
+			runtimeDetectionListItem: item,
+			Detection:                item,
+			Evidence:                 runtimeDetectionEvidenceItems(evidence),
+			Agent: runtimeDetectionAgentContext{
+				AgentID: d.AgentID,
+				Name:    firstNonEmpty(d.AgentName, d.AgentID),
+			},
+			RuntimeSession: runtimeDetectionSessionContext{SessionID: d.SessionID, TraceID: d.TraceID},
+			Trace:          runtimeDetectionSessionContext{SessionID: d.SessionID, TraceID: d.TraceID},
 		})
 	case http.MethodPatch, http.MethodPut:
 		var body struct {
@@ -614,40 +996,77 @@ func (a *APIServer) handleRuntimeDetections(w http.ResponseWriter, r *http.Reque
 			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		a.writeJSON(w, http.StatusOK, map[string]any{"detection": d})
+		a.writeJSON(w, http.StatusOK, map[string]any{"detection": runtimeDetectionListItemFromAudit(d)})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-func (a *APIServer) handleRuntimeDetectionsList(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	limit := 200
-	if v := strings.TrimSpace(q.Get("limit")); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 1000 {
-			limit = parsed
-		}
-	}
-	detections, err := a.store.ListRuntimeDetections(audit.RuntimeDetectionFilter{
-		AgentID:       strings.TrimSpace(q.Get("agent_id")),
-		SessionID:     strings.TrimSpace(q.Get("session_id")),
-		TraceID:       strings.TrimSpace(q.Get("trace_id")),
-		DetectionType: strings.TrimSpace(q.Get("type")),
-		Category:      strings.TrimSpace(q.Get("category")),
-		Severity:      strings.ToUpper(strings.TrimSpace(q.Get("severity"))),
-		Status:        strings.ToLower(strings.TrimSpace(q.Get("status"))),
-		Limit:         limit,
-	})
+func (a *APIServer) handleRuntimeDetectionEvents(w http.ResponseWriter, r *http.Request, detectionID string) {
+	d, evidence, err := a.store.GetRuntimeDetectionDetail(detectionID)
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	// Summary counts so the page can headline critical/attack numbers
-	// without client-side aggregation.
-	summary := map[string]int{
-		"total": len(detections), "attack": 0, "critical": 0, "high": 0, "open": 0,
+	if d.DetectionID == "" {
+		a.writeJSON(w, http.StatusNotFound, map[string]string{"error": "detection not found"})
+		return
 	}
+	a.writeJSON(w, http.StatusOK, runtimeDetectionEvidenceItems(evidence))
+}
+
+func (a *APIServer) handleRuntimeDetectionsList(w http.ResponseWriter, r *http.Request) {
+	filter := runtimeDetectionFilterFromQuery(r, 200, 1000)
+	sourceFilter := strings.TrimSpace(r.URL.Query().Get("source"))
+	detections, err := a.store.ListRuntimeDetections(filter)
+	if err != nil {
+		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	total, err := a.store.CountRuntimeDetections(filter)
+	if err != nil {
+		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	items := make([]runtimeDetectionListItem, 0, len(detections))
 	for _, d := range detections {
+		item := runtimeDetectionListItemFromAudit(d)
+		if sourceFilter != "" && !runtimeDetectionSourceMatches(item.Source, sourceFilter) {
+			continue
+		}
+		items = append(items, item)
+	}
+	if sourceFilter != "" && !strings.EqualFold(sourceFilter, "all") {
+		allFilter := filter
+		allFilter.Limit = 5000
+		allFilter.Offset = 0
+		all, err := a.store.ListRuntimeDetections(allFilter)
+		if err != nil {
+			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		allItems := make([]runtimeDetectionListItem, 0, len(all))
+		for _, d := range all {
+			item := runtimeDetectionListItemFromAudit(d)
+			if runtimeDetectionSourceMatches(item.Source, sourceFilter) {
+				allItems = append(allItems, item)
+			}
+		}
+		total = len(allItems)
+		start := filter.Offset
+		if start > len(allItems) {
+			start = len(allItems)
+		}
+		end := start + filter.Limit
+		if end > len(allItems) {
+			end = len(allItems)
+		}
+		items = allItems[start:end]
+	}
+	summary := map[string]int{
+		"total": total, "attack": 0, "blocked": 0, "critical": 0, "high": 0, "open": 0,
+	}
+	for _, d := range items {
 		if d.Category == "attack" {
 			summary["attack"]++
 		}
@@ -660,12 +1079,41 @@ func (a *APIServer) handleRuntimeDetectionsList(w http.ResponseWriter, r *http.R
 		if d.Status == audit.RuntimeDetectionStatusOpen {
 			summary["open"]++
 		}
+		if d.Status == audit.RuntimeDetectionStatusMitigated || strings.EqualFold(d.Status, "blocked") {
+			summary["blocked"]++
+		}
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{
-		"detections": detections,
+		"total":      total,
+		"items":      items,
+		"detections": items,
 		"summary":    summary,
-		"count":      len(detections),
+		"count":      len(items),
+		"limit":      filter.Limit,
+		"offset":     filter.Offset,
+		"page":       filter.Offset/filter.Limit + 1,
+		"page_size":  filter.Limit,
 	})
+}
+
+func (a *APIServer) handleRuntimeSecuritySummary(w http.ResponseWriter, r *http.Request) {
+	if a.store == nil {
+		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit store unavailable"})
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	filter := runtimeDetectionFilterFromQuery(r, 200, 1000)
+	filter.Limit = 0
+	filter.Offset = 0
+	summary, err := a.store.RuntimeSecuritySummary(filter)
+	if err != nil {
+		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	a.writeJSON(w, http.StatusOK, summary)
 }
 
 // handleRuntimeEvents serves GET /api/v1/runtime-sessions?agent_id=&limit=
@@ -721,8 +1169,17 @@ func (a *APIServer) handleRuntimeDecisions(w http.ResponseWriter, r *http.Reques
 		a.handleRuntimeDecisionsList(w, r)
 		return
 	}
-	decisionID := strings.Split(rest, "/")[0]
+	parts := strings.Split(rest, "/")
+	decisionID := parts[0]
 	if decisionID == "" || strings.ContainsAny(decisionID, `/\`) {
+		http.NotFound(w, r)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "enforce" {
+		a.handleRuntimeDecisionEnforce(w, r, decisionID)
+		return
+	}
+	if len(parts) > 1 {
 		http.NotFound(w, r)
 		return
 	}
@@ -745,10 +1202,10 @@ func (a *APIServer) handleRuntimeDecisions(w http.ResponseWriter, r *http.Reques
 		detection, evidence, _ = a.store.GetRuntimeDetectionDetail(decision.DetectionID)
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{
-		"decision":   decision,
-		"responses":  responses,
-		"detection":  detection,
-		"evidence":   evidence,
+		"decision":  decision,
+		"responses": responses,
+		"detection": detection,
+		"evidence":  evidence,
 	})
 }
 
@@ -814,8 +1271,8 @@ func (a *APIServer) handleRuntimeDecisionsList(w http.ResponseWriter, r *http.Re
 
 // handleRuntimeSecurityMode serves the Runtime Security Mode switch:
 //
-//	GET /api/v1/runtime-security-mode   → {"mode":"observe"|"action"}
-//	PUT /api/v1/runtime-security-mode   body {"mode":"action"}
+//	GET /api/v1/runtime-security/mode   → {"mode":"observe"|"action"}
+//	PUT /api/v1/runtime-security/mode   body {"mode":"action"}
 //
 // observe (default) records would-block decisions without enforcing —
 // the false-positive tuning loop; action executes responses (proxy

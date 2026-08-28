@@ -159,6 +159,19 @@ struct SecurityModeResponse {
     mode: String,
 }
 
+fn urlencode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
 #[tauri::command]
 pub fn get_runtime_decisions(
     app: tauri::AppHandle,
@@ -191,7 +204,7 @@ pub fn get_runtime_decision_detail(
 pub fn get_runtime_security_mode(app: tauri::AppHandle) -> Result<String, String> {
     crate::commands::gateway_api::get_json::<SecurityModeResponse>(
         &app,
-        "/api/v1/runtime-security-mode",
+        "/api/v1/runtime-security/mode",
     )
     .map(|response| response.mode)
     .map_err(|error| format!("Go Gateway 暂不可用，安全模式只能由 Go 后端提供：{error}"))
@@ -205,9 +218,92 @@ pub fn set_runtime_security_mode(app: tauri::AppHandle, mode: String) -> Result<
     }
     crate::commands::gateway_api::put_json::<SecurityModeResponse, _>(
         &app,
-        "/api/v1/runtime-security-mode",
+        "/api/v1/runtime-security/mode",
         &serde_json::json!({ "mode": mode }),
     )
     .map(|response| response.mode)
     .map_err(|error| format!("Go Gateway 暂不可用，安全模式只能由 Go 后端切换：{error}"))
+}
+
+#[tauri::command]
+pub fn block_runtime_detection(
+    app: tauri::AppHandle,
+    detection_id: String,
+    action_type: Option<String>,
+    reason: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let detection_id = detection_id.trim();
+    if detection_id.is_empty() {
+        return Err("detection_id 不能为空".to_owned());
+    }
+    crate::commands::gateway_api::post_json::<serde_json::Value, _>(
+        &app,
+        &format!(
+            "/api/v1/runtime-detections/{}/actions/block",
+            urlencode(detection_id)
+        ),
+        &serde_json::json!({
+            "action_type": action_type.unwrap_or_else(|| "BLOCK".to_owned()),
+            "reason": reason.unwrap_or_else(|| "manual_operator_action".to_owned()),
+        }),
+    )
+    .map_err(|error| format!("执行运行时检测阻断失败：{error}"))
+}
+
+#[tauri::command]
+pub fn enforce_runtime_decision(
+    app: tauri::AppHandle,
+    decision_id: String,
+) -> Result<serde_json::Value, String> {
+    let decision_id = decision_id.trim();
+    if decision_id.is_empty() {
+        return Err("decision_id 不能为空".to_owned());
+    }
+    crate::commands::gateway_api::post_json::<serde_json::Value, _>(
+        &app,
+        &format!(
+            "/api/v1/runtime-decisions/{}/enforce",
+            urlencode(decision_id)
+        ),
+        &serde_json::json!({}),
+    )
+    .map_err(|error| format!("执行运行时决策失败：{error}"))
+}
+
+#[tauri::command]
+pub fn get_runtime_enforcements(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    crate::commands::gateway_api::get_json::<serde_json::Value>(&app, "/api/v1/enforcements")
+        .map_err(|error| format!("获取运行时阻断列表失败：{error}"))
+}
+
+#[tauri::command]
+pub fn get_runtime_enforcement(
+    app: tauri::AppHandle,
+    enforcement_id: String,
+) -> Result<serde_json::Value, String> {
+    let enforcement_id = enforcement_id.trim();
+    if enforcement_id.is_empty() {
+        return Err("enforcement_id 不能为空".to_owned());
+    }
+    crate::commands::gateway_api::get_json::<serde_json::Value>(
+        &app,
+        &format!("/api/v1/enforcements/{}", urlencode(enforcement_id)),
+    )
+    .map_err(|error| format!("获取运行时阻断详情失败：{error}"))
+}
+
+#[tauri::command]
+pub fn delete_runtime_enforcement(
+    app: tauri::AppHandle,
+    enforcement_id: String,
+) -> Result<serde_json::Value, String> {
+    let enforcement_id = enforcement_id.trim();
+    if enforcement_id.is_empty() {
+        return Err("enforcement_id 不能为空".to_owned());
+    }
+    crate::commands::gateway_api::delete_json::<serde_json::Value>(
+        &app,
+        &format!("/api/v1/enforcements/{}", urlencode(enforcement_id)),
+    )
+    .map_err(|error| format!("删除运行时阻断失败：{error}"))
 }

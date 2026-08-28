@@ -567,7 +567,7 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
                 onClick={() => handleSelectAgent(agent.agent_id)}
               >
                 <span className="static-agent-name">{agent.name}</span>
-                <span className="static-agent-source">{agent.agent_type || agent.kind || "agent"}</span>
+                <span className="static-agent-source">{agent.agent_type ||  "未知agent类型"}</span>
                 <span className="static-agent-meta">
                   <span>{agent.resource_count} Resources</span>
                   <span className={agent.risk_resource_count ? "static-agent-risk" : ""}>{agent.risk_resource_count} Risks</span>

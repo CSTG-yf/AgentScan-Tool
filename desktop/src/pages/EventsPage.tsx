@@ -1,33 +1,65 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FilterOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Descriptions, Drawer, Empty, Input, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { eventKindTag, eventStatusTag, formatClock, formatTimestamp, staticRiskTag } from "../app/display";
-import { eventKindMeta } from "../data/events";
+import {
+  getRuntimeDetectionDetail,
+  getRuntimeDetectionEvents,
+  getRuntimeDetections,
+  getRuntimeEventsTimeline,
+  getRuntimeSecurityAgents,
+  getRuntimeSecuritySummary,
+} from "../bridge";
+import { formatClock, formatTimestamp, staticRiskTag } from "../app/display";
 import { staticRiskMeta } from "../data/staticAssets";
 import type {
-  DetectedEvent,
-  EventAgentBreakdown,
-  EventBreakdown,
-  EventDetectionSnapshot,
-  EventDetectionSummary,
-  EventFilter,
-  EventStatus,
-  EventTimelineBucket,
+  RuntimeDetection,
+  RuntimeDetectionDetail,
+  RuntimeDetectionEvidenceEvent,
+  RuntimeDetectionListQuery,
+  RuntimeDetectionListResponse,
+  RuntimeEventsTimelineBucket,
+  RuntimeSecurityAgent,
+  RuntimeSecuritySummary,
   StaticRisk,
 } from "../types";
 
 const { Text, Title } = Typography;
 
 interface EventsPageProps {
-  snapshot?: EventDetectionSnapshot;
   loading?: boolean;
   onRefresh?: () => Promise<void> | void;
 }
 
 type SeverityFilter = StaticRisk | "all";
-type StatusFilter = EventStatus | "all";
-type EventGroupFilter = "all" | "security" | "attack" | "blocked" | "highRisk";
+type DetectionStatusFilter = "open" | "blocked" | "resolved" | "all";
+type DetectionGroupFilter = "all" | "security" | "attack" | "blocked" | "highRisk";
+
+interface SourceBreakdown {
+  name: string;
+  count: number;
+  attack: number;
+  blocked: number;
+}
+
+const emptySummary = (): RuntimeSecuritySummary => ({
+  totalDetections: 0,
+  securityDetections: 0,
+  attackDetections: 0,
+  blocked: 0,
+  highOrAbove: 0,
+  coveredAgents: 0,
+});
+
+const emptyDetectionList = (): RuntimeDetectionListResponse => ({
+  total: 0,
+  items: [],
+  detections: [],
+  count: 0,
+  limit: 200,
+  offset: 0,
+  summary: { total: 0, attack: 0, blocked: 0, critical: 0, high: 0, open: 0 },
+});
 
 const severityOptions: Array<{ label: string; value: SeverityFilter }> = [
   { label: "全部风险", value: "all" },
@@ -38,359 +70,345 @@ const severityOptions: Array<{ label: string; value: SeverityFilter }> = [
   { label: "信息", value: "info" },
 ];
 
-const statusOptions: Array<{ label: string; value: StatusFilter }> = [
+const statusOptions: Array<{ label: string; value: DetectionStatusFilter }> = [
   { label: "全部状态", value: "all" },
+  { label: "已检测", value: "open" },
   { label: "已阻断", value: "blocked" },
-  { label: "已检测", value: "detected" },
-  { label: "已审计", value: "audited" },
-  { label: "待处置", value: "pending" },
+  { label: "已处理", value: "resolved" },
 ];
 
-function riskRank(risk: StaticRisk) {
-  return staticRiskMeta[risk]?.rank ?? 0;
-}
-
-function agentKey(agent: Pick<EventAgentBreakdown, "agent" | "runtime">) {
-  return `${agent.agent}::${agent.runtime}`;
-}
-
-function eventAgentKey(event: DetectedEvent) {
-  return `${event.agent}::${event.runtime}`;
-}
-
-function correlationKey(event: DetectedEvent) {
-  if (event.correlationKey) return event.correlationKey;
-  if (event.traceId) return `trace:${event.traceId}`;
-  if (event.sessionId) return `session:${event.sessionId}`;
-  return `agent:${event.agent}:${Math.floor(new Date(event.occurredAt).getTime() / 300000)}`;
-}
-
-function computeSummary(events: DetectedEvent[]): EventDetectionSummary {
-  const keys = new Set<string>();
-  const agents = new Set<string>();
-  const sources = new Set<string>();
-  let windowStart = "";
-  let windowEnd = "";
-  const summary: EventDetectionSummary = {
-    total: events.length,
-    security: 0,
-    attack: 0,
-    blocked: 0,
-    critical: 0,
-    high: 0,
-    correlated: 0,
-    agents: 0,
-    sources: 0,
-  };
-
-  for (const event of events) {
-    if (!windowStart || event.occurredAt < windowStart) windowStart = event.occurredAt;
-    if (!windowEnd || event.occurredAt > windowEnd) windowEnd = event.occurredAt;
-    if (event.kind === "attack") summary.attack += 1;
-    else summary.security += 1;
-    if (event.status === "blocked") summary.blocked += 1;
-    if (event.severity === "critical") summary.critical += 1;
-    if (event.severity === "high") summary.high += 1;
-    keys.add(correlationKey(event));
-    agents.add(eventAgentKey(event));
-    sources.add(event.source || "gateway");
+function normalizeRisk(value?: string): StaticRisk {
+  const normalized = (value || "").toLowerCase();
+  if (normalized === "critical" || normalized === "high" || normalized === "medium" || normalized === "low" || normalized === "info") {
+    return normalized;
   }
-
-  summary.correlated = keys.size;
-  summary.agents = agents.size;
-  summary.sources = sources.size;
-  summary.windowStart = windowStart;
-  summary.windowEnd = windowEnd;
-  return summary;
+  return "info";
 }
 
-function buildSourceBreakdown(events: DetectedEvent[]): EventBreakdown[] {
-  const map = new Map<string, EventBreakdown>();
-  for (const event of events) {
-    const name = event.source || "gateway";
-    const item = map.get(name) ?? { name, count: 0, attack: 0, blocked: 0, maxSeverity: "info" };
+function riskRank(value?: string) {
+  return staticRiskMeta[normalizeRisk(value)].rank;
+}
+
+function detectionSeverityTag(value?: string) {
+  return staticRiskTag(normalizeRisk(value));
+}
+
+function isAttackDetection(detection: RuntimeDetection) {
+  return (detection.category || "").toLowerCase() === "attack";
+}
+
+function isBlockedStatus(status?: string) {
+  const normalized = (status || "").toLowerCase();
+  return normalized === "blocked" || normalized === "mitigated";
+}
+
+function detectionTime(detection: RuntimeDetection) {
+  return detection.lastSeenAt || detection.createdAt || detection.firstSeenAt || "";
+}
+
+function confidenceText(value?: number) {
+  if (value === undefined || Number.isNaN(value)) return "-";
+  return `${Math.round((value > 1 ? value / 100 : value) * 100)}%`;
+}
+
+function categoryTag(category?: string) {
+  const normalized = (category || "").toLowerCase();
+  if (normalized === "attack") return <Tag color="red">攻击检测</Tag>;
+  if (normalized === "suspicious" || normalized === "security") return <Tag color="blue">安全检测</Tag>;
+  return <Tag>{category || "检测"}</Tag>;
+}
+
+function statusTag(status?: string) {
+  const normalized = (status || "").toLowerCase();
+  if (normalized === "blocked" || normalized === "mitigated") return <Tag color="red">已阻断</Tag>;
+  if (normalized === "resolved" || normalized === "audited") return <Tag color="green">已处理</Tag>;
+  if (normalized === "pending") return <Tag color="default">待处置</Tag>;
+  return <Tag color="gold">已检测</Tag>;
+}
+
+function sourceLabel(source?: string) {
+  const normalized = (source || "").trim();
+  const labels: Record<string, string> = {
+    runtime_detection: "运行态规则",
+    correlation_engine: "关联引擎",
+    runtime_policy: "运行态策略",
+    event_detection: "事件检测",
+  };
+  return labels[normalized] ?? (normalized || "runtime_detection");
+}
+
+function sourceBreakdownFromDetections(detections: RuntimeDetection[]): SourceBreakdown[] {
+  const map = new Map<string, SourceBreakdown>();
+  for (const detection of detections) {
+    const name = detection.source || "runtime_detection";
+    const item = map.get(name) ?? { name, count: 0, attack: 0, blocked: 0 };
     item.count += 1;
-    if (event.kind === "attack") item.attack += 1;
-    if (event.status === "blocked") item.blocked += 1;
-    if (riskRank(event.severity) > riskRank(item.maxSeverity)) item.maxSeverity = event.severity;
+    if (isAttackDetection(detection)) item.attack += 1;
+    if (isBlockedStatus(detection.status)) item.blocked += 1;
     map.set(name, item);
   }
   return [...map.values()].sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
 }
 
-function buildAgentBreakdown(events: DetectedEvent[]): EventAgentBreakdown[] {
-  const map = new Map<string, EventAgentBreakdown>();
-  for (const event of events) {
-    const key = eventAgentKey(event);
-    const item = map.get(key) ?? {
-      agent: event.agent,
-      runtime: event.runtime,
-      count: 0,
-      attack: 0,
-      blocked: 0,
-      maxSeverity: "info",
-      lastSeen: event.occurredAt,
-      sources: [],
-    };
-    item.count += 1;
-    if (event.kind === "attack") item.attack += 1;
-    if (event.status === "blocked") item.blocked += 1;
-    if (riskRank(event.severity) > riskRank(item.maxSeverity)) item.maxSeverity = event.severity;
-    if (event.occurredAt > item.lastSeen) item.lastSeen = event.occurredAt;
-    if (event.source && !item.sources.includes(event.source)) item.sources.push(event.source);
-    map.set(key, item);
-  }
-  return [...map.values()].sort((left, right) => riskRank(right.maxSeverity) - riskRank(left.maxSeverity) || right.count - left.count || left.agent.localeCompare(right.agent));
+function detectionMatchesGroup(group: DetectionGroupFilter): Partial<RuntimeDetectionListQuery> {
+  if (group === "security") return { category: "suspicious,security" };
+  if (group === "attack") return { category: "attack" };
+  if (group === "blocked") return { status: "blocked" };
+  if (group === "highRisk") return { severity: "critical,high" };
+  return {};
 }
 
-function buildTimeline(events: DetectedEvent[]): EventTimelineBucket[] {
-  const map = new Map<string, EventTimelineBucket>();
-  for (const event of events) {
-    const timestamp = new Date(event.occurredAt).getTime();
-    if (Number.isNaN(timestamp)) continue;
-    const bucket = new Date(Math.floor(timestamp / 300000) * 300000).toISOString();
-    const item = map.get(bucket) ?? { bucket, total: 0, attack: 0, blocked: 0, highRisk: 0 };
-    item.total += 1;
-    if (event.kind === "attack") item.attack += 1;
-    if (event.status === "blocked") item.blocked += 1;
-    if (riskRank(event.severity) >= 4) item.highRisk += 1;
-    map.set(bucket, item);
-  }
-  return [...map.values()].sort((left, right) => left.bucket.localeCompare(right.bucket)).slice(-24);
+function evidenceTitle(event: RuntimeDetectionEvidenceEvent) {
+  return [event.eventType, event.eventSource ? sourceLabel(event.eventSource) : ""].filter(Boolean).join(" / ") || `Event #${event.eventId}`;
 }
 
-function eventMatches(event: DetectedEvent, query: string) {
-  if (!query) return true;
-  return [
-    event.agent,
-    event.runtime,
-    event.category,
-    event.subtype,
-    event.title,
-    event.evidence,
-    event.action,
-    event.traceId,
-    event.sessionId,
-    event.target,
-    event.toolName,
-    event.destinationApp,
-    event.reason,
-  ]
-    .join(" ")
-    .toLowerCase()
-    .includes(query);
+function evidenceSummary(event: RuntimeDetectionEvidenceEvent) {
+  const action = [event.operation, event.target].filter(Boolean).join(" ");
+  return event.detail || action || event.toolName || event.eventType || "-";
 }
 
-function groupMatches(event: DetectedEvent, group: EventGroupFilter) {
-  if (group === "security") return event.kind === "security";
-  if (group === "attack") return event.kind === "attack";
-  if (group === "blocked") return event.status === "blocked";
-  if (group === "highRisk") return riskRank(event.severity) >= 4;
-  return true;
+function attributesText(value?: Record<string, unknown>) {
+  if (!value || Object.keys(value).length === 0) return "-";
+  return JSON.stringify(value, null, 2);
 }
 
-export function EventsPage({ snapshot, loading = false, onRefresh }: EventsPageProps) {
-  const [selectedAgentKey, setSelectedAgentKey] = useState<string>();
-  const [selectedEventGroup, setSelectedEventGroup] = useState<EventGroupFilter>("all");
-  const [kindFilter, setKindFilter] = useState<EventFilter>("all");
+export function EventsPage({ loading = false, onRefresh }: EventsPageProps) {
+  const [globalSummary, setGlobalSummary] = useState<RuntimeSecuritySummary>(emptySummary);
+  const [selectedSummary, setSelectedSummary] = useState<RuntimeSecuritySummary>(emptySummary);
+  const [agents, setAgents] = useState<RuntimeSecurityAgent[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>();
+  const [detectionsResponse, setDetectionsResponse] = useState<RuntimeDetectionListResponse>(emptyDetectionList);
+  const [timeline, setTimeline] = useState<RuntimeEventsTimelineBucket[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<DetectionGroupFilter>("all");
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<DetectionStatusFilter>("all");
   const [sourceFilter, setSourceFilter] = useState("all");
   const [query, setQuery] = useState("");
-  const [selectedEventId, setSelectedEventId] = useState<string>();
-  const [eventDetailOpen, setEventDetailOpen] = useState(false);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [dataError, setDataError] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedDetectionId, setSelectedDetectionId] = useState<string>();
+  const [detail, setDetail] = useState<RuntimeDetectionDetail>();
+  const [detailEvents, setDetailEvents] = useState<RuntimeDetectionEvidenceEvent[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
 
-  const events = useMemo(
-    () => [...(snapshot?.events ?? [])].sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime()),
-    [snapshot],
+  const detections = useMemo(
+    () => [...(detectionsResponse.items?.length ? detectionsResponse.items : detectionsResponse.detections ?? [])],
+    [detectionsResponse],
   );
-  const globalSummary = snapshot?.summary ?? computeSummary(events);
-  const globalAgentBreakdown = useMemo(
-    () => (snapshot?.agentBreakdown?.length ? snapshot.agentBreakdown : buildAgentBreakdown(events)),
-    [events, snapshot],
-  );
+  const selectedAgent = useMemo(() => agents.find((agent) => agent.agentId === selectedAgentId), [agents, selectedAgentId]);
+  const activeSummary = selectedAgentId ? selectedSummary : globalSummary;
+  const busy = loading || refreshing || overviewLoading;
+  const normalizedQuery = query.trim();
+
+  const listQuery = useMemo<RuntimeDetectionListQuery>(() => {
+    const next: RuntimeDetectionListQuery = {
+      ...detectionMatchesGroup(selectedGroup),
+      agentId: selectedAgentId,
+      limit: 300,
+      offset: 0,
+      sort: "latest",
+    };
+    if (severityFilter !== "all") next.severity = severityFilter;
+    if (statusFilter !== "all") next.status = statusFilter;
+    if (sourceFilter !== "all") next.source = sourceFilter;
+    if (normalizedQuery) next.keyword = normalizedQuery;
+    return next;
+  }, [normalizedQuery, selectedAgentId, selectedGroup, severityFilter, sourceFilter, statusFilter]);
+
+  const loadOverview = useCallback(async () => {
+    setOverviewLoading(true);
+    try {
+      const [summary, agentRows] = await Promise.all([getRuntimeSecuritySummary(), getRuntimeSecurityAgents(200)]);
+      setGlobalSummary(summary);
+      setAgents(agentRows);
+      setSelectedAgentId((current) => current && agentRows.some((agent) => agent.agentId === current) ? current : undefined);
+      setDataError("");
+    } catch (error) {
+      setDataError(`读取运行态检测总览失败：${String(error)}`);
+      throw error;
+    } finally {
+      setOverviewLoading(false);
+    }
+  }, []);
+
+  const loadSelectedData = useCallback(async () => {
+    setListLoading(true);
+    try {
+      const [summary, list, timelineResponse] = await Promise.all([
+        getRuntimeSecuritySummary(selectedAgentId),
+        getRuntimeDetections(listQuery),
+        getRuntimeEventsTimeline({ agentId: selectedAgentId, bucket: "5m" }),
+      ]);
+      setSelectedSummary(summary);
+      setDetectionsResponse(list);
+      setTimeline(timelineResponse.buckets ?? []);
+      setDataError("");
+    } catch (error) {
+      setDataError(`读取运行态检测列表失败：${String(error)}`);
+      throw error;
+    } finally {
+      setListLoading(false);
+    }
+  }, [listQuery, selectedAgentId]);
 
   useEffect(() => {
-    if (!globalAgentBreakdown.length) {
-      setSelectedAgentKey(undefined);
-      setSelectedEventId(undefined);
-      setEventDetailOpen(false);
-      return;
-    }
-    if (!selectedAgentKey || !globalAgentBreakdown.some((agent) => agentKey(agent) === selectedAgentKey)) {
-      setSelectedAgentKey(agentKey(globalAgentBreakdown[0]));
-      setSelectedEventGroup("all");
-      setSourceFilter("all");
-      setSelectedEventId(undefined);
-      setEventDetailOpen(false);
-    }
-  }, [globalAgentBreakdown, selectedAgentKey]);
-
-  const selectedAgent = useMemo(
-    () => globalAgentBreakdown.find((agent) => agentKey(agent) === selectedAgentKey),
-    [globalAgentBreakdown, selectedAgentKey],
-  );
-  const selectedAgentEvents = useMemo(
-    () => selectedAgentKey ? events.filter((event) => eventAgentKey(event) === selectedAgentKey) : [],
-    [events, selectedAgentKey],
-  );
-  const selectedSummary = useMemo(() => computeSummary(selectedAgentEvents), [selectedAgentEvents]);
-  const selectedSourceBreakdown = useMemo(() => buildSourceBreakdown(selectedAgentEvents), [selectedAgentEvents]);
-  const selectedTimeline = useMemo(() => buildTimeline(selectedAgentEvents), [selectedAgentEvents]);
-  const normalizedQuery = query.trim().toLowerCase();
+    void loadOverview().catch(() => undefined);
+  }, [loadOverview]);
 
   useEffect(() => {
-    if (sourceFilter !== "all" && !selectedSourceBreakdown.some((source) => source.name === sourceFilter)) {
-      setSourceFilter("all");
+    void loadSelectedData().catch(() => undefined);
+  }, [loadSelectedData]);
+
+  const sourceBreakdown = useMemo(() => sourceBreakdownFromDetections(detections), [detections]);
+  const sourceOptions = useMemo(() => {
+    const options = [{ label: "全部来源", value: "all" }, ...sourceBreakdown.map((source) => ({ label: sourceLabel(source.name), value: source.name }))];
+    if (sourceFilter !== "all" && !sourceBreakdown.some((source) => source.name === sourceFilter)) {
+      options.push({ label: sourceLabel(sourceFilter), value: sourceFilter });
     }
-  }, [selectedSourceBreakdown, sourceFilter]);
+    return options;
+  }, [sourceBreakdown, sourceFilter]);
 
-  const eventGroupSummaries = useMemo(() => {
-    const security = selectedAgentEvents.filter((event) => event.kind === "security");
-    const attack = selectedAgentEvents.filter((event) => event.kind === "attack");
-    const blocked = selectedAgentEvents.filter((event) => event.status === "blocked");
-    const highRisk = selectedAgentEvents.filter((event) => riskRank(event.severity) >= 4);
-    return [
-      { key: "all" as const, title: "全部事件", count: selectedAgentEvents.length, detail: `${selectedSummary.sources} 来源 · ${selectedSummary.correlated} 关联组` },
-      { key: "security" as const, title: "安全事件", count: security.length, detail: eventKindMeta.security.description },
-      { key: "attack" as const, title: "攻击事件", count: attack.length, detail: eventKindMeta.attack.description },
-      { key: "blocked" as const, title: "已阻断", count: blocked.length, detail: "后端防护已经执行阻断或拒绝动作" },
-      { key: "highRisk" as const, title: "高风险及以上", count: highRisk.length, detail: "优先查看严重和高风险事件" },
-    ];
-  }, [selectedAgentEvents, selectedSummary]);
+  const groupSummaries = useMemo(() => [
+    { key: "all" as const, title: "全部检测", count: activeSummary.totalDetections, detail: `${activeSummary.coveredAgents} 个 Agent` },
+    { key: "security" as const, title: "安全检测", count: activeSummary.securityDetections, detail: "可疑行为与策略命中" },
+    { key: "attack" as const, title: "攻击检测", count: activeSummary.attackDetections, detail: "注入、外联与链路攻击" },
+    { key: "blocked" as const, title: "已阻断", count: activeSummary.blocked, detail: "后端已执行阻断或缓解" },
+    { key: "highRisk" as const, title: "高危及以上", count: activeSummary.highOrAbove, detail: "严重与高风险检测" },
+  ], [activeSummary]);
 
-  const filteredEvents = useMemo(
-    () =>
-      selectedAgentEvents.filter((event) => {
-        if (!groupMatches(event, selectedEventGroup)) return false;
-        if (kindFilter !== "all" && event.kind !== kindFilter) return false;
-        if (severityFilter !== "all" && event.severity !== severityFilter) return false;
-        if (statusFilter !== "all" && event.status !== statusFilter) return false;
-        if (sourceFilter !== "all" && event.source !== sourceFilter) return false;
-        return eventMatches(event, normalizedQuery);
-      }),
-    [kindFilter, normalizedQuery, selectedAgentEvents, selectedEventGroup, severityFilter, sourceFilter, statusFilter],
-  );
+  const filteredAttackCount = detections.filter(isAttackDetection).length;
+  const filteredBlockedCount = detections.filter((detection) => isBlockedStatus(detection.status)).length;
+  const filteredHighCount = detections.filter((detection) => riskRank(detection.severity) >= 4).length;
+  const timelineBuckets = timeline.slice(-24);
+  const maxTimeline = Math.max(1, ...timelineBuckets.map((bucket) => bucket.total));
 
-  useEffect(() => {
-    if (!filteredEvents.length) {
-      setSelectedEventId(undefined);
-      setEventDetailOpen(false);
-      return;
-    }
-    if (selectedEventId && !filteredEvents.some((event) => event.id === selectedEventId)) {
-      setSelectedEventId(undefined);
-      setEventDetailOpen(false);
-    }
-  }, [filteredEvents, selectedEventId]);
-
-  const selectedEvent = filteredEvents.find((event) => event.id === selectedEventId);
-  const sourceOptions = useMemo(
-    () => [{ label: "全部来源", value: "all" }, ...selectedSourceBreakdown.map((source) => ({ label: source.name, value: source.name }))],
-    [selectedSourceBreakdown],
-  );
-
-  const selectAgent = (key: string) => {
-    setSelectedAgentKey(key);
-    setSelectedEventGroup("all");
-    setSourceFilter("all");
-    setSelectedEventId(undefined);
-    setEventDetailOpen(false);
-  };
-
-  const selectGroup = (group: EventGroupFilter) => {
-    setSelectedEventGroup(group);
-    setKindFilter("all");
+  const selectAgent = (agentId?: string) => {
+    setSelectedAgentId(agentId);
+    setSelectedGroup("all");
     setSeverityFilter("all");
     setStatusFilter("all");
-    setSelectedEventId(undefined);
-    setEventDetailOpen(false);
+    setSourceFilter("all");
+    setSelectedDetectionId(undefined);
+    setDrawerOpen(false);
+  };
+
+  const selectGroup = (group: DetectionGroupFilter) => {
+    setSelectedGroup(group);
+    setSeverityFilter("all");
+    setStatusFilter("all");
+    setSourceFilter("all");
+    setSelectedDetectionId(undefined);
+    setDrawerOpen(false);
   };
 
   const refreshEvents = async () => {
-    if (!onRefresh) return;
     setRefreshing(true);
     try {
-      await onRefresh();
-      message.success("已刷新后端事件检测结果");
+      await onRefresh?.();
+      await Promise.all([loadOverview(), loadSelectedData()]);
+      message.success("已刷新运行态检测结果");
     } catch (error) {
-      message.error(`刷新事件检测结果失败：${String(error)}`);
+      message.error(`刷新运行态检测结果失败：${String(error)}`);
     } finally {
       setRefreshing(false);
     }
   };
 
-  const columns: ColumnsType<DetectedEvent> = [
+  const openDetection = async (detection: RuntimeDetection) => {
+    setSelectedDetectionId(detection.detectionId);
+    setDrawerOpen(true);
+    setDetail(undefined);
+    setDetailEvents([]);
+    setDetailLoading(true);
+    try {
+      const [nextDetail, events] = await Promise.all([
+        getRuntimeDetectionDetail(detection.detectionId),
+        getRuntimeDetectionEvents(detection.detectionId),
+      ]);
+      setDetail(nextDetail);
+      setDetailEvents(events.length ? events : nextDetail.evidence ?? []);
+    } catch (error) {
+      message.error(`读取检测证据失败：${String(error)}`);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const selectedDetection = detail?.detection?.detectionId
+    ? detail.detection
+    : detections.find((detection) => detection.detectionId === selectedDetectionId);
+  const evidenceEvents = detailEvents.length ? detailEvents : detail?.evidence ?? [];
+
+  const columns: ColumnsType<RuntimeDetection> = [
     {
       title: "时间",
-      dataIndex: "occurredAt",
       width: 176,
-      sorter: (left, right) => new Date(left.occurredAt).getTime() - new Date(right.occurredAt).getTime(),
-      render: (value) => <Text className="mono">{formatTimestamp(value)}</Text>,
+      sorter: (left, right) => new Date(detectionTime(left)).getTime() - new Date(detectionTime(right)).getTime(),
+      render: (_, row) => <Text className="mono">{formatTimestamp(detectionTime(row))}</Text>,
     },
-    { title: "类型", dataIndex: "kind", width: 104, render: eventKindTag },
+    { title: "类型", width: 112, render: (_, row) => categoryTag(row.category) },
     {
-      title: "事件",
-      dataIndex: "title",
-      render: (value, row) => (
+      title: "Runtime Detection",
+      render: (_, row) => (
         <Space direction="vertical" size={0}>
-          <Text strong>{value}</Text>
-          <Text type="secondary">{row.category} / {row.subtype}</Text>
-          <Text code className="event-evidence">{row.evidence}</Text>
+          <Text strong>{row.title || row.detectionType || row.detectionId}</Text>
+          <Text type="secondary">{row.detectionType || row.type || "runtime_detection"} / {row.ruleId || "rule"}</Text>
+          <Text code className="event-evidence">{row.description || row.detail || row.remediation || "-"}</Text>
         </Space>
       ),
     },
-    { title: "风险", dataIndex: "severity", width: 96, render: staticRiskTag },
-    { title: "状态", dataIndex: "status", width: 104, render: eventStatusTag },
+    { title: "风险", dataIndex: "severity", width: 96, render: detectionSeverityTag },
+    { title: "状态", dataIndex: "status", width: 104, render: statusTag },
     {
       title: "关联",
       width: 190,
-      render: (_, row) => <Text code>{row.traceId || row.sessionId || row.correlationKey || "-"}</Text>,
+      render: (_, row) => <Text code>{row.traceId || row.sessionId || row.detectionId}</Text>,
     },
-    { title: "来源", dataIndex: "source", width: 136, render: (value) => <Tag>{value}</Tag> },
+    { title: "证据", dataIndex: "eventCount", width: 86, render: (value) => <Tag color="geekblue">{value || 0}</Tag> },
+    { title: "来源", dataIndex: "source", width: 136, render: (value) => <Tag>{sourceLabel(value)}</Tag> },
   ];
-
-  const maxTimeline = Math.max(1, ...selectedTimeline.map((bucket) => bucket.total));
 
   return (
     <section className="events-page">
       <div className="section-heading">
         <div>
-          <Text className="eyebrow">EVENT DETECTION</Text>
+          <Text className="eyebrow">RUNTIME SECURITY</Text>
           <Title level={2}>事件检测</Title>
-          <Text type="secondary">按 Agent 归并展示 Go 后端检测到的行为事件、审计事件、运行时发现和阻断结果。</Text>
+          <Text type="secondary">检测结果来自 Go 后端 runtime_detections；原始行为事件保留在检测详情的证据链中。</Text>
         </div>
         <Space wrap>
-          <Tag color="geekblue">来源 {globalSummary.sources}</Tag>
-          <Tag color="purple">关联组 {globalSummary.correlated}</Tag>
-          <Button icon={<ReloadOutlined />} loading={loading || refreshing} onClick={() => void refreshEvents()}>
+          <Tag color="blue">Agent {globalSummary.coveredAgents}</Tag>
+          <Tag color="red">攻击 {globalSummary.attackDetections}</Tag>
+          <Button icon={<ReloadOutlined />} loading={busy || listLoading} onClick={() => void refreshEvents()}>
             重新检测
           </Button>
         </Space>
       </div>
 
-      {snapshot?.warning ? <Alert type="warning" showIcon message={snapshot.warning} /> : null}
+      {dataError ? <Alert type="warning" showIcon message={dataError} /> : null}
 
       <div className="event-summary-grid">
         <Card bordered={false} className="event-metric-card">
-          <Text type="secondary">全部事件</Text>
-          <div className="event-metric-value">{globalSummary.total}</div>
-          <Text>最近 {globalSummary.windowEnd ? formatTimestamp(globalSummary.windowEnd) : "-"}</Text>
+          <Text type="secondary">检测结果</Text>
+          <div className="event-metric-value">{globalSummary.totalDetections}</div>
+          <Text>最近 {globalSummary.latestAt ? formatTimestamp(globalSummary.latestAt) : "-"}</Text>
         </Card>
         <Card bordered={false} className="event-metric-card">
-          <Text type="secondary">攻击事件</Text>
-          <div className="event-metric-value attack">{globalSummary.attack}</div>
-          <Text>{eventKindMeta.attack.description}</Text>
+          <Text type="secondary">攻击检测</Text>
+          <div className="event-metric-value attack">{globalSummary.attackDetections}</div>
+          <Text>安全检测 {globalSummary.securityDetections}</Text>
         </Card>
         <Card bordered={false} className="event-metric-card">
           <Text type="secondary">已阻断</Text>
           <div className="event-metric-value blocked">{globalSummary.blocked}</div>
-          <Text>严重 {globalSummary.critical} · 高风险 {globalSummary.high}</Text>
+          <Text>高危及以上 {globalSummary.highOrAbove}</Text>
         </Card>
         <Card bordered={false} className="event-metric-card">
           <Text type="secondary">覆盖 Agent</Text>
-          <div className="event-metric-value security">{globalSummary.agents}</div>
+          <div className="event-metric-value security">{globalSummary.coveredAgents}</div>
           <Text>窗口 {globalSummary.windowStart ? `${formatClock(globalSummary.windowStart)} - ${formatClock(globalSummary.windowEnd ?? "")}` : "-"}</Text>
         </Card>
       </div>
@@ -399,44 +417,55 @@ export function EventsPage({ snapshot, loading = false, onRefresh }: EventsPageP
         <aside className="event-side-panel static-agent-panel">
           <div className="static-panel-heading">
             <Text type="secondary">Agents</Text>
-            <Tag color="blue">{globalAgentBreakdown.length}</Tag>
+            <Tag color="blue">{agents.length}</Tag>
           </div>
           <div className="static-agent-list">
-            {globalAgentBreakdown.length ? globalAgentBreakdown.map((agent) => {
-              const key = agentKey(agent);
-              return (
-                <button
-                  key={key}
-                  className={`static-agent-item ${selectedAgentKey === key ? "static-agent-item-active" : ""}`}
-                  type="button"
-                  onClick={() => selectAgent(key)}
-                >
-                  <span className="static-agent-name">{agent.agent}</span>
-                  <span className="static-agent-source">{agent.runtime}</span>
-                  <span className="static-agent-meta">
-                    <span>{agent.count} Events</span>
-                    <span className={agent.attack || agent.blocked ? "static-agent-risk" : ""}>
-                      {agent.attack} Attacks · {agent.blocked} Blocked
-                    </span>
+            <button
+              className={`static-agent-item ${selectedAgentId ? "" : "static-agent-item-active"}`}
+              type="button"
+              onClick={() => selectAgent(undefined)}
+            >
+              <span className="static-agent-name">全部 Agent</span>
+              <span className="static-agent-source">runtime-security</span>
+              <span className="static-agent-meta">
+                <span>{globalSummary.totalDetections} Detections</span>
+                <span className={globalSummary.attackDetections || globalSummary.blocked ? "static-agent-risk" : ""}>
+                  {globalSummary.attackDetections} Attacks · {globalSummary.blocked} Blocked
+                </span>
+              </span>
+            </button>
+            {agents.length ? agents.map((agent) => (
+              <button
+                key={agent.agentId}
+                className={`static-agent-item ${selectedAgentId === agent.agentId ? "static-agent-item-active" : ""}`}
+                type="button"
+                onClick={() => selectAgent(agent.agentId)}
+              >
+                <span className="static-agent-name">{agent.agentName || agent.agentId}</span>
+                <span className="static-agent-source">{agent.agentType || agent.runtimeStatus || "Agent"}</span>
+                <span className="static-agent-meta">
+                  <span>{agent.detectionCount} Detections</span>
+                  <span className={agent.attackCount || agent.blockedCount ? "static-agent-risk" : ""}>
+                    {agent.attackCount} Attacks · {agent.blockedCount} Blocked
                   </span>
-                </button>
-              );
-            }) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 Agent 事件" />}
+                </span>
+              </button>
+            )) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 Agent 检测" />}
           </div>
 
           <div className="event-panel-heading event-panel-section">
-            <Text strong>当前来源</Text>
-            <Tag>{selectedSourceBreakdown.length}</Tag>
+            <Text strong>检测来源</Text>
+            <Tag>{sourceBreakdown.length}</Tag>
           </div>
           <div className="event-breakdown-list">
-            {selectedSourceBreakdown.length ? selectedSourceBreakdown.map((source) => (
+            {sourceBreakdown.length ? sourceBreakdown.map((source) => (
               <button
                 key={source.name}
                 className={`event-breakdown-item ${sourceFilter === source.name ? "event-breakdown-active" : ""}`}
                 type="button"
                 onClick={() => setSourceFilter(sourceFilter === source.name ? "all" : source.name)}
               >
-                <span>{source.name}</span>
+                <span>{sourceLabel(source.name)}</span>
                 <strong>{source.count}</strong>
                 <em>攻击 {source.attack} · 阻断 {source.blocked}</em>
               </button>
@@ -445,155 +474,125 @@ export function EventsPage({ snapshot, loading = false, onRefresh }: EventsPageP
         </aside>
 
         <main className="event-main-panel">
-          {selectedAgent ? (
-            <>
-              <div className="event-agent-context">
-                <div>
-                  <Title level={3}>{selectedAgent.agent}</Title>
-                  <Text type="secondary">
-                    {selectedAgent.count} Events · {selectedAgent.attack} Attacks · {selectedAgent.blocked} Blocked
-                  </Text>
-                </div>
-                <Space direction="vertical" align="end" size={6}>
-                  <Text className="mono event-agent-path">{selectedAgent.runtime}</Text>
-                  <Space wrap>
-                    {staticRiskTag(selectedAgent.maxSeverity)}
-                    <Tag color="blue">来源 {selectedAgent.sources.length || selectedSummary.sources}</Tag>
-                    <Tag>最近 {formatTimestamp(selectedAgent.lastSeen)}</Tag>
-                  </Space>
-                </Space>
-              </div>
+          <div className="event-agent-context">
+            <div>
+              <Title level={3}>{selectedAgent ? selectedAgent.agentName || selectedAgent.agentId : "全部 Agent"}</Title>
+              <Text type="secondary">
+                {activeSummary.totalDetections} Detections · {activeSummary.attackDetections} Attacks · {activeSummary.blocked} Blocked
+              </Text>
+            </div>
+            <Space direction="vertical" align="end" size={6}>
+              <Text className="mono event-agent-path">{selectedAgent?.agentId || "runtime-security"}</Text>
+              <Space wrap>
+                <Tag color="blue">安全 {activeSummary.securityDetections}</Tag>
+                <Tag color="red">攻击 {activeSummary.attackDetections}</Tag>
+                <Tag>最近 {activeSummary.latestAt ? formatTimestamp(activeSummary.latestAt) : "-"}</Tag>
+              </Space>
+            </Space>
+          </div>
 
-              <div className="event-type-strip">
-                {eventGroupSummaries.map((group) => (
-                  <button
-                    key={group.key}
-                    className={`event-type-card ${selectedEventGroup === group.key ? "event-type-card-active" : ""}`}
-                    type="button"
-                    onClick={() => selectGroup(group.key)}
-                  >
-                    <strong>{group.title}</strong>
-                    <span>{group.count} Events</span>
-                    <em>{group.detail}</em>
-                  </button>
+          <div className="event-type-strip">
+            {groupSummaries.map((group) => (
+              <button
+                key={group.key}
+                className={`event-type-card ${selectedGroup === group.key ? "event-type-card-active" : ""}`}
+                type="button"
+                onClick={() => selectGroup(group.key)}
+              >
+                <strong>{group.title}</strong>
+                <span>{group.count} Detections</span>
+                <em>{group.detail}</em>
+              </button>
+            ))}
+          </div>
+
+          <Card bordered={false} className="event-filter-card">
+            <div className="event-filter-bar">
+              <Input
+                allowClear
+                prefix={<SearchOutlined />}
+                placeholder="搜索检测、规则、Trace、Session、工具或目标"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              <Select
+                value={severityFilter}
+                options={severityOptions}
+                onChange={(value) => setSeverityFilter(value)}
+              />
+              <Select
+                value={statusFilter}
+                options={statusOptions}
+                onChange={(value) => setStatusFilter(value)}
+              />
+              <Select value={sourceFilter} options={sourceOptions} onChange={(value) => setSourceFilter(value)} />
+              <Button icon={<FilterOutlined />} onClick={() => void loadSelectedData()}>
+                应用
+              </Button>
+            </div>
+            <div className="event-filter-foot">
+              <Text type="secondary">当前筛选 {detections.length} / {detectionsResponse.total}</Text>
+              <Space wrap>
+                <Tag color="red">攻击 {filteredAttackCount}</Tag>
+                <Tag color="volcano">高危 {filteredHighCount}</Tag>
+                <Tag color="gold">阻断 {filteredBlockedCount}</Tag>
+              </Space>
+            </div>
+          </Card>
+
+          <Card bordered={false} className="event-timeline-card">
+            <div className="event-timeline-header">
+              <Text strong>运行态事件时间线</Text>
+              <Text type="secondary">5 分钟窗口</Text>
+            </div>
+            {timelineBuckets.length ? (
+              <div className="event-timeline">
+                {timelineBuckets.map((bucket) => (
+                  <div key={bucket.bucket} className="event-timeline-bar" title={`${formatTimestamp(bucket.bucket)} · ${bucket.total}`}>
+                    <span style={{ height: `${Math.max(8, Math.round((bucket.total / maxTimeline) * 78))}px` }} />
+                    <em>{bucket.time || formatClock(bucket.bucket)}</em>
+                    {bucket.network + bucket.process + bucket.file > 0 && <strong>{bucket.network + bucket.process + bucket.file}</strong>}
+                  </div>
                 ))}
               </div>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无时间线数据" />
+            )}
+          </Card>
 
-              <Card bordered={false} className="event-filter-card">
-                <div className="event-filter-bar">
-                  <Input
-                    allowClear
-                    prefix={<SearchOutlined />}
-                    placeholder="搜索事件、证据、Trace、Session、工具或目标"
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                  />
-                  <Select
-                    value={kindFilter}
-                    options={[
-                      { label: "全部事件", value: "all" },
-                      { label: "安全事件", value: "security" },
-                      { label: "攻击事件", value: "attack" },
-                    ]}
-                    onChange={(value) => {
-                      setSelectedEventGroup("all");
-                      setKindFilter(value);
-                    }}
-                  />
-                  <Select
-                    value={severityFilter}
-                    options={severityOptions}
-                    onChange={(value) => {
-                      setSelectedEventGroup("all");
-                      setSeverityFilter(value);
-                    }}
-                  />
-                  <Select
-                    value={statusFilter}
-                    options={statusOptions}
-                    onChange={(value) => {
-                      setSelectedEventGroup("all");
-                      setStatusFilter(value);
-                    }}
-                  />
-                  <Select value={sourceFilter} options={sourceOptions} onChange={(value) => setSourceFilter(value)} />
-                </div>
-                <div className="event-filter-foot">
-                  <Space wrap>
-                    <FilterOutlined />
-                    <Text type="secondary">当前筛选 {filteredEvents.length} / {selectedAgentEvents.length}</Text>
-                  </Space>
-                  <Space wrap>
-                    <Tag color="blue">安全 {filteredEvents.filter((event) => event.kind === "security").length}</Tag>
-                    <Tag color="red">攻击 {filteredEvents.filter((event) => event.kind === "attack").length}</Tag>
-                    <Tag color="volcano">高危 {filteredEvents.filter((event) => riskRank(event.severity) >= 4).length}</Tag>
-                  </Space>
-                </div>
-              </Card>
-
-              <Card bordered={false} className="event-timeline-card">
-                <div className="event-timeline-header">
-                  <Text strong>当前 Agent 事件时间线</Text>
-                  <Text type="secondary">5 分钟窗口</Text>
-                </div>
-                {selectedTimeline.length ? (
-                  <div className="event-timeline">
-                    {selectedTimeline.map((bucket) => (
-                      <div key={bucket.bucket} className="event-timeline-bar" title={`${formatTimestamp(bucket.bucket)} · ${bucket.total}`}>
-                        <span style={{ height: `${Math.max(8, Math.round((bucket.total / maxTimeline) * 78))}px` }} />
-                        <em>{formatClock(bucket.bucket)}</em>
-                        {bucket.attack > 0 && <strong>{bucket.attack}</strong>}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无时间线数据" />
-                )}
-              </Card>
-
-              <Card bordered={false} className="event-table-card" title="检测事件" extra={<Text type="secondary">{filteredEvents.length} 项事件</Text>}>
-                <Table
-                  rowKey="id"
-                  loading={loading || refreshing}
-                  columns={columns}
-                  dataSource={filteredEvents}
-                  pagination={{ pageSize: 12 }}
-                  locale={{ emptyText: "暂无当前 Agent 的后端事件检测结果" }}
-                  scroll={{ x: 1080 }}
-                  rowClassName={(row) => row.id === selectedEventId ? "event-table-row-active" : ""}
-                  onRow={(row) => ({
-                    onClick: () => {
-                      setSelectedEventId(row.id);
-                      setEventDetailOpen(true);
-                    },
-                  })}
-                />
-              </Card>
-            </>
-          ) : (
-            <Card bordered={false} className="event-table-card">
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无后端事件检测结果" />
-            </Card>
-          )}
+          <Card bordered={false} className="event-table-card" title="Runtime Detection" extra={<Text type="secondary">{detectionsResponse.total} 项检测</Text>}>
+            <Table
+              rowKey="detectionId"
+              loading={loading || refreshing || listLoading}
+              columns={columns}
+              dataSource={detections}
+              pagination={{ pageSize: 12 }}
+              locale={{ emptyText: "暂无运行态检测结果" }}
+              scroll={{ x: 1180 }}
+              rowClassName={(row) => row.detectionId === selectedDetectionId ? "event-table-row-active" : ""}
+              onRow={(row) => ({ onClick: () => void openDetection(row) })}
+            />
+          </Card>
         </main>
       </div>
 
       <Drawer
         className="event-detail-drawer"
-        title={selectedEvent ? (
+        title={selectedDetection ? (
           <Space direction="vertical" size={4}>
-            <Space wrap>{eventKindTag(selectedEvent.kind)}{staticRiskTag(selectedEvent.severity)}{eventStatusTag(selectedEvent.status)}</Space>
-            <Text strong>{selectedEvent.title}</Text>
+            <Space wrap>{categoryTag(selectedDetection.category)}{detectionSeverityTag(selectedDetection.severity)}{statusTag(selectedDetection.status)}</Space>
+            <Text strong>{selectedDetection.title || selectedDetection.detectionId}</Text>
           </Space>
-        ) : "事件详情"}
-        open={eventDetailOpen && Boolean(selectedEvent)}
-        width={560}
+        ) : "检测详情"}
+        open={drawerOpen}
+        width={640}
+        loading={detailLoading}
         onClose={() => {
-          setEventDetailOpen(false);
-          setSelectedEventId(undefined);
+          setDrawerOpen(false);
+          setSelectedDetectionId(undefined);
         }}
       >
-        {selectedEvent ? (
+        {selectedDetection ? (
           <Tabs
             items={[
               {
@@ -601,53 +600,63 @@ export function EventsPage({ snapshot, loading = false, onRefresh }: EventsPageP
                 label: "概览",
                 children: (
                   <Descriptions column={1} size="small" bordered>
-                    <Descriptions.Item label="Agent">{selectedEvent.agent}</Descriptions.Item>
-                    <Descriptions.Item label="运行时">{selectedEvent.runtime}</Descriptions.Item>
-                    <Descriptions.Item label="发生时间">{formatTimestamp(selectedEvent.occurredAt)}</Descriptions.Item>
-                    <Descriptions.Item label="分类">{selectedEvent.category} / {selectedEvent.subtype}</Descriptions.Item>
-                    <Descriptions.Item label="来源">{selectedEvent.source}</Descriptions.Item>
-                    <Descriptions.Item label="关联键"><Text code>{selectedEvent.correlationKey || correlationKey(selectedEvent)}</Text></Descriptions.Item>
+                    <Descriptions.Item label="Detection ID"><Text code>{selectedDetection.detectionId}</Text></Descriptions.Item>
+                    <Descriptions.Item label="Agent">{selectedDetection.agentName || detail?.agent?.name || selectedDetection.agentId || "-"}</Descriptions.Item>
+                    <Descriptions.Item label="检测类型">{selectedDetection.detectionType || selectedDetection.type || "-"}</Descriptions.Item>
+                    <Descriptions.Item label="规则">{selectedDetection.ruleId || "-"}</Descriptions.Item>
+                    <Descriptions.Item label="来源">{sourceLabel(selectedDetection.source)}</Descriptions.Item>
+                    <Descriptions.Item label="置信度">{confidenceText(selectedDetection.confidence)}</Descriptions.Item>
+                    <Descriptions.Item label="首次发现">{formatTimestamp(selectedDetection.firstSeenAt || "")}</Descriptions.Item>
+                    <Descriptions.Item label="最近发现">{formatTimestamp(detectionTime(selectedDetection))}</Descriptions.Item>
                   </Descriptions>
                 ),
               },
               {
                 key: "evidence",
-                label: "证据",
-                children: (
+                label: `证据链 ${evidenceEvents.length}`,
+                children: evidenceEvents.length ? (
                   <Space direction="vertical" size={12} className="event-detail-stack">
-                    <div className="event-detail-block">
-                      <Text type="secondary">证据摘要</Text>
-                      <pre>{selectedEvent.evidence || "-"}</pre>
-                    </div>
-                    <div className="event-detail-block">
-                      <Text type="secondary">处置建议</Text>
-                      <pre>{selectedEvent.remediation || selectedEvent.action || "-"}</pre>
-                    </div>
-                    {selectedEvent.reason ? (
-                      <div className="event-detail-block">
-                        <Text type="secondary">原因</Text>
-                        <pre>{selectedEvent.reason}</pre>
+                    {evidenceEvents.map((event, index) => (
+                      <div className="event-detail-block" key={`${event.eventId}-${event.sequence ?? index}`}>
+                        <Space wrap>
+                          <Tag color="geekblue">#{event.sequence ?? index + 1}</Tag>
+                          <Tag>{event.role || "evidence"}</Tag>
+                          <Tag>{evidenceTitle(event)}</Tag>
+                          {event.severity ? detectionSeverityTag(event.severity) : null}
+                        </Space>
+                        <pre>{evidenceSummary(event)}</pre>
+                        <Descriptions column={1} size="small" bordered>
+                          <Descriptions.Item label="Event ID"><Text code>{event.eventId || "-"}</Text></Descriptions.Item>
+                          <Descriptions.Item label="时间">{formatTimestamp(event.timestamp || "")}</Descriptions.Item>
+                          <Descriptions.Item label="Agent">{event.agentName || event.agentId || "-"}</Descriptions.Item>
+                          <Descriptions.Item label="目标">{event.target || "-"}</Descriptions.Item>
+                          <Descriptions.Item label="工具">{event.toolName || "-"}</Descriptions.Item>
+                          <Descriptions.Item label="结果">{event.outcome || "-"}</Descriptions.Item>
+                          <Descriptions.Item label="Trace"><Text code>{event.traceId || "-"}</Text></Descriptions.Item>
+                          <Descriptions.Item label="Session"><Text code>{event.sessionId || "-"}</Text></Descriptions.Item>
+                        </Descriptions>
                       </div>
-                    ) : null}
+                    ))}
                   </Space>
-                ),
+                ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无证据事件" />,
               },
               {
                 key: "context",
                 label: "上下文",
                 children: (
-                  <Descriptions column={1} size="small" bordered>
-                    <Descriptions.Item label="Trace"><Text code>{selectedEvent.traceId || "-"}</Text></Descriptions.Item>
-                    <Descriptions.Item label="Session"><Text code>{selectedEvent.sessionId || "-"}</Text></Descriptions.Item>
-                    <Descriptions.Item label="原始动作">{selectedEvent.rawAction || "-"}</Descriptions.Item>
-                    <Descriptions.Item label="目标">{selectedEvent.target || "-"}</Descriptions.Item>
-                    <Descriptions.Item label="操作者">{selectedEvent.actor || "-"}</Descriptions.Item>
-                    <Descriptions.Item label="Connector">{selectedEvent.connector || "-"}</Descriptions.Item>
-                    <Descriptions.Item label="目标应用">{selectedEvent.destinationApp || "-"}</Descriptions.Item>
-                    <Descriptions.Item label="工具">{selectedEvent.toolName || selectedEvent.mcpServer || "-"}</Descriptions.Item>
-                    <Descriptions.Item label="模型">{selectedEvent.model || "-"}</Descriptions.Item>
-                    <Descriptions.Item label="决策">{selectedEvent.decision || selectedEvent.action || "-"}</Descriptions.Item>
-                  </Descriptions>
+                  <Space direction="vertical" size={12} className="event-detail-stack">
+                    <Descriptions column={1} size="small" bordered>
+                      <Descriptions.Item label="Trace"><Text code>{selectedDetection.traceId || detail?.trace?.traceId || "-"}</Text></Descriptions.Item>
+                      <Descriptions.Item label="Session"><Text code>{selectedDetection.sessionId || detail?.runtimeSession?.sessionId || "-"}</Text></Descriptions.Item>
+                      <Descriptions.Item label="事件数量">{selectedDetection.eventCount ?? evidenceEvents.length}</Descriptions.Item>
+                      <Descriptions.Item label="说明">{selectedDetection.detail || selectedDetection.description || "-"}</Descriptions.Item>
+                      <Descriptions.Item label="处置建议">{selectedDetection.remediation || "-"}</Descriptions.Item>
+                    </Descriptions>
+                    <div className="event-detail-block">
+                      <Text type="secondary">结构化属性</Text>
+                      <pre>{attributesText(selectedDetection.attributes)}</pre>
+                    </div>
+                  </Space>
                 ),
               },
             ]}

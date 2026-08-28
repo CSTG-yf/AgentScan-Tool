@@ -2208,6 +2208,48 @@ WHERE id = ?`,
 			return nil
 		},
 	},
+	{
+		description: "agent inventory: runtime status and observed process ids",
+		apply: func(ex dbExecer) error {
+			present, err := tableExists(ex, "agents")
+			if err != nil {
+				return err
+			}
+			if !present {
+				return nil
+			}
+			for _, spec := range []struct {
+				column string
+				stmt   string
+			}{
+				{"runtime_status", `ALTER TABLE agents ADD COLUMN runtime_status TEXT NOT NULL DEFAULT 'unknown'`},
+				{"pids_json", `ALTER TABLE agents ADD COLUMN pids_json TEXT NOT NULL DEFAULT '[]'`},
+			} {
+				exists, err := hasColumnDB(ex, "agents", spec.column)
+				if err != nil {
+					return err
+				}
+				if !exists {
+					if _, err := ex.Exec(spec.stmt); err != nil {
+						return fmt.Errorf("alter agents.%s: %w", spec.column, err)
+					}
+				}
+			}
+			if _, err := ex.Exec(`
+			UPDATE agents SET runtime_status = CASE
+				WHEN lower(COALESCE(status, '')) = 'running' THEN 'running'
+				WHEN lower(COALESCE(status, '')) IN ('installed', 'stopped', 'missing') THEN 'stopped'
+				WHEN lower(COALESCE(runtime_status, '')) IN ('running', 'stopped', 'unknown') THEN lower(runtime_status)
+				ELSE 'unknown'
+			END;
+			UPDATE agents SET pids_json = '[]' WHERE pids_json IS NULL OR trim(pids_json) = '';
+			CREATE INDEX IF NOT EXISTS idx_agents_runtime_status ON agents(runtime_status);
+			`); err != nil {
+				return fmt.Errorf("backfill agents runtime status: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 type agentDiscoverySeed struct {

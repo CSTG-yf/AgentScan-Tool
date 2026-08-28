@@ -33,25 +33,46 @@ export interface AgentConfigRoot {
 
 export type AgentStatus = "running" | "stopped" | "unknown";
 
+export interface AgentEvidence {
+  type: string;
+  value: string;
+  weight: number;
+}
+
 export interface AgentInventory {
   id: string;
   product: string;
   vendor: string;
   kind: string;
+  inventoryState?: string;
+  runtimeStatus: AgentStatus;
+  discoveryStatus?: string;
+  primaryPath?: string;
+  version?: string;
   status: AgentStatus;
   running: boolean;
   processCount: number;
   pids: number[];
   primaryPid?: number;
+  processes?: AgentProcess[];
   executableNames: string[];
   startedAt?: string;
   uptimeSec?: number;
   source: string;
+  installPaths?: string[];
   configRoots: AgentConfigRoot[];
+  evidence?: AgentEvidence[];
   staticResourceCount: number;
   riskResourceCount: number;
   criticalResourceCount: number;
   lastStaticScanAt?: string;
+  firstSeenScanAt?: string;
+  lastSeenScanAt?: string;
+  runtimeDetectionCount?: number;
+  runtimeAttackCount?: number;
+  runtimeBlockedCount?: number;
+  runtimeHighOrAboveCount?: number;
+  runtimeLatestAt?: string;
   description: string;
 }
 
@@ -273,86 +294,6 @@ export type EventKind = "security" | "attack";
 export type EventStatus = "detected" | "audited" | "blocked" | "pending";
 export type EventFilter = "all" | EventKind;
 
-export interface EventDetectionSummary {
-  total: number;
-  security: number;
-  attack: number;
-  blocked: number;
-  critical: number;
-  high: number;
-  correlated: number;
-  agents: number;
-  sources: number;
-  windowStart?: string;
-  windowEnd?: string;
-  /** Phase-2 detection-backed counters. */
-  detections?: number;
-  attackDetections?: number;
-  openDetections?: number;
-}
-
-export interface EventBreakdown {
-  name: string;
-  count: number;
-  attack: number;
-  blocked: number;
-  maxSeverity: StaticRisk;
-}
-
-export interface EventAgentBreakdown {
-  agent: string;
-  runtime: string;
-  count: number;
-  attack: number;
-  blocked: number;
-  maxSeverity: StaticRisk;
-  lastSeen: string;
-  sources: string[];
-}
-
-export interface EventTimelineBucket {
-  bucket: string;
-  total: number;
-  attack: number;
-  blocked: number;
-  highRisk: number;
-}
-
-export interface DetectedEvent {
-  id: string;
-  occurredAt: string;
-  kind: EventKind;
-  agent: string;
-  runtime: string;
-  category: string;
-  subtype: string;
-  title: string;
-  severity: StaticRisk;
-  riskScore?: number;
-  status: EventStatus;
-  evidence: string;
-  action: string;
-  traceId: string;
-  sessionId: string;
-  correlationKey?: string;
-  source: string;
-  rawAction?: string;
-  target?: string;
-  actor?: string;
-  connector?: string;
-  destinationApp?: string;
-  toolName?: string;
-  model?: string;
-  mcpServer?: string;
-  decision?: string;
-  reason?: string;
-  remediation?: string;
-  /** Phase-2 structured detection backing. */
-  detectionId?: string;
-  detectionType?: string;
-  detectionSeverity?: string;
-}
-
 /** Phase-2 structured runtime detection (runtime_detections row). */
 export interface RuntimeDetection {
   detectionId: string;
@@ -360,6 +301,7 @@ export interface RuntimeDetection {
   agentName?: string;
   sessionId?: string;
   traceId?: string;
+  type?: string;
   detectionType: string;
   category: string;
   severity: string;
@@ -367,24 +309,128 @@ export interface RuntimeDetection {
   ruleId?: string;
   status: string;
   title: string;
+  description?: string;
   detail?: string;
   remediation?: string;
+  source?: string;
+  createdAt?: string;
   firstSeenAt?: string;
   lastSeenAt?: string;
   eventCount?: number;
+  attributes?: Record<string, unknown>;
 }
 
-export interface EventDetectionSnapshot {
-  capturedAt: string;
-  source: string;
-  summary?: EventDetectionSummary;
-  sourceBreakdown?: EventBreakdown[];
-  agentBreakdown?: EventAgentBreakdown[];
-  timeline?: EventTimelineBucket[];
-  events: DetectedEvent[];
-  /** Phase-2 structured detections (runtime_detections). */
+export interface RuntimeSecuritySummary {
+  totalDetections: number;
+  securityDetections: number;
+  attackDetections: number;
+  blocked: number;
+  highOrAbove: number;
+  coveredAgents: number;
+  latestAt?: string;
+  windowStart?: string;
+  windowEnd?: string;
+}
+
+export interface RuntimeSecurityAgent {
+  agentId: string;
+  agentName: string;
+  agentType: string;
+  detectionCount: number;
+  attackCount: number;
+  blockedCount: number;
+  highOrAboveCount: number;
+  latestAt?: string;
+  runtimeStatus: string;
+}
+
+export interface RuntimeDetectionListSummary {
+  total: number;
+  attack: number;
+  blocked: number;
+  critical: number;
+  high: number;
+  open: number;
+}
+
+export interface RuntimeDetectionListResponse {
+  total: number;
+  items: RuntimeDetection[];
   detections?: RuntimeDetection[];
-  warning?: string;
+  summary?: RuntimeDetectionListSummary;
+  count: number;
+  limit: number;
+  offset: number;
+}
+
+export interface RuntimeDetectionListQuery {
+  agentId?: string;
+  category?: string;
+  severity?: string;
+  status?: string;
+  source?: string;
+  keyword?: string;
+  traceId?: string;
+  sessionId?: string;
+  detectionType?: string;
+  limit?: number;
+  offset?: number;
+  sort?: string;
+}
+
+export interface RuntimeDetectionEvidenceEvent {
+  detectionId?: string;
+  eventId: number;
+  eventType: string;
+  eventSource?: string;
+  eventCategory?: string;
+  timestamp?: string;
+  sequence?: number;
+  role?: string;
+  agentId?: string;
+  agentName?: string;
+  sessionId?: string;
+  traceId?: string;
+  toolName?: string;
+  target?: string;
+  operation?: string;
+  outcome?: string;
+  severity?: string;
+  detail?: string;
+  attributes?: Record<string, unknown>;
+}
+
+export interface RuntimeDetectionDetail {
+  detection: RuntimeDetection;
+  evidence?: RuntimeDetectionEvidenceEvent[];
+  agent?: { agentId?: string; name?: string };
+  runtimeSession?: { sessionId?: string; traceId?: string };
+  trace?: { sessionId?: string; traceId?: string };
+}
+
+export interface RuntimeEventsTimelineBucket {
+  time: string;
+  bucket: string;
+  total: number;
+  prompt: number;
+  tool: number;
+  process: number;
+  file: number;
+  network: number;
+  content: number;
+}
+
+export interface RuntimeEventsTimelineResponse {
+  buckets: RuntimeEventsTimelineBucket[];
+}
+
+export interface RuntimeEventsTimelineQuery {
+  agentId?: string;
+  bucket?: string;
+  startTime?: string;
+  endTime?: string;
+  sessionId?: string;
+  traceId?: string;
 }
 
 export type ChainNodeKind = "entry" | "agent" | "llm" | "tool" | "mcp" | "data" | "network" | "defense";
@@ -538,6 +584,39 @@ export interface RuntimeDecisionDetail {
   evidence?: DecisionEvidenceEvent[];
 }
 
+export interface RuntimeEnforcementRecord {
+  id: string;
+  kind?: string;
+  target?: string;
+  host?: string;
+  status?: string;
+  reason?: string;
+  source?: string;
+  decision_id?: string;
+  response_id?: string;
+  action_type?: string;
+  executor?: string;
+  result?: string;
+  added_at?: string;
+  expires_at?: string;
+}
+
+export interface RuntimeEnforcementListResponse {
+  items: RuntimeEnforcementRecord[];
+  total?: number;
+  count?: number;
+}
+
+export interface RuntimeEnforcementResult {
+  status?: string;
+  id?: string;
+  removed?: number;
+  decision?: RuntimeDecision;
+  response?: RuntimeResponseAction;
+  responses?: RuntimeResponseAction[];
+  items?: RuntimeEnforcementRecord[];
+}
+
 export interface ScanTaskSchedule {
   enabled: boolean;
   intervalSec: number;
@@ -590,41 +669,6 @@ export interface StaticResourceRelation {
   type: StaticResourceType;
   relation: string;
   risk: StaticRisk;
-}
-
-export interface StaticResource {
-  id: string;
-  name: string;
-  type: StaticResourceType;
-  kind: string;
-  path: string;
-  risk: StaticRisk;
-  status: StaticResourceStatus;
-  updatedAt: string;
-  size: string;
-  permissions: string;
-  hash: string;
-  description: string;
-  contentPreview: string;
-  findings: StaticResourceFinding[];
-  relations: StaticResourceRelation[];
-}
-
-export interface StaticAgentInventory {
-  id: string;
-  name: string;
-  runtime: string;
-  source: string;
-  description: string;
-  resources: StaticResource[];
-}
-
-export interface StaticAssetSnapshot {
-  capturedAt: string;
-  source: string;
-  lastScanAt?: string;
-  agents: StaticAgentInventory[];
-  warning?: string;
 }
 
 // ---------------------------------------------------------------------------
