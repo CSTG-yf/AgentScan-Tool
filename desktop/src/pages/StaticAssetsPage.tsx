@@ -11,6 +11,7 @@ import {
   getStaticResourceFindings,
   getStaticResourceScans,
   getStaticResources,
+  exportStaticResourceTextReport,
   revealStaticResourcePath,
   getStaticResourceSummary,
   triggerStaticResourceRescan,
@@ -117,6 +118,96 @@ function formatSize(size?: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function safeReportName(value: string, extension = "md") {
+  const base = (value || "static-resources-report")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .slice(0, 120) || "static-resources-report";
+  return base.toLowerCase().endsWith(`.${extension}`) ? base : `${base}.${extension}`;
+}
+
+function mdCell(value?: string | number | boolean | null) {
+  const text = value === undefined || value === null || value === "" ? "-" : String(value);
+  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+}
+
+function resourceTypeLabel(resourceType?: string) {
+  const display = API_TYPE_TO_DISPLAY[(resourceType ?? "").toLowerCase()] ?? resourceType ?? "-";
+  return staticTypeMeta[display as keyof typeof staticTypeMeta]?.label ?? display;
+}
+
+function riskLabel(risk?: string) {
+  const normalized = apiRisk(risk ?? "");
+  return staticRiskMeta[normalized]?.label ?? risk ?? "clean";
+}
+
+function statusLabel(status?: string) {
+  return STATUS_META[status ?? ""]?.label ?? status ?? "-";
+}
+
+function buildResourceSummaryText(resource: StaticResourceDetailResponse | StaticResourceListItem) {
+  const agentName = "agent" in resource ? resource.agent?.name : undefined;
+  return [
+    "# 静态资源扫描摘要",
+    "",
+    `- 资源名称: ${resource.name}`,
+    `- 所属 Agent: ${agentName || resource.agent_id || "-"}`,
+    `- 资源类型: ${resourceTypeLabel(resource.resource_type)}`,
+    `- 资源位置: ${resource.path || "-"}`,
+    `- 风险等级: ${riskLabel(resource.risk_level)}`,
+    `- 是否恶意: ${resource.malicious ? "是" : "否"}`,
+    `- 风险发现数: ${resource.finding_count}`,
+    `- 状态: ${statusLabel(resource.status)}`,
+    `- 最近扫描: ${formatTimestamp(resource.last_scan_at)}`,
+    `- 更新时间: ${formatTimestamp(resource.updated_at)}`,
+  ].join("\n");
+}
+
+function buildAgentResourceSection(agent: StaticResourceAgentSummary, resources: StaticResourceListItem[]) {
+  const lines = [
+    `## ${agent.name || agent.agent_id}`,
+    "",
+    `- Agent ID: ${agent.agent_id}`,
+    `- Agent Type: ${agent.agent_type || "-"}`,
+    `- 资源数: ${resources.length}`,
+    `- 风险资源: ${resources.filter((item) => ["medium", "high", "critical"].includes((item.risk_level || "").toLowerCase())).length}`,
+    "",
+  ];
+  if (!resources.length) {
+    lines.push("暂无静态资源。", "");
+    return lines.join("\n");
+  }
+  lines.push("| 序号 | 名称 | 类型 | 位置 | 风险 | 恶意 | 发现数 | 状态 | 最近扫描 |");
+  lines.push("| --- | --- | --- | --- | --- | --- | ---: | --- | --- |");
+  resources.forEach((resource, index) => {
+    lines.push(
+      `| ${index + 1} | ${mdCell(resource.name)} | ${mdCell(resourceTypeLabel(resource.resource_type))} | ${mdCell(resource.path)} | ${mdCell(riskLabel(resource.risk_level))} | ${resource.malicious ? "是" : "否"} | ${resource.finding_count} | ${mdCell(statusLabel(resource.status))} | ${mdCell(formatTimestamp(resource.last_scan_at))} |`,
+    );
+  });
+  lines.push("");
+  return lines.join("\n");
+}
+
+function buildStaticResourcesReport(sections: Array<{ agent: StaticResourceAgentSummary; resources: StaticResourceListItem[] }>) {
+  const totalResources = sections.reduce((sum, section) => sum + section.resources.length, 0);
+  const totalRiskResources = sections.reduce(
+    (sum, section) => sum + section.resources.filter((item) => ["medium", "high", "critical"].includes((item.risk_level || "").toLowerCase())).length,
+    0,
+  );
+  return [
+    "# 静态资源检测报告",
+    "",
+    `- 导出时间: ${formatTimestamp(new Date().toISOString())}`,
+    `- Agent 数量: ${sections.length}`,
+    `- 资源总数: ${totalResources}`,
+    `- 风险资源: ${totalRiskResources}`,
+    "",
+    ...sections.map((section) => buildAgentResourceSection(section.agent, section.resources)),
+  ].join("\n");
+}
+
 interface StaticAssetsPageProps {
   loading?: boolean;
   onRefresh?: () => Promise<void> | void;
@@ -168,6 +259,9 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
   const [statusSaving, setStatusSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [rescanning, setRescanning] = useState(false);
+  const [summaryExporting, setSummaryExporting] = useState(false);
+  const [allReportExporting, setAllReportExporting] = useState(false);
+  const [agentReportExporting, setAgentReportExporting] = useState(false);
 
   const inTauri = "__TAURI_INTERNALS__" in window;
 
@@ -388,6 +482,18 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
     try {
       await triggerStaticResourceRescan(selectedAgentId);
       message.success("已提交重新扫描任务，稍后刷新查看结果");
+      const resourceId = detailResourceId;
+      [2500, 6000, 10000].forEach((delay) => {
+        setTimeout(() => {
+          void loadAgents(false);
+          void refreshListAndSummary();
+          if (resourceId) {
+            void loadDetail(resourceId);
+            void loadFindings(resourceId);
+            void loadScans(resourceId);
+          }
+        }, delay);
+      });
     } catch (error) {
       message.error(`提交重新扫描失败：${String(error)}`);
     } finally {
@@ -402,11 +508,15 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
       await triggerStaticResourceScan(detailResourceId);
       message.success("已提交扫描任务，稍后自动刷新");
       // Give the backend a moment, then refresh what we are looking at.
-      setTimeout(() => {
-        void loadDetail(detailResourceId);
-        void loadFindings(detailResourceId);
-        void refreshListAndSummary();
-      }, 2500);
+      const resourceId = detailResourceId;
+      [1500, 3500, 7000].forEach((delay) => {
+        setTimeout(() => {
+          void loadDetail(resourceId);
+          void loadFindings(resourceId);
+          void loadScans(resourceId);
+          void refreshListAndSummary();
+        }, delay);
+      });
     } catch (error) {
       message.error(`提交扫描失败：${String(error)}`);
     } finally {
@@ -460,25 +570,105 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
     }
   };
 
-  const downloadResourceSummary = (resource: StaticResourceDetailResponse | StaticResourceListItem | undefined) => {
+  const saveTextReport = useCallback(
+    async (contentText: string, defaultFileName: string) => {
+      if (inTauri) {
+        return exportStaticResourceTextReport(contentText, defaultFileName);
+      }
+      const blob = new Blob([contentText], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = defaultFileName;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      return defaultFileName;
+    },
+    [inTauri],
+  );
+
+  const fetchAllResourcesForAgent = useCallback(async (agentId: string) => {
+    const pageSize = 200;
+    let nextPage = 1;
+    let total = Number.POSITIVE_INFINITY;
+    const rows: StaticResourceListItem[] = [];
+    while (rows.length < total) {
+      const response = await getStaticResources({ agentId, page: nextPage, pageSize });
+      const items = response.items ?? [];
+      rows.push(...items);
+      total = response.total ?? rows.length;
+      if (!items.length || rows.length >= total) break;
+      nextPage += 1;
+    }
+    return rows;
+  }, []);
+
+  const exportResourceSummary = async (resource: StaticResourceDetailResponse | StaticResourceListItem | undefined) => {
     if (!resource) return;
-    const lines = [
-      `资源名称：${resource.name}`,
-      `类型：${resource.resource_type}`,
-      `路径：${resource.path}`,
-      `风险等级：${resource.risk_level}`,
-      `状态：${resource.status}`,
-      `发现时间：${formatTimestamp("updated_at" in resource ? resource.updated_at : undefined)}`,
-    ];
-    if ("finding_count" in resource) lines.push(`风险项数量：${resource.finding_count}`);
-    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${resource.name.replace(/[\\/:*?"<>|]/g, "_")}.scan-summary.txt`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    message.success("资源扫描摘要已导出");
+    setSummaryExporting(true);
+    try {
+      const fileName = safeReportName(`${resource.name || "resource"}-scan-summary.md`);
+      const path = await saveTextReport(buildResourceSummaryText(resource), fileName);
+      if (path) {
+        message.success(`资源扫描摘要已导出：${path}`);
+      } else {
+        message.info("已取消导出");
+      }
+    } catch (error) {
+      message.error(`导出摘要失败：${String(error)}`);
+    } finally {
+      setSummaryExporting(false);
+    }
+  };
+
+  const exportCurrentAgentResources = async () => {
+    if (!selectedAgent) {
+      message.warning("请先选择一个 Agent");
+      return;
+    }
+    setAgentReportExporting(true);
+    try {
+      const resources = await fetchAllResourcesForAgent(selectedAgent.agent_id);
+      const contentText = buildStaticResourcesReport([{ agent: selectedAgent, resources }]);
+      const fileName = safeReportName(`${selectedAgent.name || selectedAgent.agent_id}-static-resources-${new Date().toISOString().slice(0, 10)}.md`);
+      const path = await saveTextReport(contentText, fileName);
+      if (path) {
+        message.success(`当前 Agent 资源报告已导出：${path}`);
+      } else {
+        message.info("已取消导出");
+      }
+    } catch (error) {
+      message.error(`导出当前 Agent 资源失败：${String(error)}`);
+    } finally {
+      setAgentReportExporting(false);
+    }
+  };
+
+  const exportAllAgentResources = async () => {
+    if (!agents.length) {
+      message.warning("当前没有可导出的 Agent 资源");
+      return;
+    }
+    setAllReportExporting(true);
+    try {
+      const sections: Array<{ agent: StaticResourceAgentSummary; resources: StaticResourceListItem[] }> = [];
+      for (const agent of agents) {
+        const resources = await fetchAllResourcesForAgent(agent.agent_id);
+        sections.push({ agent, resources });
+      }
+      const contentText = buildStaticResourcesReport(sections);
+      const fileName = safeReportName(`static-resources-report-${new Date().toISOString().slice(0, 10)}.md`);
+      const path = await saveTextReport(contentText, fileName);
+      if (path) {
+        message.success(`静态资源报告已导出：${path}`);
+      } else {
+        message.info("已取消导出");
+      }
+    } catch (error) {
+      message.error(`导出静态资源报告失败：${String(error)}`);
+    } finally {
+      setAllReportExporting(false);
+    }
   };
 
   const renderStatusCell = (resource: StaticResourceListItem | StaticResourceDetailResponse) => (
@@ -579,6 +769,14 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
           <Text type="secondary">基于 Agent 资源规则发现并检测配置、技能、插件、MCP 服务、提示词、凭据与环境变量。</Text>
         </div>
         <div className="static-header-actions">
+          <Button
+            icon={<DownloadOutlined />}
+            loading={allReportExporting}
+            disabled={!agents.length}
+            onClick={() => void exportAllAgentResources()}
+          >
+            导出报告
+          </Button>
           <Button
             type="primary"
             icon={<SecurityScanOutlined />}
@@ -726,7 +924,21 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
                   />
                 </div>
                 <div className="static-table-title">
-                  <Text strong>{selectedTypeLabel}</Text>
+                  <Space>
+                    <Text strong>{selectedTypeLabel}</Text>
+                    <Button
+                      size="small"
+                      icon={<DownloadOutlined />}
+                      loading={agentReportExporting}
+                      disabled={!selectedAgent}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void exportCurrentAgentResources();
+                      }}
+                    >
+                      导出当前 Agent 资源
+                    </Button>
+                  </Space>
                   <Text type="secondary">{listTotal} 项资源</Text>
                 </div>
                 <Table
@@ -783,7 +995,7 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
               <Button icon={<EyeOutlined />} onClick={() => handleDetailTabChange("content")}>查看内容</Button>
               <Button icon={<CopyOutlined />} onClick={() => void copyResourcePath(detail.path)}>复制路径</Button>
               <Button icon={<FolderOpenOutlined />} onClick={() => openRevealDialog(detail.path)}>定位文件</Button>
-              <Button icon={<DownloadOutlined />} onClick={() => downloadResourceSummary(detail)}>导出摘要</Button>
+              <Button icon={<DownloadOutlined />} loading={summaryExporting} onClick={() => void exportResourceSummary(detail)}>导出摘要</Button>
             </div>
           ) : null
         }

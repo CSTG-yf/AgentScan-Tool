@@ -26,6 +26,7 @@ type DateSort = "none" | "asc" | "desc";
 
 interface AgentsPageProps {
   agents: AgentInventory[];
+  totalAgents?: number;
   warning: string;
   loading?: boolean;
   onRefresh?: () => Promise<void> | void;
@@ -175,7 +176,7 @@ function reportFileName(agents: AgentInventory[]) {
   return `${prefix.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")}-${new Date().toISOString().slice(0, 10)}.pdf`;
 }
 
-export function AgentsPage({ agents, warning, loading = false, onRefresh }: AgentsPageProps) {
+export function AgentsPage({ agents, totalAgents, warning, loading = false, onRefresh }: AgentsPageProps) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [firstSeenSort, setFirstSeenSort] = useState<DateSort>("none");
@@ -216,6 +217,7 @@ export function AgentsPage({ agents, warning, loading = false, onRefresh }: Agen
   const stoppedCount = agents.filter((agent) => agentStatus(agent) === "stopped").length;
   const unknownCount = agents.filter((agent) => agentStatus(agent) === "unknown").length;
   const latestScan = newestTimestamp(agents.map(lastSeen));
+  const displayAgentTotal = totalAgents && totalAgents > 0 ? totalAgents : agents.length;
 
   const openAgentDetail = async (agent: AgentInventory) => {
     setSelectedAgentId(agent.id);
@@ -418,8 +420,8 @@ export function AgentsPage({ agents, warning, loading = false, onRefresh }: Agen
               <Text type="secondary">Agent 总数</Text>
               <Tooltip title="后端合并进程、配置目录和静态扫描结果后的 Agent 数量"><InfoCircleOutlined /></Tooltip>
             </Space>
-            <strong>{agents.length}</strong>
-            <Text type="secondary">已识别 Agent</Text>
+            <strong>{displayAgentTotal}</strong>
+            <Text type="secondary">{displayAgentTotal === agents.length ? "已识别 Agent" : `当前加载 ${agents.length} 条`}</Text>
           </div>
         </Card>
         <Card bordered={false} className="agent-stat-card">

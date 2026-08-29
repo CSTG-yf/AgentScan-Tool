@@ -128,9 +128,9 @@ func TestStoreObservabilityPhase6ColumnsPresent(t *testing.T) {
 	}
 }
 
-// TestStoreBusinessTablesHaveSoftDeleteColumn pins the common soft-delete
-// marker across every persisted domain table in audit.db.
-func TestStoreBusinessTablesHaveSoftDeleteColumn(t *testing.T) {
+// TestStoreTablesHaveSoftDeleteColumn pins the common soft-delete marker across
+// every application-owned table in audit.db.
+func TestStoreTablesHaveSoftDeleteColumn(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "audit.db"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
@@ -140,7 +140,7 @@ func TestStoreBusinessTablesHaveSoftDeleteColumn(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	for _, table := range softDeleteBusinessTables {
+	for _, table := range softDeleteTables {
 		ok, err := store.hasColumn(table, "delete")
 		if err != nil {
 			t.Fatalf("hasColumn(%s, delete): %v", table, err)

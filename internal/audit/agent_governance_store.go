@@ -156,43 +156,51 @@ type GovernanceResourceRulePage struct {
 }
 
 type GovernanceResourceRuleRow struct {
-	ID              int64  `json:"id"`
-	AgentTypeID     int64  `json:"agent_type_id"`
-	AgentTypeKey    string `json:"agent_type_key"`
-	AgentTypeName   string `json:"agent_type_name"`
-	Name            string `json:"name"`
-	ResourceType    string `json:"resource_type"`
-	PathPattern     string `json:"path_pattern"`
-	EnumerationMode string `json:"enumeration_mode"`
-	ScanProfileID   int64  `json:"scan_profile_id,omitempty"`
-	ScanProfileName string `json:"scan_profile_name,omitempty"`
-	Enabled         bool   `json:"enabled"`
-	Priority        int    `json:"priority"`
-	ResourceCount   int    `json:"resource_count"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	ID                  int64  `json:"id"`
+	AgentTypeID         int64  `json:"agent_type_id"`
+	AgentTypeKey        string `json:"agent_type_key"`
+	AgentTypeName       string `json:"agent_type_name"`
+	Name                string `json:"name"`
+	ResourceType        string `json:"resource_type"`
+	PathPattern         string `json:"path_pattern"`
+	EnumerationMode     string `json:"enumeration_mode"`
+	ScanProfileID       int64  `json:"scan_profile_id,omitempty"`
+	ScanProfileName     string `json:"scan_profile_name,omitempty"`
+	PreScanProfileID    int64  `json:"pre_scan_profile_id,omitempty"`
+	PreScanProfileName  string `json:"pre_scan_profile_name,omitempty"`
+	PostScanProfileID   int64  `json:"post_scan_profile_id,omitempty"`
+	PostScanProfileName string `json:"post_scan_profile_name,omitempty"`
+	Enabled             bool   `json:"enabled"`
+	Priority            int    `json:"priority"`
+	ResourceCount       int    `json:"resource_count"`
+	CreatedAt           string `json:"created_at"`
+	UpdatedAt           string `json:"updated_at"`
 }
 
 type GovernanceResourceRuleInput struct {
-	AgentTypeID     int64  `json:"agent_type_id"`
-	Name            string `json:"name"`
-	ResourceType    string `json:"resource_type"`
-	PathPattern     string `json:"path_pattern"`
-	EnumerationMode string `json:"enumeration_mode"`
-	ScanProfileID   int64  `json:"scan_profile_id,omitempty"`
-	Enabled         bool   `json:"enabled"`
-	Priority        int    `json:"priority"`
+	AgentTypeID       int64  `json:"agent_type_id"`
+	Name              string `json:"name"`
+	ResourceType      string `json:"resource_type"`
+	PathPattern       string `json:"path_pattern"`
+	EnumerationMode   string `json:"enumeration_mode"`
+	ScanProfileID     int64  `json:"scan_profile_id,omitempty"`
+	PreScanProfileID  int64  `json:"pre_scan_profile_id,omitempty"`
+	PostScanProfileID int64  `json:"post_scan_profile_id,omitempty"`
+	Enabled           bool   `json:"enabled"`
+	Priority          int    `json:"priority"`
 }
 
 type GovernanceResourceRulePatch struct {
-	AgentTypeID     *int64  `json:"agent_type_id,omitempty"`
-	Name            *string `json:"name,omitempty"`
-	ResourceType    *string `json:"resource_type,omitempty"`
-	PathPattern     *string `json:"path_pattern,omitempty"`
-	EnumerationMode *string `json:"enumeration_mode,omitempty"`
-	ScanProfileID   *int64  `json:"scan_profile_id,omitempty"`
-	Enabled         *bool   `json:"enabled,omitempty"`
-	Priority        *int    `json:"priority,omitempty"`
+	AgentTypeID       *int64  `json:"agent_type_id,omitempty"`
+	Name              *string `json:"name,omitempty"`
+	ResourceType      *string `json:"resource_type,omitempty"`
+	PathPattern       *string `json:"path_pattern,omitempty"`
+	EnumerationMode   *string `json:"enumeration_mode,omitempty"`
+	ScanProfileID     *int64  `json:"scan_profile_id,omitempty"`
+	PreScanProfileID  *int64  `json:"pre_scan_profile_id,omitempty"`
+	PostScanProfileID *int64  `json:"post_scan_profile_id,omitempty"`
+	Enabled           *bool   `json:"enabled,omitempty"`
+	Priority          *int    `json:"priority,omitempty"`
 }
 
 type GovernanceScanProfilePage struct {
@@ -332,9 +340,9 @@ SELECT t.id, COALESCE(t.type_key,''), COALESCE(t.name,''), COALESCE(t.vendor,'')
        COALESCE(t.kind,''), COALESCE(t.runtime,''), COALESCE(t.description,''),
        COALESCE(t.enabled,0), COALESCE(t."delete",0), COALESCE(CAST(t.created_at AS TEXT), ''),
        COALESCE(CAST(t.updated_at AS TEXT), ''),
-       (SELECT COUNT(*) FROM agents a WHERE COALESCE(a.agent_type_id,0) = t.id),
-       (SELECT COUNT(*) FROM agent_discovery_rules r WHERE r.agent_type_id = t.id),
-       (SELECT COUNT(*) FROM agent_resource_rules rr WHERE rr.agent_type_id = t.id)
+       (SELECT COUNT(*) FROM agents a WHERE COALESCE(a.agent_type_id,0) = t.id AND COALESCE(a."delete",0) = 0),
+       (SELECT COUNT(*) FROM agent_discovery_rules r WHERE r.agent_type_id = t.id AND COALESCE(r."delete",0) = 0),
+       (SELECT COUNT(*) FROM agent_resource_rules rr WHERE rr.agent_type_id = t.id AND COALESCE(rr."delete",0) = 0)
 FROM agent_types t
 WHERE `+clause+`
 ORDER BY COALESCE(t.enabled,0) DESC, LOWER(t.name), t.id
@@ -359,16 +367,29 @@ func (s *Store) CreateGovernanceAgentType(in GovernanceAgentTypeInput) (Governan
 		return GovernanceAgentTypeRow{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := s.execDB(context.Background(), "governance_agent_type_create", `
+	_, err := s.execDB(context.Background(), "governance_agent_type_create", `
 INSERT INTO agent_types (type_key, name, vendor, kind, runtime, description, enabled, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(type_key) DO UPDATE SET
+  name = excluded.name,
+  vendor = excluded.vendor,
+  kind = excluded.kind,
+  runtime = excluded.runtime,
+  description = excluded.description,
+  enabled = excluded.enabled,
+  updated_at = excluded.updated_at,
+  "delete" = 0`,
 		normalizeKey(in.TypeKey), strings.TrimSpace(in.Name), strings.TrimSpace(in.Vendor),
 		strings.TrimSpace(in.Kind), strings.TrimSpace(in.Runtime), strings.TrimSpace(in.Description),
 		boolInt(in.Enabled), now, now)
 	if err != nil {
 		return GovernanceAgentTypeRow{}, fmt.Errorf("audit: create agent type: %w", err)
 	}
-	id, _ := res.LastInsertId()
+	var id int64
+	if err := s.queryRowDB(context.Background(), "governance_agent_type_created_lookup",
+		`SELECT id FROM agent_types WHERE type_key = ?`, normalizeKey(in.TypeKey)).Scan(&id); err != nil {
+		return GovernanceAgentTypeRow{}, fmt.Errorf("audit: lookup created agent type: %w", err)
+	}
 	row, ok, err := s.GetGovernanceAgentType(id)
 	if err != nil {
 		return GovernanceAgentTypeRow{}, err
@@ -424,7 +445,7 @@ func (s *Store) UpdateGovernanceAgentType(id int64, patch GovernanceAgentTypePat
 	sets = append(sets, "updated_at = ?")
 	args = append(args, time.Now().UTC().Format(time.RFC3339Nano), id)
 	res, err := s.execDB(context.Background(), "governance_agent_type_update",
-		"UPDATE agent_types SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...)
+		"UPDATE agent_types SET "+strings.Join(sets, ", ")+" WHERE id = ? AND COALESCE(\"delete\",0) = 0", args...)
 	if err != nil {
 		return GovernanceAgentTypeRow{}, false, fmt.Errorf("audit: update agent type: %w", err)
 	}
@@ -465,9 +486,9 @@ SELECT t.id, COALESCE(t.type_key,''), COALESCE(t.name,''), COALESCE(t.vendor,'')
        COALESCE(t.kind,''), COALESCE(t.runtime,''), COALESCE(t.description,''),
        COALESCE(t.enabled,0), COALESCE(t."delete",0), COALESCE(CAST(t.created_at AS TEXT), ''),
        COALESCE(CAST(t.updated_at AS TEXT), ''),
-       (SELECT COUNT(*) FROM agents a WHERE COALESCE(a.agent_type_id,0) = t.id),
-       (SELECT COUNT(*) FROM agent_discovery_rules r WHERE r.agent_type_id = t.id),
-       (SELECT COUNT(*) FROM agent_resource_rules rr WHERE rr.agent_type_id = t.id)
+       (SELECT COUNT(*) FROM agents a WHERE COALESCE(a.agent_type_id,0) = t.id AND COALESCE(a."delete",0) = 0),
+       (SELECT COUNT(*) FROM agent_discovery_rules r WHERE r.agent_type_id = t.id AND COALESCE(r."delete",0) = 0),
+       (SELECT COUNT(*) FROM agent_resource_rules rr WHERE rr.agent_type_id = t.id AND COALESCE(rr."delete",0) = 0)
 FROM agent_types t
 WHERE t.id = ?`, id)
 	if err != nil {
@@ -486,7 +507,7 @@ WHERE t.id = ?`, id)
 
 func (s *Store) ListGovernanceDiscoveryRules(f GovernancePageFilter) (*GovernanceDiscoveryRulePage, error) {
 	page, size := normalizeGovernancePage(f.Page, f.PageSize)
-	where := []string{`COALESCE(t."delete",0) = 0`}
+	where := []string{`COALESCE(r."delete",0) = 0`, `COALESCE(t."delete",0) = 0`}
 	var args []any
 	if f.AgentTypeID > 0 {
 		where = append(where, "r.agent_type_id = ?")
@@ -517,7 +538,7 @@ WHERE `+clause, args...)
 	rows, err := s.queryDB(context.Background(), "governance_discovery_rule_list", `
 SELECT r.id, r.agent_type_id, COALESCE(t.type_key,''), COALESCE(t.name,''),
        COALESCE(r.rule_name,''), COALESCE(r.threshold,60), COALESCE(r.enabled,0),
-       (SELECT COUNT(*) FROM agent_discovery_conditions c WHERE c.rule_id = r.id),
+       (SELECT COUNT(*) FROM agent_discovery_conditions c WHERE c.rule_id = r.id AND COALESCE(c."delete",0) = 0),
        COALESCE(CAST(r.created_at AS TEXT), ''), COALESCE(CAST(r.updated_at AS TEXT), '')
 FROM agent_discovery_rules r
 JOIN agent_types t ON t.id = r.agent_type_id
@@ -550,14 +571,26 @@ func (s *Store) CreateGovernanceDiscoveryRule(in GovernanceDiscoveryRuleInput) (
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := tx.ExecContext(ctx, `
+	ruleName := strings.TrimSpace(in.RuleName)
+	_, err = tx.ExecContext(ctx, `
 INSERT INTO agent_discovery_rules (agent_type_id, rule_name, threshold, enabled, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)`,
-		in.AgentTypeID, strings.TrimSpace(in.RuleName), normalizeThreshold(in.Threshold), boolInt(in.Enabled), now, now)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(agent_type_id, rule_name) DO UPDATE SET
+  threshold = excluded.threshold,
+  enabled = excluded.enabled,
+  updated_at = excluded.updated_at,
+  "delete" = 0`,
+		in.AgentTypeID, ruleName, normalizeThreshold(in.Threshold), boolInt(in.Enabled), now, now)
 	if err != nil {
 		return GovernanceDiscoveryRuleRow{}, fmt.Errorf("audit: create discovery rule: %w", err)
 	}
-	id, _ := res.LastInsertId()
+	var id int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT id FROM agent_discovery_rules WHERE agent_type_id = ? AND rule_name = ?`,
+		in.AgentTypeID, ruleName,
+	).Scan(&id); err != nil {
+		return GovernanceDiscoveryRuleRow{}, fmt.Errorf("audit: lookup created discovery rule: %w", err)
+	}
 	for _, cond := range in.Conditions {
 		cond.RuleID = id
 		if _, err := insertDiscoveryCondition(ctx, tx, cond, now); err != nil {
@@ -603,7 +636,7 @@ func (s *Store) UpdateGovernanceDiscoveryRule(id int64, patch GovernanceDiscover
 	sets = append(sets, "updated_at = ?")
 	args = append(args, time.Now().UTC().Format(time.RFC3339Nano), id)
 	res, err := s.execDB(context.Background(), "governance_discovery_rule_update",
-		"UPDATE agent_discovery_rules SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...)
+		"UPDATE agent_discovery_rules SET "+strings.Join(sets, ", ")+" WHERE id = ? AND COALESCE(\"delete\",0) = 0", args...)
 	if err != nil {
 		return GovernanceDiscoveryRuleRow{}, false, fmt.Errorf("audit: update discovery rule: %w", err)
 	}
@@ -619,11 +652,30 @@ func (s *Store) DisableGovernanceDiscoveryRule(id int64) (GovernanceDiscoveryRul
 	return s.UpdateGovernanceDiscoveryRule(id, GovernanceDiscoveryRulePatch{Enabled: ptrBool(false)})
 }
 
+func (s *Store) DeleteGovernanceDiscoveryRule(id int64) (GovernanceDiscoveryRuleRow, bool, error) {
+	res, err := s.execDB(context.Background(), "governance_discovery_rule_delete",
+		`UPDATE agent_discovery_rules SET "delete" = 1, updated_at = ? WHERE id = ? AND COALESCE("delete",0) = 0`,
+		time.Now().UTC().Format(time.RFC3339Nano), id)
+	if err != nil {
+		return GovernanceDiscoveryRuleRow{}, false, fmt.Errorf("audit: delete discovery rule: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		row, ok, err := s.GetGovernanceDiscoveryRule(id)
+		if err != nil {
+			return GovernanceDiscoveryRuleRow{}, false, err
+		}
+		return row, ok, nil
+	}
+	row, ok, err := s.GetGovernanceDiscoveryRule(id)
+	return row, ok, err
+}
+
 func (s *Store) GetGovernanceDiscoveryRule(id int64) (GovernanceDiscoveryRuleRow, bool, error) {
 	rows, err := s.queryDB(context.Background(), "governance_discovery_rule_get", `
 SELECT r.id, r.agent_type_id, COALESCE(t.type_key,''), COALESCE(t.name,''),
        COALESCE(r.rule_name,''), COALESCE(r.threshold,60), COALESCE(r.enabled,0),
-       (SELECT COUNT(*) FROM agent_discovery_conditions c WHERE c.rule_id = r.id),
+       (SELECT COUNT(*) FROM agent_discovery_conditions c WHERE c.rule_id = r.id AND COALESCE(c."delete",0) = 0),
        COALESCE(CAST(r.created_at AS TEXT), ''), COALESCE(CAST(r.updated_at AS TEXT), '')
 FROM agent_discovery_rules r
 JOIN agent_types t ON t.id = r.agent_type_id
@@ -664,7 +716,7 @@ SELECT id, rule_id, COALESCE(condition_type,''), COALESCE(field,''), COALESCE(op
        COALESCE(value,''), COALESCE(weight,0), COALESCE(required,0), COALESCE(enabled,0),
        COALESCE(CAST(created_at AS TEXT), ''), COALESCE(CAST(updated_at AS TEXT), '')
 FROM agent_discovery_conditions
-WHERE rule_id = ?
+WHERE rule_id = ? AND COALESCE("delete",0) = 0
 ORDER BY COALESCE(required,0) DESC, COALESCE(weight,0) DESC, id`, ruleID)
 	if err != nil {
 		return nil, fmt.Errorf("audit: list discovery conditions: %w", err)
@@ -690,11 +742,24 @@ func (s *Store) CreateGovernanceDiscoveryCondition(ruleID int64, in GovernanceDi
 	}
 	in.RuleID = ruleID
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := insertDiscoveryCondition(context.Background(), s.db, in, now)
+	ctx := context.Background()
+	_, err := insertDiscoveryCondition(ctx, s.db, in, now)
 	if err != nil {
 		return GovernanceDiscoveryConditionRow{}, err
 	}
-	id, _ := res.LastInsertId()
+	var id int64
+	if err := s.queryRowDB(ctx, "governance_discovery_condition_created_lookup", `
+SELECT id
+FROM agent_discovery_conditions
+WHERE rule_id = ? AND condition_type = ? AND field = ? AND operator = ? AND value = ?`,
+		ruleID,
+		strings.TrimSpace(in.ConditionType),
+		strings.TrimSpace(in.Field),
+		strings.TrimSpace(in.Operator),
+		strings.TrimSpace(in.Value),
+	).Scan(&id); err != nil {
+		return GovernanceDiscoveryConditionRow{}, fmt.Errorf("audit: lookup created discovery condition: %w", err)
+	}
 	row, ok, err := s.GetGovernanceDiscoveryCondition(id)
 	if err != nil {
 		return GovernanceDiscoveryConditionRow{}, err
@@ -755,7 +820,7 @@ func (s *Store) UpdateGovernanceDiscoveryCondition(id int64, patch GovernanceDis
 	sets = append(sets, "updated_at = ?")
 	args = append(args, time.Now().UTC().Format(time.RFC3339Nano), id)
 	res, err := s.execDB(context.Background(), "governance_discovery_condition_update",
-		"UPDATE agent_discovery_conditions SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...)
+		"UPDATE agent_discovery_conditions SET "+strings.Join(sets, ", ")+" WHERE id = ? AND COALESCE(\"delete\",0) = 0", args...)
 	if err != nil {
 		return GovernanceDiscoveryConditionRow{}, false, fmt.Errorf("audit: update discovery condition: %w", err)
 	}
@@ -769,7 +834,8 @@ func (s *Store) UpdateGovernanceDiscoveryCondition(id int64, patch GovernanceDis
 
 func (s *Store) DeleteGovernanceDiscoveryCondition(id int64) (bool, error) {
 	res, err := s.execDB(context.Background(), "governance_discovery_condition_delete",
-		"DELETE FROM agent_discovery_conditions WHERE id = ?", id)
+		`UPDATE agent_discovery_conditions SET "delete" = 1, updated_at = ? WHERE id = ? AND COALESCE("delete",0) = 0`,
+		time.Now().UTC().Format(time.RFC3339Nano), id)
 	if err != nil {
 		return false, fmt.Errorf("audit: delete discovery condition: %w", err)
 	}
@@ -797,7 +863,7 @@ WHERE id = ?`, id)
 
 func (s *Store) ListGovernanceResourceRules(f GovernancePageFilter) (*GovernanceResourceRulePage, error) {
 	page, size := normalizeGovernancePage(f.Page, f.PageSize)
-	where := []string{`COALESCE(t."delete",0) = 0`}
+	where := []string{`COALESCE(rr."delete",0) = 0`, `COALESCE(t."delete",0) = 0`}
 	var args []any
 	if f.AgentTypeID > 0 {
 		where = append(where, "rr.agent_type_id = ?")
@@ -829,7 +895,7 @@ func (s *Store) ListGovernanceResourceRules(f GovernancePageFilter) (*Governance
 SELECT COUNT(*)
 FROM agent_resource_rules rr
 JOIN agent_types t ON t.id = rr.agent_type_id
-LEFT JOIN resource_scan_profiles p ON p.id = rr.scan_profile_id
+LEFT JOIN resource_scan_profiles p ON p.id = rr.scan_profile_id AND COALESCE(p."delete",0) = 0
 WHERE `+clause, args...)
 	if err != nil {
 		return nil, err
@@ -838,12 +904,16 @@ WHERE `+clause, args...)
 SELECT rr.id, rr.agent_type_id, COALESCE(t.type_key,''), COALESCE(t.name,''),
        COALESCE(rr.name,''), COALESCE(rr.resource_type,''), COALESCE(rr.path_pattern,''),
        COALESCE(rr.enumeration_mode,'children'), COALESCE(rr.scan_profile_id,0),
-       COALESCE(p.name,''), COALESCE(rr.enabled,0), COALESCE(rr.priority,100),
-       (SELECT COUNT(*) FROM static_resources sr WHERE COALESCE(sr.resource_rule_id,0) = rr.id),
+       COALESCE(p.name,''), COALESCE(rr.pre_scan_profile_id,0), COALESCE(pre.name,''),
+       COALESCE(rr.post_scan_profile_id,0), COALESCE(post.name,''),
+       COALESCE(rr.enabled,0), COALESCE(rr.priority,100),
+       (SELECT COUNT(*) FROM static_resources sr WHERE COALESCE(sr.resource_rule_id,0) = rr.id AND COALESCE(sr."delete",0) = 0),
        COALESCE(CAST(rr.created_at AS TEXT), ''), COALESCE(CAST(rr.updated_at AS TEXT), '')
 FROM agent_resource_rules rr
 JOIN agent_types t ON t.id = rr.agent_type_id
-LEFT JOIN resource_scan_profiles p ON p.id = rr.scan_profile_id
+LEFT JOIN resource_scan_profiles p ON p.id = rr.scan_profile_id AND COALESCE(p."delete",0) = 0
+LEFT JOIN resource_pre_scan_profiles pre ON pre.id = rr.pre_scan_profile_id AND COALESCE(pre."delete",0) = 0
+LEFT JOIN resource_post_scan_profiles post ON post.id = rr.post_scan_profile_id AND COALESCE(post."delete",0) = 0
 WHERE `+clause+`
 ORDER BY COALESCE(rr.enabled,0) DESC, COALESCE(t.type_key,''), COALESCE(rr.priority,100), rr.id
 LIMIT ? OFFSET ?`, append(append([]any{}, args...), size, (page-1)*size)...)
@@ -867,18 +937,45 @@ func (s *Store) CreateGovernanceResourceRule(in GovernanceResourceRuleInput) (Go
 		return GovernanceResourceRuleRow{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := s.execDB(context.Background(), "governance_resource_rule_create", `
+	name := strings.TrimSpace(in.Name)
+	preScanProfileID := in.PreScanProfileID
+	if preScanProfileID <= 0 {
+		preScanProfileID = s.DefaultPreScanProfileID()
+	}
+	postScanProfileID := in.PostScanProfileID
+	if postScanProfileID <= 0 {
+		postScanProfileID = s.DefaultPostScanProfileID()
+	}
+	_, err := s.execDB(context.Background(), "governance_resource_rule_create", `
 INSERT INTO agent_resource_rules (
   agent_type_id, name, resource_type, path_pattern, enumeration_mode,
-  scan_profile_id, enabled, priority, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		in.AgentTypeID, strings.TrimSpace(in.Name), normalizeResourceType(in.ResourceType),
+  scan_profile_id, pre_scan_profile_id, post_scan_profile_id, enabled, priority, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(agent_type_id, name) DO UPDATE SET
+  resource_type = excluded.resource_type,
+  path_pattern = excluded.path_pattern,
+  enumeration_mode = excluded.enumeration_mode,
+  scan_profile_id = excluded.scan_profile_id,
+  pre_scan_profile_id = excluded.pre_scan_profile_id,
+  post_scan_profile_id = excluded.post_scan_profile_id,
+  enabled = excluded.enabled,
+  priority = excluded.priority,
+  updated_at = excluded.updated_at,
+  "delete" = 0`,
+		in.AgentTypeID, name, normalizeResourceType(in.ResourceType),
 		strings.TrimSpace(in.PathPattern), normalizeEnumerationMode(in.EnumerationMode),
-		nullInt64Value(in.ScanProfileID), boolInt(in.Enabled), normalizePriority(in.Priority), now, now)
+		nullInt64Value(in.ScanProfileID), nullInt64Value(preScanProfileID), nullInt64Value(postScanProfileID),
+		boolInt(in.Enabled), normalizePriority(in.Priority), now, now)
 	if err != nil {
 		return GovernanceResourceRuleRow{}, fmt.Errorf("audit: create resource rule: %w", err)
 	}
-	id, _ := res.LastInsertId()
+	var id int64
+	if err := s.queryRowDB(context.Background(), "governance_resource_rule_created_lookup",
+		`SELECT id FROM agent_resource_rules WHERE agent_type_id = ? AND name = ?`,
+		in.AgentTypeID, name,
+	).Scan(&id); err != nil {
+		return GovernanceResourceRuleRow{}, fmt.Errorf("audit: lookup created resource rule: %w", err)
+	}
 	row, ok, err := s.GetGovernanceResourceRule(id)
 	if err != nil {
 		return GovernanceResourceRuleRow{}, err
@@ -935,6 +1032,14 @@ func (s *Store) UpdateGovernanceResourceRule(id int64, patch GovernanceResourceR
 		sets = append(sets, "scan_profile_id = ?")
 		args = append(args, nullInt64Value(*patch.ScanProfileID))
 	}
+	if patch.PreScanProfileID != nil {
+		sets = append(sets, "pre_scan_profile_id = ?")
+		args = append(args, nullInt64Value(*patch.PreScanProfileID))
+	}
+	if patch.PostScanProfileID != nil {
+		sets = append(sets, "post_scan_profile_id = ?")
+		args = append(args, nullInt64Value(*patch.PostScanProfileID))
+	}
 	if patch.Enabled != nil {
 		sets = append(sets, "enabled = ?")
 		args = append(args, boolInt(*patch.Enabled))
@@ -950,7 +1055,7 @@ func (s *Store) UpdateGovernanceResourceRule(id int64, patch GovernanceResourceR
 	sets = append(sets, "updated_at = ?")
 	args = append(args, time.Now().UTC().Format(time.RFC3339Nano), id)
 	res, err := s.execDB(context.Background(), "governance_resource_rule_update",
-		"UPDATE agent_resource_rules SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...)
+		"UPDATE agent_resource_rules SET "+strings.Join(sets, ", ")+" WHERE id = ? AND COALESCE(\"delete\",0) = 0", args...)
 	if err != nil {
 		return GovernanceResourceRuleRow{}, false, fmt.Errorf("audit: update resource rule: %w", err)
 	}
@@ -966,17 +1071,40 @@ func (s *Store) DisableGovernanceResourceRule(id int64) (GovernanceResourceRuleR
 	return s.UpdateGovernanceResourceRule(id, GovernanceResourceRulePatch{Enabled: ptrBool(false)})
 }
 
+func (s *Store) DeleteGovernanceResourceRule(id int64) (GovernanceResourceRuleRow, bool, error) {
+	res, err := s.execDB(context.Background(), "governance_resource_rule_delete",
+		`UPDATE agent_resource_rules SET "delete" = 1, updated_at = ? WHERE id = ? AND COALESCE("delete",0) = 0`,
+		time.Now().UTC().Format(time.RFC3339Nano), id)
+	if err != nil {
+		return GovernanceResourceRuleRow{}, false, fmt.Errorf("audit: delete resource rule: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		row, ok, err := s.GetGovernanceResourceRule(id)
+		if err != nil {
+			return GovernanceResourceRuleRow{}, false, err
+		}
+		return row, ok, nil
+	}
+	row, ok, err := s.GetGovernanceResourceRule(id)
+	return row, ok, err
+}
+
 func (s *Store) GetGovernanceResourceRule(id int64) (GovernanceResourceRuleRow, bool, error) {
 	rows, err := s.queryDB(context.Background(), "governance_resource_rule_get", `
 SELECT rr.id, rr.agent_type_id, COALESCE(t.type_key,''), COALESCE(t.name,''),
        COALESCE(rr.name,''), COALESCE(rr.resource_type,''), COALESCE(rr.path_pattern,''),
        COALESCE(rr.enumeration_mode,'children'), COALESCE(rr.scan_profile_id,0),
-       COALESCE(p.name,''), COALESCE(rr.enabled,0), COALESCE(rr.priority,100),
-       (SELECT COUNT(*) FROM static_resources sr WHERE COALESCE(sr.resource_rule_id,0) = rr.id),
+       COALESCE(p.name,''), COALESCE(rr.pre_scan_profile_id,0), COALESCE(pre.name,''),
+       COALESCE(rr.post_scan_profile_id,0), COALESCE(post.name,''),
+       COALESCE(rr.enabled,0), COALESCE(rr.priority,100),
+       (SELECT COUNT(*) FROM static_resources sr WHERE COALESCE(sr.resource_rule_id,0) = rr.id AND COALESCE(sr."delete",0) = 0),
        COALESCE(CAST(rr.created_at AS TEXT), ''), COALESCE(CAST(rr.updated_at AS TEXT), '')
 FROM agent_resource_rules rr
 JOIN agent_types t ON t.id = rr.agent_type_id
-LEFT JOIN resource_scan_profiles p ON p.id = rr.scan_profile_id
+LEFT JOIN resource_scan_profiles p ON p.id = rr.scan_profile_id AND COALESCE(p."delete",0) = 0
+LEFT JOIN resource_pre_scan_profiles pre ON pre.id = rr.pre_scan_profile_id AND COALESCE(pre."delete",0) = 0
+LEFT JOIN resource_post_scan_profiles post ON post.id = rr.post_scan_profile_id AND COALESCE(post."delete",0) = 0
 WHERE rr.id = ?`, id)
 	if err != nil {
 		return GovernanceResourceRuleRow{}, false, fmt.Errorf("audit: get resource rule: %w", err)
@@ -991,7 +1119,7 @@ WHERE rr.id = ?`, id)
 
 func (s *Store) ListGovernanceScanProfiles(f GovernancePageFilter) (*GovernanceScanProfilePage, error) {
 	page, size := normalizeGovernancePage(f.Page, f.PageSize)
-	where := []string{"1=1"}
+	where := []string{`COALESCE(p."delete",0) = 0`}
 	var args []any
 	if f.ResourceType = strings.TrimSpace(f.ResourceType); f.ResourceType != "" {
 		where = append(where, "LOWER(COALESCE(p.resource_type,'')) = ?")
@@ -1014,9 +1142,9 @@ func (s *Store) ListGovernanceScanProfiles(f GovernancePageFilter) (*GovernanceS
 	rows, err := s.queryDB(context.Background(), "governance_scan_profile_list", `
 SELECT p.id, COALESCE(p.name,''), COALESCE(p.resource_type,''), COALESCE(p.enabled,0),
        COALESCE(p.description,''),
-       (SELECT COUNT(*) FROM resource_scan_profile_capabilities pc WHERE pc.profile_id = p.id),
-       (SELECT COUNT(*) FROM agent_resource_rules rr WHERE COALESCE(rr.scan_profile_id,0) = p.id),
-       (SELECT COUNT(*) FROM static_resources sr WHERE COALESCE(sr.scan_profile_id,0) = p.id),
+       (SELECT COUNT(*) FROM resource_scan_profile_capabilities pc WHERE pc.profile_id = p.id AND COALESCE(pc."delete",0) = 0),
+       (SELECT COUNT(*) FROM agent_resource_rules rr WHERE COALESCE(rr.scan_profile_id,0) = p.id AND COALESCE(rr."delete",0) = 0),
+       (SELECT COUNT(*) FROM static_resources sr WHERE COALESCE(sr.scan_profile_id,0) = p.id AND COALESCE(sr."delete",0) = 0),
        COALESCE(CAST(p.created_at AS TEXT), ''), COALESCE(CAST(p.updated_at AS TEXT), '')
 FROM resource_scan_profiles p
 WHERE `+clause+`
@@ -1062,15 +1190,25 @@ func (s *Store) CreateGovernanceScanProfile(in GovernanceScanProfileInput) (Gove
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := tx.ExecContext(ctx, `
+	name := strings.TrimSpace(in.Name)
+	_, err = tx.ExecContext(ctx, `
 INSERT INTO resource_scan_profiles (name, resource_type, enabled, description, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)`,
-		strings.TrimSpace(in.Name), normalizeResourceType(in.ResourceType), boolInt(in.Enabled),
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(name) DO UPDATE SET
+  resource_type = excluded.resource_type,
+  enabled = excluded.enabled,
+  description = excluded.description,
+  updated_at = excluded.updated_at,
+  "delete" = 0`,
+		name, normalizeResourceType(in.ResourceType), boolInt(in.Enabled),
 		strings.TrimSpace(in.Description), now, now)
 	if err != nil {
 		return GovernanceScanProfileRow{}, fmt.Errorf("audit: create scan profile: %w", err)
 	}
-	id, _ := res.LastInsertId()
+	var id int64
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM resource_scan_profiles WHERE name = ?`, name).Scan(&id); err != nil {
+		return GovernanceScanProfileRow{}, fmt.Errorf("audit: lookup created scan profile: %w", err)
+	}
 	if err := replaceProfileCapabilities(ctx, tx, id, in.Capabilities, now); err != nil {
 		return GovernanceScanProfileRow{}, err
 	}
@@ -1121,7 +1259,7 @@ func (s *Store) UpdateGovernanceScanProfile(id int64, patch GovernanceScanProfil
 	sets = append(sets, "updated_at = ?")
 	args = append(args, time.Now().UTC().Format(time.RFC3339Nano), id)
 	res, err := s.execDB(context.Background(), "governance_scan_profile_update",
-		"UPDATE resource_scan_profiles SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...)
+		"UPDATE resource_scan_profiles SET "+strings.Join(sets, ", ")+" WHERE id = ? AND COALESCE(\"delete\",0) = 0", args...)
 	if err != nil {
 		return GovernanceScanProfileRow{}, false, fmt.Errorf("audit: update scan profile: %w", err)
 	}
@@ -1135,6 +1273,25 @@ func (s *Store) UpdateGovernanceScanProfile(id int64, patch GovernanceScanProfil
 
 func (s *Store) DisableGovernanceScanProfile(id int64) (GovernanceScanProfileRow, bool, error) {
 	return s.UpdateGovernanceScanProfile(id, GovernanceScanProfilePatch{Enabled: ptrBool(false)})
+}
+
+func (s *Store) DeleteGovernanceScanProfile(id int64) (GovernanceScanProfileRow, bool, error) {
+	res, err := s.execDB(context.Background(), "governance_scan_profile_delete",
+		`UPDATE resource_scan_profiles SET "delete" = 1, updated_at = ? WHERE id = ? AND COALESCE("delete",0) = 0`,
+		time.Now().UTC().Format(time.RFC3339Nano), id)
+	if err != nil {
+		return GovernanceScanProfileRow{}, false, fmt.Errorf("audit: delete scan profile: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		row, ok, err := s.GetGovernanceScanProfile(id)
+		if err != nil {
+			return GovernanceScanProfileRow{}, false, err
+		}
+		return row, ok, nil
+	}
+	row, ok, err := s.GetGovernanceScanProfile(id)
+	return row, ok, err
 }
 
 func (s *Store) ReplaceGovernanceScanProfileCapabilities(id int64, caps []GovernanceProfileCapabilityInput) (GovernanceScanProfileRow, bool, error) {
@@ -1151,7 +1308,7 @@ func (s *Store) ReplaceGovernanceScanProfileCapabilities(id int64, caps []Govern
 	if err := replaceProfileCapabilities(ctx, tx, id, caps, now); err != nil {
 		return GovernanceScanProfileRow{}, false, err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE resource_scan_profiles SET updated_at = ? WHERE id = ?", now, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE resource_scan_profiles SET updated_at = ? WHERE id = ? AND COALESCE("delete",0) = 0`, now, id); err != nil {
 		return GovernanceScanProfileRow{}, false, fmt.Errorf("audit: touch scan profile: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -1165,9 +1322,9 @@ func (s *Store) GetGovernanceScanProfile(id int64) (GovernanceScanProfileRow, bo
 	rows, err := s.queryDB(context.Background(), "governance_scan_profile_get", `
 SELECT p.id, COALESCE(p.name,''), COALESCE(p.resource_type,''), COALESCE(p.enabled,0),
        COALESCE(p.description,''),
-       (SELECT COUNT(*) FROM resource_scan_profile_capabilities pc WHERE pc.profile_id = p.id),
-       (SELECT COUNT(*) FROM agent_resource_rules rr WHERE COALESCE(rr.scan_profile_id,0) = p.id),
-       (SELECT COUNT(*) FROM static_resources sr WHERE COALESCE(sr.scan_profile_id,0) = p.id),
+       (SELECT COUNT(*) FROM resource_scan_profile_capabilities pc WHERE pc.profile_id = p.id AND COALESCE(pc."delete",0) = 0),
+       (SELECT COUNT(*) FROM agent_resource_rules rr WHERE COALESCE(rr.scan_profile_id,0) = p.id AND COALESCE(rr."delete",0) = 0),
+       (SELECT COUNT(*) FROM static_resources sr WHERE COALESCE(sr.scan_profile_id,0) = p.id AND COALESCE(sr."delete",0) = 0),
        COALESCE(CAST(p.created_at AS TEXT), ''), COALESCE(CAST(p.updated_at AS TEXT), '')
 FROM resource_scan_profiles p
 WHERE p.id = ?`, id)
@@ -1202,7 +1359,7 @@ WHERE p.id = ?`, id)
 }
 
 func (s *Store) ListGovernanceScanCapabilities(f GovernancePageFilter) ([]GovernanceScanCapabilityRow, error) {
-	where := []string{"1=1"}
+	where := []string{`COALESCE("delete",0) = 0`}
 	var args []any
 	if f.Enabled != nil {
 		where = append(where, "COALESCE(enabled,0) = ?")
@@ -1248,7 +1405,7 @@ SELECT pc.profile_id, pc.capability_id, COALESCE(c.capability_key,''), COALESCE(
        COALESCE(pc.config_json,''), COALESCE(c.description,'')
 FROM resource_scan_profile_capabilities pc
 JOIN security_scan_capabilities c ON c.id = pc.capability_id
-WHERE pc.profile_id = ?
+WHERE pc.profile_id = ? AND COALESCE(pc."delete",0) = 0 AND COALESCE(c."delete",0) = 0
 ORDER BY COALESCE(pc.priority,100), pc.capability_id`, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("audit: list profile capabilities: %w", err)
@@ -1274,7 +1431,7 @@ ORDER BY COALESCE(pc.priority,100), pc.capability_id`, profileID)
 
 func (s *Store) ListGovernanceResourceActions(f GovernancePageFilter) (*GovernanceResourceActionPage, error) {
 	page, size := normalizeGovernancePage(f.Page, f.PageSize)
-	where := []string{"1=1"}
+	where := []string{`COALESCE("delete",0) = 0`}
 	var args []any
 	if f.TargetType = strings.TrimSpace(f.TargetType); f.TargetType != "" {
 		where = append(where, "LOWER(target_type) = ?")
@@ -1400,7 +1557,9 @@ func (s *Store) UpdateGovernanceResourceAction(id string, patch GovernanceResour
 }
 
 func (s *Store) DeleteGovernanceResourceAction(id string) (bool, error) {
-	res, err := s.execDB(context.Background(), "governance_action_delete", "DELETE FROM actions WHERE id = ?", strings.TrimSpace(id))
+	res, err := s.execDB(context.Background(), "governance_action_delete",
+		`UPDATE actions SET "delete" = 1, updated_at = ? WHERE id = ? AND COALESCE("delete",0) = 0`,
+		time.Now().UTC(), strings.TrimSpace(id))
 	if err != nil {
 		return false, fmt.Errorf("audit: delete action: %w", err)
 	}
@@ -1409,12 +1568,12 @@ func (s *Store) DeleteGovernanceResourceAction(id string) (bool, error) {
 }
 
 func (s *Store) GetGovernanceResourceActionByTarget(targetType, targetName, connector string) (GovernanceResourceActionRow, bool, error) {
-	return s.getGovernanceResourceAction("target_type = ? AND target_name = ? AND connector = ?",
+	return s.getGovernanceResourceAction(`target_type = ? AND target_name = ? AND connector = ? AND COALESCE("delete",0) = 0`,
 		strings.TrimSpace(targetType), strings.TrimSpace(targetName), strings.TrimSpace(connector))
 }
 
 func (s *Store) GetGovernanceResourceActionByID(id string) (GovernanceResourceActionRow, bool, error) {
-	return s.getGovernanceResourceAction("id = ?", strings.TrimSpace(id))
+	return s.getGovernanceResourceAction(`id = ? AND COALESCE("delete",0) = 0`, strings.TrimSpace(id))
 }
 
 func (s *Store) getGovernanceResourceAction(where string, args ...any) (GovernanceResourceActionRow, bool, error) {
@@ -1436,7 +1595,7 @@ LIMIT 1`, args...)
 }
 
 func (s *Store) GetGovernanceAgentResourceContext(agentID string, agentTypeID int64) (AgentResourceRecord, bool, error) {
-	where := `COALESCE(a.status, 'observed') NOT IN ('gone', 'removed', 'disabled', 'retired') AND COALESCE(t."delete",0) = 0`
+	where := `COALESCE(a.status, 'observed') NOT IN ('gone', 'removed', 'disabled', 'retired') AND COALESCE(a."delete",0) = 0 AND COALESCE(t."delete",0) = 0`
 	var args []any
 	if strings.TrimSpace(agentID) != "" {
 		where += " AND a.id = ?"
@@ -1522,7 +1681,8 @@ func scanGovernanceResourceRule(rows *sql.Rows) (GovernanceResourceRuleRow, erro
 	var enabled int
 	if err := rows.Scan(&item.ID, &item.AgentTypeID, &item.AgentTypeKey, &item.AgentTypeName,
 		&item.Name, &item.ResourceType, &item.PathPattern, &item.EnumerationMode,
-		&item.ScanProfileID, &item.ScanProfileName, &enabled, &item.Priority,
+		&item.ScanProfileID, &item.ScanProfileName, &item.PreScanProfileID, &item.PreScanProfileName,
+		&item.PostScanProfileID, &item.PostScanProfileName, &enabled, &item.Priority,
 		&item.ResourceCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return item, fmt.Errorf("audit: scan resource rule row: %w", err)
 	}
@@ -1569,21 +1729,27 @@ func insertDiscoveryCondition(ctx context.Context, ex discoveryConditionInserter
 	return ex.ExecContext(ctx, `
 INSERT INTO agent_discovery_conditions (
   rule_id, condition_type, field, operator, value, weight, required, enabled, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(rule_id, condition_type, field, operator, value) DO UPDATE SET
+  weight = excluded.weight,
+  required = excluded.required,
+  enabled = excluded.enabled,
+  updated_at = excluded.updated_at,
+  "delete" = 0`,
 		in.RuleID, strings.TrimSpace(in.ConditionType), strings.TrimSpace(in.Field),
 		strings.TrimSpace(in.Operator), strings.TrimSpace(in.Value), in.Weight,
 		boolInt(in.Required), boolInt(in.Enabled), now, now)
 }
 
 func replaceProfileCapabilities(ctx context.Context, tx *sql.Tx, profileID int64, caps []GovernanceProfileCapabilityInput, now string) error {
-	if _, err := tx.ExecContext(ctx, "DELETE FROM resource_scan_profile_capabilities WHERE profile_id = ?", profileID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE resource_scan_profile_capabilities SET "delete" = 1, updated_at = ? WHERE profile_id = ? AND COALESCE("delete",0) = 0`, now, profileID); err != nil {
 		return fmt.Errorf("audit: clear profile capabilities: %w", err)
 	}
 	for i, cap := range caps {
 		id := cap.CapabilityID
 		if id <= 0 && strings.TrimSpace(cap.CapabilityKey) != "" {
 			if err := tx.QueryRowContext(ctx,
-				"SELECT id FROM security_scan_capabilities WHERE capability_key = ?",
+				`SELECT id FROM security_scan_capabilities WHERE capability_key = ? AND COALESCE("delete",0) = 0`,
 				strings.TrimSpace(cap.CapabilityKey),
 			).Scan(&id); err != nil {
 				return fmt.Errorf("audit: lookup capability %q: %w", cap.CapabilityKey, err)
@@ -1599,7 +1765,13 @@ func replaceProfileCapabilities(ctx context.Context, tx *sql.Tx, profileID int64
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO resource_scan_profile_capabilities (
   profile_id, capability_id, priority, enabled, config_json, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(profile_id, capability_id) DO UPDATE SET
+  priority = excluded.priority,
+  enabled = excluded.enabled,
+  config_json = excluded.config_json,
+  updated_at = excluded.updated_at,
+  "delete" = 0`,
 			profileID, id, priority, boolInt(cap.Enabled), strings.TrimSpace(cap.ConfigJSON), now, now); err != nil {
 			return fmt.Errorf("audit: insert profile capability: %w", err)
 		}

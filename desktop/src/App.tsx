@@ -42,7 +42,7 @@ import { RangePage } from "./pages/RangePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { StaticAssetsPage } from "./pages/StaticAssetsPage";
 import { TracePage } from "./pages/TracePage";
-import type { AgentInventory, AgentTraceSnapshot, AttackChainSnapshot, EnvironmentSnapshot, GatewayAuditSnapshot, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus, ScanScheduleSettings, ScanTaskKey, StaticResourceScanSettings } from "./types";
+import type { AgentInventory, AgentSnapshot, AgentTraceSnapshot, AttackChainSnapshot, EnvironmentSnapshot, GatewayAuditSnapshot, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus, ScanScheduleSettings, ScanTaskKey, StaticResourceScanSettings } from "./types";
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title } = Typography;
@@ -54,6 +54,7 @@ export default function App() {
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [environment, setEnvironment] = useState<EnvironmentSnapshot>();
   const [agents, setAgents] = useState<AgentInventory[]>([]);
+  const [agentTotal, setAgentTotal] = useState(0);
   const [agentWarning, setAgentWarning] = useState("");
   const [policy, setPolicy] = useState<GuardPolicy>();
   const [rangeStatus, setRangeStatus] = useState<RangeStatus>();
@@ -130,6 +131,12 @@ export default function App() {
     void persistPolicy(next);
   };
 
+  const applyAgentSnapshot = (snapshot: AgentSnapshot) => {
+    setAgents(snapshot.agents);
+    setAgentTotal(snapshot.total && snapshot.total > 0 ? snapshot.total : snapshot.agents.length);
+    setAgentWarning(snapshot.warning ?? "");
+  };
+
   const refreshTask = async (task: ScanTaskKey) => {
     switch (task) {
       case "environment":
@@ -137,8 +144,7 @@ export default function App() {
         return;
       case "agentDiscovery": {
         const snapshot = await getAgents();
-        setAgents(snapshot.agents);
-        setAgentWarning(snapshot.warning ?? "");
+        applyAgentSnapshot(snapshot);
         return;
       }
       case "behaviorTrace":
@@ -178,8 +184,7 @@ export default function App() {
     const results = await Promise.allSettled([getEnvironment(), getAgents(), getGuardPolicy(), getRangeStatus(), getProcessGuardAudit(), getAgentTrace(), getGatewayAudit(), getRangeReplayStatus(), getStaticResourceAgents(), getAttackChains()]);
     if (results[0].status === "fulfilled") setEnvironment(results[0].value);
     if (results[1].status === "fulfilled") {
-      setAgents(results[1].value.agents);
-      setAgentWarning(results[1].value.warning ?? "");
+      applyAgentSnapshot(results[1].value);
     }
     if (results[2].status === "fulfilled") setPolicy(results[2].value);
     if (results[3].status === "fulfilled") {
@@ -406,7 +411,7 @@ export default function App() {
           />
         );
       case "agents":
-        return <AgentsPage agents={agents} warning={agentWarning} loading={loading} onRefresh={() => refreshTask("agentDiscovery")} />;
+        return <AgentsPage agents={agents} totalAgents={agentTotal} warning={agentWarning} loading={loading} onRefresh={() => refreshTask("agentDiscovery")} />;
       case "governance":
         return <AgentGovernancePage />;
       case "trace":
@@ -452,7 +457,7 @@ export default function App() {
         );
       case "overview":
       default:
-        return <OverviewPage environment={environment} agentsCount={agents.length} policy={policy} enabledRules={enabledRules} readyCount={readyCount} totalCount={totalCount} onNavigate={setActive} onGatewayAction={(running) => void changeGatewayState(running)} />;
+        return <OverviewPage environment={environment} agentsCount={agentTotal || agents.length} policy={policy} enabledRules={enabledRules} readyCount={readyCount} totalCount={totalCount} onNavigate={setActive} onGatewayAction={(running) => void changeGatewayState(running)} />;
     }
   };
 

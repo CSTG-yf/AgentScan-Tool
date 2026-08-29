@@ -45,6 +45,14 @@ func (a *APIServer) handleAgentGovernanceAPI(w http.ResponseWriter, r *http.Requ
 		a.handleGovernanceScanCapabilities(w, r)
 	case "resource-actions":
 		a.handleGovernanceResourceActions(w, r, parts[1:])
+	case "pre-scan-profiles":
+		a.handleGovernancePreScanProfiles(w, r, parts[1:])
+	case "pre-scan-rules":
+		a.handleGovernancePreScanRules(w, r, parts[1:])
+	case "post-scan-profiles":
+		a.handleGovernancePostScanProfiles(w, r, parts[1:])
+	case "post-scan-rules":
+		a.handleGovernancePostScanRules(w, r, parts[1:])
 	case "admission-matrix":
 		a.handleGovernanceAdmissionMatrix(w, r)
 	case "admission":
@@ -92,11 +100,23 @@ func (a *APIServer) handleAgentGovernanceOverview(w http.ResponseWriter, r *http
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	preProfiles, err := a.store.ListGovernancePreScanProfiles(audit.GovernancePageFilter{PageSize: 1})
+	if err != nil {
+		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	postProfiles, err := a.store.ListGovernancePostScanProfiles(audit.GovernancePageFilter{PageSize: 1})
+	if err != nil {
+		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	a.writeJSON(w, http.StatusOK, map[string]any{
-		"agent_type_count":      agentTypes.Total,
-		"resource_rule_count":   resourceRules.Total,
-		"scan_profile_count":    profiles.Total,
-		"resource_action_count": actions.Total,
+		"agent_type_count":        agentTypes.Total,
+		"resource_rule_count":     resourceRules.Total,
+		"scan_profile_count":      profiles.Total,
+		"resource_action_count":   actions.Total,
+		"pre_scan_profile_count":  preProfiles.Total,
+		"post_scan_profile_count": postProfiles.Total,
 	})
 }
 
@@ -207,7 +227,7 @@ func (a *APIServer) handleGovernanceDiscoveryRules(w http.ResponseWriter, r *htt
 		row, found, err := a.store.UpdateGovernanceDiscoveryRule(id, body)
 		a.writeGovernanceMutated(w, r, row, found, err, "discovery-rule")
 	case http.MethodDelete:
-		row, found, err := a.store.DisableGovernanceDiscoveryRule(id)
+		row, found, err := a.store.DeleteGovernanceDiscoveryRule(id)
 		a.writeGovernanceMutated(w, r, row, found, err, "discovery-rule")
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -286,7 +306,7 @@ func (a *APIServer) handleGovernanceResourceRules(w http.ResponseWriter, r *http
 		row, found, err := a.store.UpdateGovernanceResourceRule(id, body)
 		a.writeGovernanceMutated(w, r, row, found, err, "resource-rule")
 	case http.MethodDelete:
-		row, found, err := a.store.DisableGovernanceResourceRule(id)
+		row, found, err := a.store.DeleteGovernanceResourceRule(id)
 		a.writeGovernanceMutated(w, r, row, found, err, "resource-rule")
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -347,7 +367,7 @@ func (a *APIServer) handleGovernanceScanProfiles(w http.ResponseWriter, r *http.
 		row, found, err := a.store.UpdateGovernanceScanProfile(id, body)
 		a.writeGovernanceMutated(w, r, row, found, err, "scan-profile")
 	case http.MethodDelete:
-		row, found, err := a.store.DisableGovernanceScanProfile(id)
+		row, found, err := a.store.DeleteGovernanceScanProfile(id)
 		a.writeGovernanceMutated(w, r, row, found, err, "scan-profile")
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -404,6 +424,190 @@ func (a *APIServer) handleGovernanceResourceActions(w http.ResponseWriter, r *ht
 	case http.MethodDelete:
 		found, err := a.store.DeleteGovernanceResourceAction(id)
 		a.writeGovernanceDeleted(w, r, found, err, "resource-action")
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *APIServer) handleGovernancePreScanProfiles(w http.ResponseWriter, r *http.Request, parts []string) {
+	if len(parts) == 0 {
+		switch r.Method {
+		case http.MethodGet:
+			page, err := a.store.ListGovernancePreScanProfiles(a.governanceFilter(r, true))
+			a.writeGovernanceResult(w, page, err)
+		case http.MethodPost:
+			var body audit.GovernancePreScanProfileInput
+			if !a.decodeGovernanceBody(w, r, &body) {
+				return
+			}
+			row, err := a.store.CreateGovernancePreScanProfile(body)
+			a.writeGovernanceCreated(w, r, row, err, "pre-scan-profile")
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+	id, ok := parseGovernanceID(parts[0])
+	if !ok {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id must be a positive integer"})
+		return
+	}
+	if len(parts) == 2 && parts[1] == "rules" {
+		switch r.Method {
+		case http.MethodGet:
+			page, err := a.store.ListGovernancePreScanRules(id, a.governanceFilter(r, true))
+			a.writeGovernanceResult(w, page, err)
+		case http.MethodPost:
+			var body audit.GovernancePreScanRuleInput
+			if !a.decodeGovernanceBody(w, r, &body) {
+				return
+			}
+			row, err := a.store.CreateGovernancePreScanRule(id, body)
+			a.writeGovernanceCreated(w, r, row, err, "pre-scan-rule")
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+	if len(parts) != 1 {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		row, found, err := a.store.GetGovernancePreScanProfile(id)
+		a.writeGovernanceMaybe(w, row, found, err)
+	case http.MethodPatch:
+		var body audit.GovernancePreScanProfilePatch
+		if !a.decodeGovernanceBody(w, r, &body) {
+			return
+		}
+		row, found, err := a.store.UpdateGovernancePreScanProfile(id, body)
+		a.writeGovernanceMutated(w, r, row, found, err, "pre-scan-profile")
+	case http.MethodDelete:
+		found, err := a.store.DeleteGovernancePreScanProfile(id)
+		a.writeGovernanceDeleted(w, r, found, err, "pre-scan-profile")
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *APIServer) handleGovernancePreScanRules(w http.ResponseWriter, r *http.Request, parts []string) {
+	if len(parts) != 1 {
+		http.NotFound(w, r)
+		return
+	}
+	id, ok := parseGovernanceID(parts[0])
+	if !ok {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id must be a positive integer"})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		row, found, err := a.store.GetGovernancePreScanRule(id)
+		a.writeGovernanceMaybe(w, row, found, err)
+	case http.MethodPatch:
+		var body audit.GovernancePreScanRulePatch
+		if !a.decodeGovernanceBody(w, r, &body) {
+			return
+		}
+		row, found, err := a.store.UpdateGovernancePreScanRule(id, body)
+		a.writeGovernanceMutated(w, r, row, found, err, "pre-scan-rule")
+	case http.MethodDelete:
+		found, err := a.store.DeleteGovernancePreScanRule(id)
+		a.writeGovernanceDeleted(w, r, found, err, "pre-scan-rule")
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *APIServer) handleGovernancePostScanProfiles(w http.ResponseWriter, r *http.Request, parts []string) {
+	if len(parts) == 0 {
+		switch r.Method {
+		case http.MethodGet:
+			page, err := a.store.ListGovernancePostScanProfiles(a.governanceFilter(r, true))
+			a.writeGovernanceResult(w, page, err)
+		case http.MethodPost:
+			var body audit.GovernancePostScanProfileInput
+			if !a.decodeGovernanceBody(w, r, &body) {
+				return
+			}
+			row, err := a.store.CreateGovernancePostScanProfile(body)
+			a.writeGovernanceCreated(w, r, row, err, "post-scan-profile")
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+	id, ok := parseGovernanceID(parts[0])
+	if !ok {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id must be a positive integer"})
+		return
+	}
+	if len(parts) == 2 && parts[1] == "rules" {
+		switch r.Method {
+		case http.MethodGet:
+			page, err := a.store.ListGovernancePostScanRules(id, a.governanceFilter(r, true))
+			a.writeGovernanceResult(w, page, err)
+		case http.MethodPost:
+			var body audit.GovernancePostScanRuleInput
+			if !a.decodeGovernanceBody(w, r, &body) {
+				return
+			}
+			row, err := a.store.CreateGovernancePostScanRule(id, body)
+			a.writeGovernanceCreated(w, r, row, err, "post-scan-rule")
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+	if len(parts) != 1 {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		row, found, err := a.store.GetGovernancePostScanProfile(id)
+		a.writeGovernanceMaybe(w, row, found, err)
+	case http.MethodPatch:
+		var body audit.GovernancePostScanProfilePatch
+		if !a.decodeGovernanceBody(w, r, &body) {
+			return
+		}
+		row, found, err := a.store.UpdateGovernancePostScanProfile(id, body)
+		a.writeGovernanceMutated(w, r, row, found, err, "post-scan-profile")
+	case http.MethodDelete:
+		found, err := a.store.DeleteGovernancePostScanProfile(id)
+		a.writeGovernanceDeleted(w, r, found, err, "post-scan-profile")
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *APIServer) handleGovernancePostScanRules(w http.ResponseWriter, r *http.Request, parts []string) {
+	if len(parts) != 1 {
+		http.NotFound(w, r)
+		return
+	}
+	id, ok := parseGovernanceID(parts[0])
+	if !ok {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id must be a positive integer"})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		row, found, err := a.store.GetGovernancePostScanRule(id)
+		a.writeGovernanceMaybe(w, row, found, err)
+	case http.MethodPatch:
+		var body audit.GovernancePostScanRulePatch
+		if !a.decodeGovernanceBody(w, r, &body) {
+			return
+		}
+		row, found, err := a.store.UpdateGovernancePostScanRule(id, body)
+		a.writeGovernanceMutated(w, r, row, found, err, "post-scan-rule")
+	case http.MethodDelete:
+		found, err := a.store.DeleteGovernancePostScanRule(id)
+		a.writeGovernanceDeleted(w, r, found, err, "post-scan-rule")
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}

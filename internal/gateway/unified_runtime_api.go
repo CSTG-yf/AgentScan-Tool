@@ -122,14 +122,14 @@ func (a *APIServer) handleAgentsAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *APIServer) handleAgentsList(w http.ResponseWriter, r *http.Request) {
-	snap, err := a.buildPageAgentInventory(pageLimit(r, 2000, 50, 5000))
+	snap, err := a.buildPageAgentInventory(pageLimit(r, 5000, 50, 5000))
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	agents := a.enrichAgentsRuntimeSecurity(snap.Agents)
 	filtered := filterAgentsForRequest(agents, r)
-	page, pageSize := requestPage(r, 1, 2000, 2000)
+	page, pageSize := requestPage(r, 1, 5000, 5000)
 	total := len(filtered)
 	filtered = paginateAgents(filtered, page, pageSize)
 	items := compactAgentListItems(filtered)
@@ -148,7 +148,7 @@ func (a *APIServer) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *APIServer) handleAgentsSummary(w http.ResponseWriter, r *http.Request) {
-	snap, err := a.buildPageAgentInventory(pageLimit(r, 2000, 50, 5000))
+	snap, err := a.buildPageAgentInventory(pageLimit(r, 5000, 50, 5000))
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -158,7 +158,7 @@ func (a *APIServer) handleAgentsSummary(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *APIServer) handleAgentDetail(w http.ResponseWriter, r *http.Request, agentID string) {
-	snap, err := a.buildPageAgentInventory(pageLimit(r, 2000, 50, 5000))
+	snap, err := a.buildPageAgentInventory(pageLimit(r, 5000, 50, 5000))
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

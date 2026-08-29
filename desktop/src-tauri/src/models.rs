@@ -36,6 +36,8 @@ pub struct AgentSnapshot {
     pub agents: Vec<AgentInventory>,
     #[serde(default, deserialize_with = "vec_or_default")]
     pub processes: Vec<AgentProcess>,
+    #[serde(default)]
+    pub total: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
 }

@@ -137,6 +137,8 @@ func TestAgentGovernanceReadEndpointsSmoke(t *testing.T) {
 		"/api/v1/agent-governance/scan-profiles",
 		"/api/v1/agent-governance/scan-capabilities",
 		"/api/v1/agent-governance/resource-actions",
+		"/api/v1/agent-governance/pre-scan-profiles",
+		"/api/v1/agent-governance/post-scan-profiles",
 		"/api/v1/agent-governance/admission-matrix",
 		"/api/v1/agent-governance/risk-model",
 	} {
@@ -146,5 +148,141 @@ func TestAgentGovernanceReadEndpointsSmoke(t *testing.T) {
 				t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestAgentGovernanceDecisionProfileCRUD(t *testing.T) {
+	api := newAgentGovernanceAPITest(t)
+
+	var agentTypes audit.GovernanceAgentTypePage
+	agentTypeRec := agentGovernanceRequest(t, api, http.MethodGet, "/api/v1/agent-governance/agent-types?page_size=1", nil)
+	if agentTypeRec.Code != http.StatusOK {
+		t.Fatalf("agent type list status = %d body = %s", agentTypeRec.Code, agentTypeRec.Body.String())
+	}
+	if err := json.NewDecoder(agentTypeRec.Body).Decode(&agentTypes); err != nil {
+		t.Fatalf("decode agent types: %v", err)
+	}
+	if len(agentTypes.Items) == 0 {
+		t.Fatal("expected seeded agent type")
+	}
+	agentTypeID := agentTypes.Items[0].ID
+
+	preCreate := agentGovernanceRequest(t, api, http.MethodPost, "/api/v1/agent-governance/pre-scan-profiles", map[string]any{
+		"profile_key": "pre-test",
+		"name":        "Pre Test",
+		"description": "pre profile test",
+		"enabled":     true,
+		"rules": []map[string]any{{
+			"rule_name":      "scan all",
+			"priority":       10,
+			"agent_type_id":  agentTypeID,
+			"resource_type":  "all",
+			"decision":       "scan",
+			"install_action": "none",
+			"file_action":    "none",
+			"runtime_action": "allow",
+			"enabled":        true,
+		}},
+	})
+	if preCreate.Code != http.StatusCreated {
+		t.Fatalf("pre profile create status = %d body = %s", preCreate.Code, preCreate.Body.String())
+	}
+	var preProfile audit.GovernancePreScanProfileRow
+	if err := json.NewDecoder(preCreate.Body).Decode(&preProfile); err != nil {
+		t.Fatalf("decode pre profile: %v", err)
+	}
+	if preProfile.ID == 0 || preProfile.RuleCount != 1 {
+		t.Fatalf("created pre profile = %+v", preProfile)
+	}
+
+	preRulesRec := agentGovernanceRequest(t, api, http.MethodGet, "/api/v1/agent-governance/pre-scan-profiles/"+strconv.FormatInt(preProfile.ID, 10)+"/rules", nil)
+	if preRulesRec.Code != http.StatusOK {
+		t.Fatalf("pre rule list status = %d body = %s", preRulesRec.Code, preRulesRec.Body.String())
+	}
+	var preRules audit.GovernancePreScanRulePage
+	if err := json.NewDecoder(preRulesRec.Body).Decode(&preRules); err != nil {
+		t.Fatalf("decode pre rules: %v", err)
+	}
+	if preRules.Total != 1 || len(preRules.Items) != 1 {
+		t.Fatalf("pre rules = %+v", preRules)
+	}
+
+	postCreate := agentGovernanceRequest(t, api, http.MethodPost, "/api/v1/agent-governance/post-scan-profiles", map[string]any{
+		"profile_key": "post-test",
+		"name":        "Post Test",
+		"description": "post profile test",
+		"enabled":     true,
+		"rules": []map[string]any{{
+			"rule_name":        "high blocks",
+			"priority":         10,
+			"resource_type":    "all",
+			"severity":         "HIGH",
+			"risk_level":       "high",
+			"malicious":        false,
+			"finding_category": "prompt_injection",
+			"decision":         "block",
+			"install_action":   "block",
+			"file_action":      "quarantine",
+			"runtime_action":   "block",
+			"enabled":          true,
+		}},
+	})
+	if postCreate.Code != http.StatusCreated {
+		t.Fatalf("post profile create status = %d body = %s", postCreate.Code, postCreate.Body.String())
+	}
+	var postProfile audit.GovernancePostScanProfileRow
+	if err := json.NewDecoder(postCreate.Body).Decode(&postProfile); err != nil {
+		t.Fatalf("decode post profile: %v", err)
+	}
+	if postProfile.ID == 0 || postProfile.RuleCount != 1 {
+		t.Fatalf("created post profile = %+v", postProfile)
+	}
+
+	resourceRuleRec := agentGovernanceRequest(t, api, http.MethodPost, "/api/v1/agent-governance/resource-rules", map[string]any{
+		"agent_type_id":        agentTypeID,
+		"name":                 "decision-bound-rule",
+		"resource_type":        "skill",
+		"path_pattern":         "${CONFIG_ROOT}/decision-bound-rule",
+		"enumeration_mode":     "exact",
+		"scan_profile_id":      0,
+		"pre_scan_profile_id":  preProfile.ID,
+		"post_scan_profile_id": postProfile.ID,
+		"enabled":              true,
+		"priority":             100,
+	})
+	if resourceRuleRec.Code != http.StatusCreated {
+		t.Fatalf("resource rule create status = %d body = %s", resourceRuleRec.Code, resourceRuleRec.Body.String())
+	}
+	var resourceRule audit.GovernanceResourceRuleRow
+	if err := json.NewDecoder(resourceRuleRec.Body).Decode(&resourceRule); err != nil {
+		t.Fatalf("decode resource rule: %v", err)
+	}
+	if resourceRule.PreScanProfileID != preProfile.ID || resourceRule.PostScanProfileID != postProfile.ID {
+		t.Fatalf("resource rule decision profiles = %+v", resourceRule)
+	}
+
+	preDelete := agentGovernanceRequest(t, api, http.MethodDelete, "/api/v1/agent-governance/pre-scan-rules/"+strconv.FormatInt(preRules.Items[0].ID, 10), nil)
+	if preDelete.Code != http.StatusOK {
+		t.Fatalf("pre rule delete status = %d body = %s", preDelete.Code, preDelete.Body.String())
+	}
+	postDelete := agentGovernanceRequest(t, api, http.MethodDelete, "/api/v1/agent-governance/post-scan-profiles/"+strconv.FormatInt(postProfile.ID, 10), nil)
+	if postDelete.Code != http.StatusOK {
+		t.Fatalf("post profile delete status = %d body = %s", postDelete.Code, postDelete.Body.String())
+	}
+
+	defaultDelete := agentGovernanceRequest(t, api, http.MethodGet, "/api/v1/agent-governance/pre-scan-profiles?keyword=default-pre-scan", nil)
+	if defaultDelete.Code != http.StatusOK {
+		t.Fatalf("default pre profile lookup status = %d body = %s", defaultDelete.Code, defaultDelete.Body.String())
+	}
+	var defaults audit.GovernancePreScanProfilePage
+	if err := json.NewDecoder(defaultDelete.Body).Decode(&defaults); err != nil {
+		t.Fatalf("decode default pre profile: %v", err)
+	}
+	if len(defaults.Items) == 0 {
+		t.Fatal("expected default pre-scan profile")
+	}
+	deleteDefaultRec := agentGovernanceRequest(t, api, http.MethodDelete, "/api/v1/agent-governance/pre-scan-profiles/"+strconv.FormatInt(defaults.Items[0].ID, 10), nil)
+	if deleteDefaultRec.Code != http.StatusBadRequest {
+		t.Fatalf("default pre profile delete status = %d body = %s", deleteDefaultRec.Code, deleteDefaultRec.Body.String())
 	}
 }

@@ -820,9 +820,6 @@ func (a *APIServer) buildPageAgentInventory(limit int) (pageAgentSnapshot, error
 
 	agents := make([]pageAgent, 0, len(agentRows))
 	for _, row := range agentRows {
-		if pageAgentInventoryHidden(row) {
-			continue
-		}
 		agent := pageAgentFromCanonical(row)
 		agents = append(agents, agent)
 		processes = append(processes, agent.ProcessesForSnapshot()...)

@@ -1,5 +1,5 @@
-pub(crate) mod agents;
 pub(crate) mod agent_governance;
+pub(crate) mod agents;
 pub(crate) mod attack_chains;
 pub(crate) mod audit;
 pub(crate) mod environment;

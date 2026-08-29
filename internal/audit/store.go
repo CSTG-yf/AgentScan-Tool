@@ -400,10 +400,9 @@ type migration struct {
 	apply       func(ex dbExecer) error
 }
 
-// softDeleteBusinessTables are persisted domain tables that should carry the
-// common soft-delete marker. schema_version is intentionally excluded because it
-// is migration metadata, not user/domain data.
-var softDeleteBusinessTables = []string{
+// softDeleteTables are application-owned SQLite tables that should carry the
+// common soft-delete marker. SQLite internal tables are intentionally excluded.
+var softDeleteTables = []string{
 	"audit_events",
 	"scan_results",
 	"findings",
@@ -419,6 +418,7 @@ var softDeleteBusinessTables = []string{
 	"static_resources",
 	"behavior_events",
 	"app_settings",
+	"schema_version",
 	"agent_types",
 	"agent_discovery_rules",
 	"agent_discovery_conditions",
@@ -426,6 +426,10 @@ var softDeleteBusinessTables = []string{
 	"resource_scan_profiles",
 	"security_scan_capabilities",
 	"resource_scan_profile_capabilities",
+	"resource_pre_scan_profiles",
+	"resource_pre_scan_rules",
+	"resource_post_scan_profiles",
+	"resource_post_scan_rules",
 	"agent_runtime_sessions",
 	"runtime_detections",
 	"runtime_detection_events",
@@ -472,7 +476,8 @@ var migrations = []migration{
 				details TEXT,
 				structured_json TEXT,
 				severity TEXT,
-				run_id TEXT
+				run_id TEXT,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE TABLE IF NOT EXISTS scan_results (
 				id TEXT PRIMARY KEY,
@@ -483,7 +488,8 @@ var migrations = []migration{
 				finding_count INTEGER,
 				max_severity TEXT,
 				raw_json TEXT,
-				run_id TEXT
+				run_id TEXT,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE TABLE IF NOT EXISTS findings (
 				id TEXT PRIMARY KEY,
@@ -495,6 +501,7 @@ var migrations = []migration{
 				remediation TEXT,
 				scanner TEXT NOT NULL,
 				tags TEXT,
+				"delete" INTEGER NOT NULL DEFAULT 0,
 				FOREIGN KEY (scan_id) REFERENCES scan_results(id)
 			);
 			CREATE TABLE IF NOT EXISTS actions (
@@ -504,7 +511,8 @@ var migrations = []migration{
 				source_path TEXT,
 				actions_json TEXT NOT NULL DEFAULT '{}',
 				reason TEXT,
-				updated_at DATETIME NOT NULL
+				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE TABLE IF NOT EXISTS network_egress_events (
 				id TEXT PRIMARY KEY,
@@ -518,7 +526,8 @@ var migrations = []migration{
 				decision_code TEXT,
 				blocked INTEGER NOT NULL DEFAULT 0,
 				severity TEXT NOT NULL DEFAULT 'INFO',
-				details TEXT
+				details TEXT,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE TABLE IF NOT EXISTS target_snapshots (
 				id TEXT PRIMARY KEY,
@@ -530,6 +539,7 @@ var migrations = []migration{
 				network_endpoints TEXT,
 				scan_id TEXT,
 				captured_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0,
 				UNIQUE(target_type, target_path)
 			);
 			CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_events(timestamp);
@@ -620,7 +630,8 @@ var migrations = []migration{
 				severity TEXT,
 				latency_ms INTEGER,
 				parse_error TEXT,
-				raw_response TEXT NOT NULL
+				raw_response TEXT NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE INDEX IF NOT EXISTS idx_judge_timestamp ON judge_responses(timestamp);
 			CREATE INDEX IF NOT EXISTS idx_judge_kind ON judge_responses(kind);
@@ -809,7 +820,8 @@ var migrations = []migration{
 				schema_version INTEGER,
 				content_hash TEXT,
 				generation INTEGER,
-				binary_version TEXT
+				binary_version TEXT,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE INDEX IF NOT EXISTS idx_scan_findings_scan_id ON scan_findings(scan_id);
 			CREATE INDEX IF NOT EXISTS idx_scan_findings_scanner ON scan_findings(scanner);
@@ -884,7 +896,8 @@ var migrations = []migration{
 				generation INTEGER,
 				binary_version TEXT,
 				agent_id TEXT,
-				sidecar_instance_id TEXT
+				sidecar_instance_id TEXT,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE INDEX IF NOT EXISTS idx_activity_timestamp ON activity_events(timestamp);
 			CREATE INDEX IF NOT EXISTS idx_activity_actor ON activity_events(actor);
@@ -923,7 +936,8 @@ var migrations = []migration{
 				content_hash TEXT,
 				generation INTEGER,
 				binary_version TEXT,
-				sidecar_instance_id TEXT
+				sidecar_instance_id TEXT,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE INDEX IF NOT EXISTS idx_sink_health_timestamp ON sink_health(timestamp);
 			CREATE INDEX IF NOT EXISTS idx_sink_health_sink ON sink_health(sink_name);
@@ -1426,7 +1440,8 @@ var migrations = []migration{
 				first_seen_at DATETIME NOT NULL,
 				last_seen_at DATETIME NOT NULL,
 				last_static_scan_at DATETIME,
-				metadata_json TEXT NOT NULL DEFAULT '{}'
+				metadata_json TEXT NOT NULL DEFAULT '{}',
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE TABLE IF NOT EXISTS agent_aliases (
 				alias TEXT PRIMARY KEY,
@@ -1436,6 +1451,7 @@ var migrations = []migration{
 				source TEXT NOT NULL DEFAULT '',
 				created_at DATETIME NOT NULL,
 				last_seen_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0,
 				FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 			);
 			CREATE TABLE IF NOT EXISTS static_resources (
@@ -1453,6 +1469,7 @@ var migrations = []migration{
 				content_hash TEXT,
 				status TEXT NOT NULL DEFAULT 'discovered',
 				source TEXT NOT NULL DEFAULT '',
+				"delete" INTEGER NOT NULL DEFAULT 0,
 				FOREIGN KEY (canonical_agent_id) REFERENCES agents(id) ON DELETE CASCADE
 			);
 			CREATE INDEX IF NOT EXISTS idx_agents_last_seen ON agents(last_seen_at);
@@ -1557,6 +1574,7 @@ var migrations = []migration{
 				session_id TEXT,
 				trace_id TEXT,
 				sidecar_instance_id TEXT,
+				"delete" INTEGER NOT NULL DEFAULT 0,
 				FOREIGN KEY (canonical_agent_id) REFERENCES agents(id) ON DELETE SET NULL
 			);
 			CREATE INDEX IF NOT EXISTS idx_behavior_events_timestamp ON behavior_events(timestamp DESC);
@@ -1577,7 +1595,8 @@ var migrations = []migration{
 			CREATE TABLE IF NOT EXISTS app_settings (
 				key TEXT PRIMARY KEY,
 				value_json TEXT NOT NULL,
-				updated_at DATETIME NOT NULL
+				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE INDEX IF NOT EXISTS idx_app_settings_updated_at ON app_settings(updated_at DESC);
 			`); err != nil {
@@ -1667,6 +1686,7 @@ var migrations = []migration{
 				enabled INTEGER NOT NULL DEFAULT 1,
 				created_at DATETIME NOT NULL,
 				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0,
 				FOREIGN KEY (agent_type_id) REFERENCES agent_types(id) ON DELETE CASCADE,
 				UNIQUE(agent_type_id, rule_name)
 			);
@@ -1682,6 +1702,7 @@ var migrations = []migration{
 				enabled INTEGER NOT NULL DEFAULT 1,
 				created_at DATETIME NOT NULL,
 				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0,
 				FOREIGN KEY (rule_id) REFERENCES agent_discovery_rules(id) ON DELETE CASCADE,
 				UNIQUE(rule_id, condition_type, field, operator, value)
 			);
@@ -1752,7 +1773,8 @@ var migrations = []migration{
 				enabled INTEGER NOT NULL DEFAULT 1,
 				description TEXT,
 				created_at DATETIME NOT NULL,
-				updated_at DATETIME NOT NULL
+				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE TABLE IF NOT EXISTS security_scan_capabilities (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1762,7 +1784,8 @@ var migrations = []migration{
 				enabled INTEGER NOT NULL DEFAULT 1,
 				description TEXT,
 				created_at DATETIME NOT NULL,
-				updated_at DATETIME NOT NULL
+				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE TABLE IF NOT EXISTS resource_scan_profile_capabilities (
 				profile_id INTEGER NOT NULL,
@@ -1772,6 +1795,7 @@ var migrations = []migration{
 				config_json TEXT,
 				created_at DATETIME NOT NULL,
 				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0,
 				PRIMARY KEY (profile_id, capability_id),
 				FOREIGN KEY (profile_id) REFERENCES resource_scan_profiles(id) ON DELETE CASCADE,
 				FOREIGN KEY (capability_id) REFERENCES security_scan_capabilities(id) ON DELETE CASCADE
@@ -1788,6 +1812,7 @@ var migrations = []migration{
 				priority INTEGER NOT NULL DEFAULT 100,
 				created_at DATETIME NOT NULL,
 				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0,
 				FOREIGN KEY (agent_type_id) REFERENCES agent_types(id) ON DELETE CASCADE,
 				FOREIGN KEY (scan_profile_id) REFERENCES resource_scan_profiles(id) ON DELETE SET NULL,
 				UNIQUE(agent_type_id, name)
@@ -2077,6 +2102,7 @@ WHERE id = ?`,
 				user TEXT,
 				status TEXT NOT NULL DEFAULT 'active',
 				metadata_json TEXT,
+				"delete" INTEGER NOT NULL DEFAULT 0,
 				FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 			);
 			CREATE INDEX IF NOT EXISTS idx_agent_runtime_sessions_agent ON agent_runtime_sessions(agent_id, started_at DESC);
@@ -2163,7 +2189,8 @@ WHERE id = ?`,
 				first_seen_at DATETIME NOT NULL,
 				last_seen_at DATETIME NOT NULL,
 				event_count INTEGER NOT NULL DEFAULT 0,
-				agent_name TEXT
+				agent_name TEXT,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE INDEX IF NOT EXISTS idx_runtime_detections_agent ON runtime_detections(agent_id, last_seen_at DESC);
 			CREATE INDEX IF NOT EXISTS idx_runtime_detections_session ON runtime_detections(session_id, last_seen_at DESC);
@@ -2177,6 +2204,7 @@ WHERE id = ?`,
 				role TEXT NOT NULL DEFAULT 'evidence',
 				sequence INTEGER NOT NULL DEFAULT 0,
 				linked_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0,
 				PRIMARY KEY (detection_id, event_id)
 			);
 			CREATE INDEX IF NOT EXISTS idx_runtime_detection_events_event ON runtime_detection_events(event_id);
@@ -2214,7 +2242,8 @@ WHERE id = ?`,
 				mode TEXT NOT NULL DEFAULT 'observe',
 				would_block INTEGER NOT NULL DEFAULT 0,
 				agent_name TEXT,
-				created_at DATETIME NOT NULL
+				created_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE INDEX IF NOT EXISTS idx_runtime_decisions_detection ON runtime_decisions(detection_id, created_at DESC);
 			CREATE INDEX IF NOT EXISTS idx_runtime_decisions_agent ON runtime_decisions(agent_id, created_at DESC);
@@ -2229,7 +2258,8 @@ WHERE id = ?`,
 				target TEXT,
 				status TEXT NOT NULL DEFAULT 'pending',
 				result TEXT,
-				executed_at DATETIME NOT NULL
+				executed_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE INDEX IF NOT EXISTS idx_runtime_response_actions_decision ON runtime_response_actions(decision_id, executed_at DESC);
 
@@ -2245,7 +2275,8 @@ WHERE id = ?`,
 				end_time DATETIME NOT NULL,
 				detection_id TEXT NOT NULL DEFAULT '',
 				decision_id TEXT NOT NULL DEFAULT '',
-				agent_name TEXT
+				agent_name TEXT,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE INDEX IF NOT EXISTS idx_runtime_attack_chains_agent ON runtime_attack_chains(agent_id, start_time DESC);
 			CREATE INDEX IF NOT EXISTS idx_runtime_attack_chains_session ON runtime_attack_chains(session_id, start_time DESC);
@@ -2256,6 +2287,7 @@ WHERE id = ?`,
 				event_id INTEGER NOT NULL,
 				sequence INTEGER NOT NULL DEFAULT 0,
 				relation TEXT NOT NULL DEFAULT '',
+				"delete" INTEGER NOT NULL DEFAULT 0,
 				PRIMARY KEY (attack_chain_id, event_id)
 			);
 			CREATE INDEX IF NOT EXISTS idx_runtime_attack_chain_events_event ON runtime_attack_chain_events(event_id);
@@ -2320,12 +2352,124 @@ WHERE id = ?`,
 		},
 	},
 	{
-		description: "soft delete marker for audit business tables",
+		description: "soft delete marker for audit tables",
 		apply: func(ex dbExecer) error {
-			for _, table := range softDeleteBusinessTables {
+			for _, table := range softDeleteTables {
 				if err := ensureSoftDeleteColumn(ex, table); err != nil {
 					return err
 				}
+			}
+			return nil
+		},
+	},
+	{
+		description: "soft delete marker for audit schema table",
+		apply: func(ex dbExecer) error {
+			return ensureSoftDeleteColumn(ex, "schema_version")
+		},
+	},
+	{
+		description: "resource decision profiles: pre-scan and post-scan schemes",
+		apply: func(ex dbExecer) error {
+			if _, err := ex.Exec(`
+			CREATE TABLE IF NOT EXISTS resource_pre_scan_profiles (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				profile_key TEXT NOT NULL UNIQUE,
+				name TEXT NOT NULL,
+				description TEXT NOT NULL DEFAULT '',
+				enabled INTEGER NOT NULL DEFAULT 1,
+				is_default INTEGER NOT NULL DEFAULT 0,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0
+			);
+			CREATE TABLE IF NOT EXISTS resource_pre_scan_rules (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				profile_id INTEGER NOT NULL,
+				rule_name TEXT NOT NULL,
+				priority INTEGER NOT NULL DEFAULT 100,
+				agent_type_id INTEGER,
+				resource_type TEXT NOT NULL DEFAULT 'all',
+				path_pattern TEXT NOT NULL DEFAULT '',
+				source_trust TEXT NOT NULL DEFAULT '',
+				decision TEXT NOT NULL DEFAULT 'scan',
+				install_action TEXT NOT NULL DEFAULT 'none',
+				file_action TEXT NOT NULL DEFAULT 'none',
+				runtime_action TEXT NOT NULL DEFAULT 'allow',
+				enabled INTEGER NOT NULL DEFAULT 1,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0,
+				FOREIGN KEY (profile_id) REFERENCES resource_pre_scan_profiles(id) ON DELETE CASCADE,
+				FOREIGN KEY (agent_type_id) REFERENCES agent_types(id) ON DELETE SET NULL,
+				UNIQUE(profile_id, rule_name)
+			);
+			CREATE TABLE IF NOT EXISTS resource_post_scan_profiles (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				profile_key TEXT NOT NULL UNIQUE,
+				name TEXT NOT NULL,
+				description TEXT NOT NULL DEFAULT '',
+				enabled INTEGER NOT NULL DEFAULT 1,
+				is_default INTEGER NOT NULL DEFAULT 0,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0
+			);
+			CREATE TABLE IF NOT EXISTS resource_post_scan_rules (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				profile_id INTEGER NOT NULL,
+				rule_name TEXT NOT NULL,
+				priority INTEGER NOT NULL DEFAULT 100,
+				resource_type TEXT NOT NULL DEFAULT 'all',
+				severity TEXT NOT NULL DEFAULT 'INFO',
+				risk_level TEXT NOT NULL DEFAULT 'clean',
+				malicious INTEGER NOT NULL DEFAULT 0,
+				finding_category TEXT NOT NULL DEFAULT '',
+				scanner TEXT NOT NULL DEFAULT '',
+				decision TEXT NOT NULL DEFAULT 'alert',
+				install_action TEXT NOT NULL DEFAULT 'none',
+				file_action TEXT NOT NULL DEFAULT 'none',
+				runtime_action TEXT NOT NULL DEFAULT 'allow',
+				enabled INTEGER NOT NULL DEFAULT 1,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0,
+				FOREIGN KEY (profile_id) REFERENCES resource_post_scan_profiles(id) ON DELETE CASCADE,
+				UNIQUE(profile_id, rule_name)
+			);
+			CREATE INDEX IF NOT EXISTS idx_resource_pre_scan_profiles_enabled ON resource_pre_scan_profiles(enabled, "delete");
+			CREATE INDEX IF NOT EXISTS idx_resource_pre_scan_rules_profile ON resource_pre_scan_rules(profile_id, priority);
+			CREATE INDEX IF NOT EXISTS idx_resource_pre_scan_rules_agent_type ON resource_pre_scan_rules(agent_type_id);
+			CREATE INDEX IF NOT EXISTS idx_resource_post_scan_profiles_enabled ON resource_post_scan_profiles(enabled, "delete");
+			CREATE INDEX IF NOT EXISTS idx_resource_post_scan_rules_profile ON resource_post_scan_rules(profile_id, priority);
+			`); err != nil {
+				return fmt.Errorf("create resource decision profile tables: %w", err)
+			}
+			for _, spec := range []struct {
+				column string
+				stmt   string
+			}{
+				{"pre_scan_profile_id", `ALTER TABLE agent_resource_rules ADD COLUMN pre_scan_profile_id INTEGER`},
+				{"post_scan_profile_id", `ALTER TABLE agent_resource_rules ADD COLUMN post_scan_profile_id INTEGER`},
+			} {
+				exists, err := hasColumnDB(ex, "agent_resource_rules", spec.column)
+				if err != nil {
+					return err
+				}
+				if !exists {
+					if _, err := ex.Exec(spec.stmt); err != nil {
+						return fmt.Errorf("alter agent_resource_rules.%s: %w", spec.column, err)
+					}
+				}
+			}
+			if _, err := ex.Exec(`
+			CREATE INDEX IF NOT EXISTS idx_agent_resource_rules_pre_scan_profile ON agent_resource_rules(pre_scan_profile_id);
+			CREATE INDEX IF NOT EXISTS idx_agent_resource_rules_post_scan_profile ON agent_resource_rules(post_scan_profile_id);
+			`); err != nil {
+				return fmt.Errorf("index agent_resource_rules decision profiles: %w", err)
+			}
+			if err := seedResourceDecisionProfiles(ex); err != nil {
+				return err
 			}
 			return nil
 		},
@@ -2828,7 +2972,8 @@ func (s *Store) Init() error {
 	// Ensure the schema_version tracking table exists.
 	if _, err := s.execDB(context.Background(), "audit", `CREATE TABLE IF NOT EXISTS schema_version (
 		version INTEGER PRIMARY KEY,
-		applied_at DATETIME NOT NULL
+		applied_at DATETIME NOT NULL,
+		"delete" INTEGER NOT NULL DEFAULT 0
 	)`); err != nil {
 		return fmt.Errorf("audit: create schema_version table: %w", err)
 	}
@@ -2943,6 +3088,10 @@ var knownTables = map[string]bool{
 	"resource_scan_profiles":             true,
 	"security_scan_capabilities":         true,
 	"resource_scan_profile_capabilities": true,
+	"resource_pre_scan_profiles":         true,
+	"resource_pre_scan_rules":            true,
+	"resource_post_scan_profiles":        true,
+	"resource_post_scan_rules":           true,
 	// runtime detection and response tables
 	"agent_runtime_sessions":      true,
 	"runtime_detections":          true,
@@ -3821,7 +3970,8 @@ func (s *Store) SetActionForConnector(targetType, targetName, connector, sourceP
 		   actions_json = excluded.actions_json,
 		   reason = excluded.reason,
 		   updated_at = excluded.updated_at,
-		   source_path = COALESCE(excluded.source_path, source_path)`,
+		   source_path = COALESCE(excluded.source_path, source_path),
+		   "delete" = 0`,
 		id, targetType, targetName, nullStr(sourcePath), string(actionsJSON), reason, now, connector,
 	)
 	if err != nil {
@@ -3860,7 +4010,8 @@ func (s *Store) SetActionFieldForConnector(targetType, targetName, connector, fi
 		 ON CONFLICT(target_type, target_name, connector) DO UPDATE SET
 		   actions_json = json_set(actions_json, ?, ?),
 		   reason = excluded.reason,
-		   updated_at = excluded.updated_at`
+		   updated_at = excluded.updated_at,
+		   "delete" = 0`
 	_, err := s.execDB(context.Background(), "audit", query, id, targetType, targetName, initJSON, reason, now, connector, path, value)
 	if err != nil {
 		return fmt.Errorf("audit: set action field %s: %w", field, err)
@@ -3878,7 +4029,7 @@ func (s *Store) SetSourcePath(targetType, targetName, path string) error {
 // connector (connector="" = global). See ActionEntry.Connector (SK-4).
 func (s *Store) SetSourcePathForConnector(targetType, targetName, connector, path string) error {
 	_, err := s.execDB(context.Background(), "audit",
-		`UPDATE actions SET source_path = ? WHERE target_type = ? AND target_name = ? AND connector = ?`,
+		`UPDATE actions SET source_path = ? WHERE target_type = ? AND target_name = ? AND connector = ? AND COALESCE("delete",0) = 0`,
 		path, targetType, targetName, connector,
 	)
 	if err != nil {
@@ -3903,7 +4054,7 @@ func (s *Store) ClearActionFieldForConnector(targetType, targetName, connector, 
 	path := "$." + field
 	_, err := s.execDB(context.Background(), "audit",
 		`UPDATE actions SET actions_json = json_remove(actions_json, ?), updated_at = ?
-		 WHERE target_type = ? AND target_name = ? AND connector = ?`,
+		 WHERE target_type = ? AND target_name = ? AND connector = ? AND COALESCE("delete",0) = 0`,
 		path, time.Now().UTC(), targetType, targetName, connector,
 	)
 	if err != nil {
@@ -3911,8 +4062,8 @@ func (s *Store) ClearActionFieldForConnector(targetType, targetName, connector, 
 	}
 	// Clean up rows with no active actions
 	_, _ = s.execDB(context.Background(), "audit",
-		`DELETE FROM actions WHERE target_type = ? AND target_name = ? AND connector = ? AND actions_json IN ('{}', 'null', '')`,
-		targetType, targetName, connector,
+		`UPDATE actions SET "delete" = 1, updated_at = ? WHERE target_type = ? AND target_name = ? AND connector = ? AND actions_json IN ('{}', 'null', '') AND COALESCE("delete",0) = 0`,
+		time.Now().UTC(), targetType, targetName, connector,
 	)
 	return nil
 }
@@ -3926,8 +4077,8 @@ func (s *Store) RemoveAction(targetType, targetName string) error {
 // (connector="" = global). See ActionEntry.Connector (SK-4).
 func (s *Store) RemoveActionForConnector(targetType, targetName, connector string) error {
 	_, err := s.execDB(context.Background(), "audit",
-		`DELETE FROM actions WHERE target_type = ? AND target_name = ? AND connector = ?`,
-		targetType, targetName, connector,
+		`UPDATE actions SET "delete" = 1, updated_at = ? WHERE target_type = ? AND target_name = ? AND connector = ? AND COALESCE("delete",0) = 0`,
+		time.Now().UTC(), targetType, targetName, connector,
 	)
 	if err != nil {
 		return fmt.Errorf("audit: remove action: %w", err)
@@ -3951,7 +4102,7 @@ func (s *Store) GetActionForConnector(targetType, targetName, connector string) 
 	err := s.scanRow(context.Background(), "get_action",
 		s.db.QueryRowContext(context.Background(),
 			`SELECT id, target_type, target_name, source_path, actions_json, reason, updated_at, connector
-		 FROM actions WHERE target_type = ? AND target_name = ? AND connector = ?`,
+		 FROM actions WHERE target_type = ? AND target_name = ? AND connector = ? AND COALESCE("delete",0) = 0`,
 			targetType, targetName, connector,
 		), &e.ID, &e.TargetType, &e.TargetName, &sourcePath, &actionsJSON, &reason, &e.UpdatedAt, &e.Connector)
 	if err == sql.ErrNoRows {
@@ -3984,7 +4135,7 @@ func (s *Store) HasActionForConnector(targetType, targetName, connector, field, 
 	}
 	var count int
 	query := fmt.Sprintf(
-		`SELECT COUNT(*) FROM actions WHERE target_type = ? AND target_name = ? AND connector = ? AND json_extract(actions_json, '$.%s') = ?`,
+		`SELECT COUNT(*) FROM actions WHERE target_type = ? AND target_name = ? AND connector = ? AND COALESCE("delete",0) = 0 AND json_extract(actions_json, '$.%s') = ?`,
 		field)
 	err := s.scanRow(context.Background(), "has_action",
 		s.db.QueryRowContext(context.Background(), query, targetType, targetName, connector, value), &count)
@@ -4002,7 +4153,7 @@ func (s *Store) ListByAction(field, value string) ([]ActionEntry, error) {
 	}
 	query := fmt.Sprintf(
 		`SELECT id, target_type, target_name, source_path, actions_json, reason, updated_at, connector
-		 FROM actions WHERE json_extract(actions_json, '$.%s') = ?
+		 FROM actions WHERE COALESCE("delete",0) = 0 AND json_extract(actions_json, '$.%s') = ?
 		 ORDER BY updated_at DESC`, field)
 	return s.queryActions(query, value)
 }
@@ -4015,7 +4166,7 @@ func (s *Store) ListByActionAndType(field, value, targetType string) ([]ActionEn
 	}
 	query := fmt.Sprintf(
 		`SELECT id, target_type, target_name, source_path, actions_json, reason, updated_at, connector
-		 FROM actions WHERE json_extract(actions_json, '$.%s') = ? AND target_type = ?
+		 FROM actions WHERE COALESCE("delete",0) = 0 AND json_extract(actions_json, '$.%s') = ? AND target_type = ?
 		 ORDER BY updated_at DESC`, field)
 	return s.queryActions(query, value, targetType)
 }
@@ -4025,7 +4176,7 @@ func (s *Store) ListByActionAndType(field, value, targetType string) ([]ActionEn
 func (s *Store) ListActionsByType(targetType string) ([]ActionEntry, error) {
 	return s.queryActions(
 		`SELECT id, target_type, target_name, source_path, actions_json, reason, updated_at, connector
-		 FROM actions WHERE target_type = ? ORDER BY updated_at DESC`, targetType)
+		 FROM actions WHERE target_type = ? AND COALESCE("delete",0) = 0 ORDER BY updated_at DESC`, targetType)
 }
 
 // ListActionsByTypeForConnector returns action entries for a target type
@@ -4034,7 +4185,7 @@ func (s *Store) ListActionsByType(targetType string) ([]ActionEntry, error) {
 func (s *Store) ListActionsByTypeForConnector(targetType, connector string) ([]ActionEntry, error) {
 	return s.queryActions(
 		`SELECT id, target_type, target_name, source_path, actions_json, reason, updated_at, connector
-		 FROM actions WHERE target_type = ? AND connector = ? ORDER BY updated_at DESC`, targetType, connector)
+		 FROM actions WHERE target_type = ? AND connector = ? AND COALESCE("delete",0) = 0 ORDER BY updated_at DESC`, targetType, connector)
 }
 
 // ListAllActions returns every action entry, across all connectors. Each entry
@@ -4042,7 +4193,7 @@ func (s *Store) ListActionsByTypeForConnector(targetType, connector string) ([]A
 func (s *Store) ListAllActions() ([]ActionEntry, error) {
 	return s.queryActions(
 		`SELECT id, target_type, target_name, source_path, actions_json, reason, updated_at, connector
-		 FROM actions ORDER BY updated_at DESC`)
+		 FROM actions WHERE COALESCE("delete",0) = 0 ORDER BY updated_at DESC`)
 }
 
 func (s *Store) queryActions(query string, args ...any) ([]ActionEntry, error) {
@@ -4386,10 +4537,10 @@ func (s *Store) GetCounts() (Counts, error) {
 		sql  string
 		dest *int
 	}{
-		{`SELECT COUNT(*) FROM actions WHERE target_type = 'skill' AND json_extract(actions_json, '$.install') = 'block'`, &c.BlockedSkills},
-		{`SELECT COUNT(*) FROM actions WHERE target_type = 'skill' AND json_extract(actions_json, '$.install') = 'allow'`, &c.AllowedSkills},
-		{`SELECT COUNT(*) FROM actions WHERE target_type = 'mcp' AND json_extract(actions_json, '$.install') = 'block'`, &c.BlockedMCPs},
-		{`SELECT COUNT(*) FROM actions WHERE target_type = 'mcp' AND json_extract(actions_json, '$.install') = 'allow'`, &c.AllowedMCPs},
+		{`SELECT COUNT(*) FROM actions WHERE COALESCE("delete",0) = 0 AND target_type = 'skill' AND json_extract(actions_json, '$.install') = 'block'`, &c.BlockedSkills},
+		{`SELECT COUNT(*) FROM actions WHERE COALESCE("delete",0) = 0 AND target_type = 'skill' AND json_extract(actions_json, '$.install') = 'allow'`, &c.AllowedSkills},
+		{`SELECT COUNT(*) FROM actions WHERE COALESCE("delete",0) = 0 AND target_type = 'mcp' AND json_extract(actions_json, '$.install') = 'block'`, &c.BlockedMCPs},
+		{`SELECT COUNT(*) FROM actions WHERE COALESCE("delete",0) = 0 AND target_type = 'mcp' AND json_extract(actions_json, '$.install') = 'allow'`, &c.AllowedMCPs},
 		{`SELECT COUNT(*) FROM audit_events WHERE severity IN ('CRITICAL','HIGH','MEDIUM','LOW')`, &c.Alerts},
 		{`SELECT COUNT(*) FROM scan_results`, &c.TotalScans},
 		{`SELECT COUNT(*) FROM network_egress_events WHERE blocked = 1`, &c.BlockedEgressCalls},

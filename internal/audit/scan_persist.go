@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -151,8 +152,8 @@ func (s *Store) InsertScanFindings(scanID, target string, findings []scanner.Fin
 		agentName = agent.DisplayName
 	}
 	canonicalAgentID := agent.ID
-	staticResourceID := ""
-	if len(findings) > 0 && IsStaticResourceScan(findings[0].Scanner, target) && canonicalAgentID != "" {
+	staticResourceID := strings.TrimSpace(meta.StaticResourceID)
+	if staticResourceID == "" && len(findings) > 0 && IsStaticResourceScan(findings[0].Scanner, target) && canonicalAgentID != "" {
 		staticResourceType := StaticResourceType("", findings[0].Scanner, target)
 		staticResourceID, err = s.EnsureStaticResource(StaticResourceInput{
 			CanonicalAgentID: canonicalAgentID,

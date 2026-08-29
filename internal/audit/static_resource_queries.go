@@ -182,9 +182,10 @@ SELECT a.id,
        COALESCE(SUM(CASE WHEN COALESCE(r.malicious,0) = 1 THEN 1 ELSE 0 END), 0),
        COALESCE(SUM(CASE WHEN LOWER(COALESCE(r.risk_level,'')) = 'critical' THEN 1 ELSE 0 END), 0)
 FROM agents a
-LEFT JOIN static_resources r ON r.canonical_agent_id = a.id
-LEFT JOIN agent_types t ON t.id = COALESCE(a.agent_type_id, 0)
+LEFT JOIN static_resources r ON r.canonical_agent_id = a.id AND COALESCE(r."delete", 0) = 0
+LEFT JOIN agent_types t ON t.id = COALESCE(a.agent_type_id, 0) AND COALESCE(t."delete", 0) = 0
 WHERE COALESCE(a.status, 'observed') NOT IN ('gone','removed','disabled')
+  AND COALESCE(a."delete", 0) = 0
 GROUP BY a.id
 ORDER BY COUNT(r.id) DESC, a.id`)
 
@@ -236,6 +237,7 @@ SELECT LOWER(COALESCE(resource_type, '')),
        COALESCE(SUM(CASE WHEN COALESCE(malicious,0) = 1 THEN 1 ELSE 0 END), 0)
 FROM static_resources
 WHERE canonical_agent_id = ?
+  AND COALESCE("delete", 0) = 0
 GROUP BY LOWER(COALESCE(resource_type, ''))
 ORDER BY COUNT(*) DESC`, agentID)
 	if err != nil {
@@ -266,7 +268,7 @@ ORDER BY COUNT(*) DESC`, agentID)
 
 // staticResourceWhere builds the WHERE clause + args for the paginated list.
 func staticResourceWhere(f StaticResourceFilter) (string, []any) {
-	var clauses []string
+	clauses := []string{`COALESCE(r."delete", 0) = 0`}
 	var args []any
 	if f.AgentID != "" {
 		clauses = append(clauses, "r.canonical_agent_id = ?")
@@ -349,10 +351,10 @@ SELECT r.id,
        COALESCE(r.finding_count, 0),
        COALESCE(r.status, 'discovered'),
        COALESCE(r.last_scan_id, ''),
-       COALESCE((SELECT CAST(MIN(timestamp) AS TEXT) FROM scan_results sr WHERE sr.id = r.last_scan_id), ''),
+       COALESCE((SELECT CAST(MIN(timestamp) AS TEXT) FROM scan_results sr WHERE sr.id = r.last_scan_id AND COALESCE(sr."delete", 0) = 0), ''),
        COALESCE(r.last_seen_at, '')
 FROM static_resources r
-LEFT JOIN agents a ON a.id = r.canonical_agent_id
+LEFT JOIN agents a ON a.id = r.canonical_agent_id AND COALESCE(a."delete", 0) = 0
 WHERE `+where+`
 ORDER BY CASE LOWER(COALESCE(r.risk_level,'clean'))
            WHEN 'critical' THEN 0
@@ -404,7 +406,7 @@ SELECT r.id,
        COALESCE(r.finding_count, 0),
        COALESCE(r.status, 'discovered'),
        COALESCE(r.last_scan_id, ''),
-       COALESCE((SELECT CAST(MIN(timestamp) AS TEXT) FROM scan_results sr WHERE sr.id = r.last_scan_id), ''),
+       COALESCE((SELECT CAST(MIN(timestamp) AS TEXT) FROM scan_results sr WHERE sr.id = r.last_scan_id AND COALESCE(sr."delete", 0) = 0), ''),
        COALESCE(r.last_seen_at, ''),
        COALESCE(r.content_hash, ''),
        COALESCE(a.first_seen_at, ''),
@@ -414,11 +416,11 @@ SELECT r.id,
        COALESCE(p.id, 0),
        COALESCE(p.name, '')
 FROM static_resources r
-LEFT JOIN agents a ON a.id = r.canonical_agent_id
-LEFT JOIN agent_types t ON t.id = COALESCE(a.agent_type_id, 0)
-LEFT JOIN agent_resource_rules rr ON rr.id = r.resource_rule_id
-LEFT JOIN resource_scan_profiles p ON p.id = r.scan_profile_id
-WHERE r.id = ?`, resourceID)
+LEFT JOIN agents a ON a.id = r.canonical_agent_id AND COALESCE(a."delete", 0) = 0
+LEFT JOIN agent_types t ON t.id = COALESCE(a.agent_type_id, 0) AND COALESCE(t."delete", 0) = 0
+LEFT JOIN agent_resource_rules rr ON rr.id = r.resource_rule_id AND COALESCE(rr."delete", 0) = 0
+LEFT JOIN resource_scan_profiles p ON p.id = r.scan_profile_id AND COALESCE(p."delete", 0) = 0
+WHERE r.id = ? AND COALESCE(r."delete", 0) = 0`, resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("audit: static resource detail %q: %w", resourceID, err)
 	}
@@ -491,6 +493,8 @@ SELECT c.id,
 FROM resource_scan_profile_capabilities pc
 JOIN security_scan_capabilities c ON c.id = pc.capability_id
 WHERE pc.profile_id = ?
+  AND COALESCE(pc."delete", 0) = 0
+  AND COALESCE(c."delete", 0) = 0
 ORDER BY COALESCE(pc.priority, 100), c.id`, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("audit: profile capabilities %d: %w", profileID, err)
@@ -521,7 +525,8 @@ func (s *Store) GetStaticResourceTargetPath(resourceID string) (target, agentID,
 	rows, err := s.queryDB(context.Background(), "static_resource_target_get", `
 SELECT COALESCE(target,''), COALESCE(canonical_agent_id,''), COALESCE(resource_type,''),
        COALESCE(resource_rule_id,0), COALESCE(scan_profile_id,0)
-FROM static_resources WHERE id = ?`, resourceID)
+FROM static_resources
+WHERE id = ? AND COALESCE("delete", 0) = 0`, resourceID)
 	if err != nil {
 		return "", "", "", 0, 0, false, fmt.Errorf("audit: static resource target %q: %w", resourceID, err)
 	}
@@ -580,10 +585,11 @@ func (s *Store) ListStaticResourceLatestFindings(resourceID string) (*StaticReso
 	// last_scan_id was not yet written back).
 	scanRow := s.queryRowDB(context.Background(), "static_resource_latest_scan", `
 SELECT COALESCE(r.last_scan_id, ''),
-       COALESCE((SELECT CAST(MIN(sr.timestamp) AS TEXT) FROM scan_results sr WHERE sr.id = r.last_scan_id),
-                (SELECT CAST(MAX(sr2.timestamp) AS TEXT) FROM scan_results sr2 WHERE sr2.static_resource_id = r.id), ''),
-       COALESCE((SELECT sr3.scanner FROM scan_results sr3 WHERE sr3.id = r.last_scan_id LIMIT 1), '')
-FROM static_resources r WHERE r.id = ?`, resourceID)
+       COALESCE((SELECT CAST(MIN(sr.timestamp) AS TEXT) FROM scan_results sr WHERE sr.id = r.last_scan_id AND COALESCE(sr."delete", 0) = 0),
+                (SELECT CAST(MAX(sr2.timestamp) AS TEXT) FROM scan_results sr2 WHERE sr2.static_resource_id = r.id AND COALESCE(sr2."delete", 0) = 0), ''),
+       COALESCE((SELECT sr3.scanner FROM scan_results sr3 WHERE sr3.id = r.last_scan_id AND COALESCE(sr3."delete", 0) = 0 LIMIT 1), '')
+FROM static_resources r
+WHERE r.id = ? AND COALESCE(r."delete", 0) = 0`, resourceID)
 	var scanID, scannedAt, scanner string
 	if err := scanRow.Scan(&scanID, &scannedAt, &scanner); err != nil {
 		return nil, fmt.Errorf("audit: latest scan for resource %q: %w", resourceID, err)
@@ -593,6 +599,7 @@ FROM static_resources r WHERE r.id = ?`, resourceID)
 		rows, err := s.queryDB(context.Background(), "static_resource_latest_scan_fallback", `
 SELECT id, COALESCE(CAST(timestamp AS TEXT), ''), COALESCE(scanner, '')
 FROM scan_results WHERE static_resource_id = ?
+  AND COALESCE("delete", 0) = 0
 ORDER BY timestamp DESC LIMIT 1`, resourceID)
 		if err != nil {
 			return nil, fmt.Errorf("audit: fallback scan for resource %q: %w", resourceID, err)
@@ -621,6 +628,7 @@ SELECT COALESCE(f.id, ''),
        COALESCE(f.scanner, '')
 FROM scan_findings f
 WHERE f.scan_id = ?
+  AND COALESCE(f."delete", 0) = 0
 ORDER BY CASE UPPER(COALESCE(f.severity,'INFO'))
          WHEN 'CRITICAL' THEN 0
          WHEN 'HIGH' THEN 1
@@ -671,7 +679,7 @@ func (s *Store) ListStaticResourceScanHistory(resourceID string, limit int) (*St
 		Items:      []StaticResourceScanRecord{},
 	}
 	if err := s.queryRowDB(context.Background(), "static_resource_scan_history_total",
-		`SELECT COUNT(*) FROM scan_results WHERE static_resource_id = ?`, resourceID,
+		`SELECT COUNT(*) FROM scan_results WHERE static_resource_id = ? AND COALESCE("delete", 0) = 0`, resourceID,
 	).Scan(&out.Total); err != nil {
 		return nil, fmt.Errorf("audit: scan history total for %q: %w", resourceID, err)
 	}
@@ -685,6 +693,7 @@ SELECT COALESCE(id, ''),
        COALESCE(verdict, '')
 FROM scan_results
 WHERE static_resource_id = ?
+  AND COALESCE("delete", 0) = 0
 ORDER BY timestamp DESC, id DESC
 LIMIT ?`, resourceID, limit)
 	if err != nil {
@@ -713,7 +722,7 @@ func (s *Store) SetStaticResourceStatus(resourceID, status string) (bool, error)
 		return false, nil
 	}
 	res, err := s.execDB(context.Background(), "static_resource_status_set",
-		`UPDATE static_resources SET status = ? WHERE id = ?`, status, resourceID)
+		`UPDATE static_resources SET status = ? WHERE id = ? AND COALESCE("delete", 0) = 0`, status, resourceID)
 	if err != nil {
 		return false, fmt.Errorf("audit: set resource status %q: %w", resourceID, err)
 	}
@@ -732,7 +741,7 @@ func (s *Store) ListAgentResourceIDs(agentID string) ([]string, error) {
 	}
 	rows, err := s.queryDB(context.Background(), "static_resource_ids_by_agent", `
 SELECT id FROM static_resources
-WHERE canonical_agent_id = ? AND COALESCE(status,'') <> 'missing'
+WHERE canonical_agent_id = ? AND COALESCE(status,'') <> 'missing' AND COALESCE("delete", 0) = 0
 ORDER BY id`, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("audit: resource ids for agent %q: %w", agentID, err)

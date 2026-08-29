@@ -225,12 +225,19 @@ var judgeBodyMigrations = []migration{
 			return ensureSoftDeleteColumn(ex, "judge_responses")
 		},
 	},
+	{
+		description: "v4: soft delete marker for schema table",
+		apply: func(ex dbExecer) error {
+			return ensureSoftDeleteColumn(ex, "schema_version")
+		},
+	},
 }
 
 func (s *JudgeBodyStore) init() error {
 	if _, err := s.execDB(context.Background(), "judge_body_schema", `CREATE TABLE IF NOT EXISTS schema_version (
 		version INTEGER PRIMARY KEY,
-		applied_at DATETIME NOT NULL
+		applied_at DATETIME NOT NULL,
+		"delete" INTEGER NOT NULL DEFAULT 0
 	)`); err != nil {
 		return fmt.Errorf("judge_body: create schema_version: %w", err)
 	}

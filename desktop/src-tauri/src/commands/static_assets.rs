@@ -1,4 +1,12 @@
+use std::{fs, path::PathBuf, process::Command};
+
 use serde_json::Value;
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 fn urlencode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
@@ -191,6 +199,26 @@ pub fn get_static_resource_scans(
 }
 
 #[tauri::command]
+pub fn export_static_resource_text_report(
+    content: String,
+    default_file_name: Option<String>,
+) -> Result<Option<String>, String> {
+    let file_name = safe_report_file_name(
+        default_file_name
+            .as_deref()
+            .unwrap_or("static-resources-report.md"),
+    );
+    let Some(path) = choose_static_report_output_path(&file_name)? else {
+        return Ok(None);
+    };
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("创建导出目录失败：{error}"))?;
+    }
+    fs::write(&path, content).map_err(|error| format!("写入静态资源报告失败：{error}"))?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
 pub fn update_static_resource_status(
     app: tauri::AppHandle,
     resource_id: String,
@@ -242,4 +270,94 @@ fn reveal_in_file_explorer(path: &str) -> Result<(), String> {
 #[cfg(not(windows))]
 fn reveal_in_file_explorer(_path: &str) -> Result<(), String> {
     Err("当前平台不支持在文件资源管理器中定位文件".to_string())
+}
+
+fn safe_report_file_name(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let mut name = if trimmed.is_empty() {
+        "static-resources-report.md".to_string()
+    } else {
+        trimmed
+            .chars()
+            .map(|ch| match ch {
+                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' | '\0'..='\u{1f}' => '_',
+                _ => ch,
+            })
+            .collect::<String>()
+    };
+    let lower = name.to_lowercase();
+    if !(lower.ends_with(".md") || lower.ends_with(".txt")) {
+        name.push_str(".md");
+    }
+    name
+}
+
+fn choose_static_report_output_path(default_file_name: &str) -> Result<Option<PathBuf>, String> {
+    #[cfg(windows)]
+    {
+        let file_name = default_file_name.replace('\'', "''");
+        let script = format!(
+            r#"
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.SaveFileDialog
+$dialog.Title = '导出静态资源报告'
+$dialog.Filter = 'Markdown 文件 (*.md)|*.md|文本文件 (*.txt)|*.txt'
+$dialog.DefaultExt = 'md'
+$dialog.AddExtension = $true
+$dialog.OverwritePrompt = $true
+$dialog.FileName = '{file_name}'
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
+  Write-Output $dialog.FileName
+}}
+"#
+        );
+        let output = quiet_command("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-STA",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                &script,
+            ])
+            .output()
+            .map_err(|error| format!("打开保存对话框失败：{error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "保存对话框失败：{}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if selected.is_empty() {
+            return Ok(None);
+        }
+        let mut path = PathBuf::from(selected);
+        if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .is_empty()
+        {
+            path.set_extension("md");
+        }
+        return Ok(Some(path));
+    }
+
+    #[cfg(not(windows))]
+    {
+        let mut path =
+            std::env::current_dir().map_err(|error| format!("读取当前目录失败：{error}"))?;
+        path.push(default_file_name);
+        Ok(Some(path))
+    }
+}
+
+fn quiet_command(program: &str) -> Command {
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
 }

@@ -466,8 +466,9 @@ SELECT a.id,
        COALESCE(SUM(CASE WHEN lower(sr.max_severity) IN ('high', 'critical', 'error') THEN 1 ELSE 0 END), 0),
        COALESCE(SUM(CASE WHEN lower(sr.max_severity) = 'critical' THEN 1 ELSE 0 END), 0)
 FROM agents a
-LEFT JOIN agent_types t ON t.id = a.agent_type_id
-LEFT JOIN static_resources sr ON sr.canonical_agent_id = a.id
+LEFT JOIN agent_types t ON t.id = a.agent_type_id AND COALESCE(t."delete", 0) = 0
+LEFT JOIN static_resources sr ON sr.canonical_agent_id = a.id AND COALESCE(sr."delete", 0) = 0
+WHERE COALESCE(a."delete", 0) = 0
 GROUP BY a.id
 ORDER BY lower(COALESCE(t.name, a.display_name)), lower(a.id)
 LIMIT ?`, limit)
@@ -516,6 +517,7 @@ SELECT r.id,
 FROM agent_discovery_rules r
 JOIN agent_types t ON t.id = r.agent_type_id
 WHERE COALESCE(r.enabled, 0) = 1
+  AND COALESCE(r."delete", 0) = 0
   AND COALESCE(t.enabled, 0) = 1
   AND COALESCE(t."delete", 0) = 0
 ORDER BY lower(t.name), r.id`)
@@ -569,6 +571,7 @@ SELECT id,
        COALESCE(enabled, 0)
 FROM agent_discovery_conditions
 WHERE COALESCE(enabled, 0) = 1
+  AND COALESCE("delete", 0) = 0
   AND rule_id IN (`+strings.Join(ids, ",")+`)
 ORDER BY rule_id, required DESC, weight DESC, id`, args...)
 	if err != nil {
@@ -613,6 +616,7 @@ func (s *Store) MarkMissingAgentDiscoveries(activeIDs []string, observedAt time.
 UPDATE agents
 SET status = ?, runtime_status = 'stopped', pids_json = '[]'
 WHERE status <> 'missing'
+  AND COALESCE("delete", 0) = 0
   AND (matched_rule_id IS NOT NULL OR source LIKE '%agent-scanner%')`
 	if len(predicates) > 0 {
 		query += ` AND id NOT IN (` + strings.Join(predicates, ",") + `)`

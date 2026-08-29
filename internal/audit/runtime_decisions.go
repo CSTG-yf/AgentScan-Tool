@@ -707,7 +707,8 @@ SELECT id, COALESCE(canonical_agent_id, ''), COALESCE(resource_type, ''),
        COALESCE(name, ''), COALESCE(target, ''), COALESCE(risk_level, 'high')
 FROM static_resources
 WHERE COALESCE(malicious, 0) = 1
-  AND COALESCE(status, '') <> 'missing'`)
+  AND COALESCE(status, '') <> 'missing'
+  AND COALESCE("delete", 0) = 0`)
 	if err != nil {
 		return nil, err
 	}

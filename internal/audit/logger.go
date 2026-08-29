@@ -444,9 +444,12 @@ type ScanCorrelation struct {
 	SessionID string
 	TraceID   string
 
-	AgentID         string
-	AgentName       string
-	AgentInstanceID string
+	AgentID          string
+	AgentName        string
+	AgentInstanceID  string
+	StaticResourceID string
+	ResourceRuleID   int64
+	ScanProfileID    int64
 
 	// Connector attributes the scan to its originating connector so
 	// EmitScanResult can record per-connector scan-finding metrics. Empty
@@ -480,6 +483,19 @@ func (l *Logger) LogScanWithCorrelation(
 	verdict string,
 	corr ScanCorrelation,
 ) error {
+	_, err := l.LogScanWithCorrelationID(ctx, result, verdict, corr)
+	return err
+}
+
+// LogScanWithCorrelationID is LogScanWithCorrelation plus the generated
+// scan_id. Watcher-triggered static-resource scans use it to update the
+// owning static_resources row after scan_results has been persisted.
+func (l *Logger) LogScanWithCorrelationID(
+	ctx context.Context,
+	result *scanner.ScanResult,
+	verdict string,
+	corr ScanCorrelation,
+) (string, error) {
 	sinksMgr, otel, structured := l.snapshot()
 
 	if verdict != "" {
@@ -511,13 +527,16 @@ func (l *Logger) LogScanWithCorrelation(
 		SessionID:         corr.SessionID,
 		TraceID:           corr.TraceID,
 		Connector:         corr.Connector,
+		StaticResourceID:  corr.StaticResourceID,
+		ResourceRuleID:    corr.ResourceRuleID,
+		ScanProfileID:     corr.ScanProfileID,
 	}
 	scanID, err := scanner.EmitScanResult(ctx, l.gatewayWriterSnapshot(), l.store, tel, result, agent)
 	if err != nil {
 		if otel != nil {
 			otel.RecordAuditDBError(ctx, "emit_scan_result")
 		}
-		return err
+		return "", err
 	}
 
 	event := sanitizeEvent(Event{
@@ -544,7 +563,7 @@ func (l *Logger) LogScanWithCorrelation(
 		if otel != nil {
 			otel.RecordAuditDBError(context.Background(), "insert_event")
 		}
-		return err
+		return scanID, err
 	}
 	if otel != nil {
 		otel.RecordAuditEvent(context.Background(), event.Action, event.Severity, event.Connector)
@@ -557,7 +576,7 @@ func (l *Logger) LogScanWithCorrelation(
 		otel.EmitScanResult(result, scanID, targetType, verdict, agent.Connector)
 	}
 
-	return nil
+	return scanID, nil
 }
 
 // LogAction persists an action event and emits OTel lifecycle signals.

@@ -156,6 +156,9 @@ type ScanFindingMeta struct {
 	// onto every scan_findings row so SIEM queries can pivot on it
 	// without joining to scan_results.
 	EvaluationID string
+	// StaticResourceID is the pre-resolved static_resources row for
+	// rule-driven resource scans.
+	StaticResourceID string
 }
 
 // EmitScanResult fans out one EventScan + N EventScanFinding events (when w
@@ -231,6 +234,7 @@ func EmitScanResult(
 		Generation:        prov.Generation,
 		BinaryVersion:     prov.BinaryVersion,
 		EvaluationID:      agent.EvaluationID,
+		StaticResourceID:  agent.StaticResourceID,
 	}
 
 	if pers != nil {

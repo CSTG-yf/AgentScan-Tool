@@ -158,10 +158,10 @@ type InstallWatcher struct {
 // classified with full lineage (agent / rule / profile / resource type)
 // instead of guessing from fixed skill/plugin directories.
 type resourceWatchContext struct {
-	AgentID    string
-	RuleID     int64
-	ProfileID  int64
-	Type       InstallType
+	AgentID      string
+	RuleID       int64
+	ProfileID    int64
+	Type         InstallType
 	ResourceType string
 	// Root is the directory registered with fsnotify.
 	Root string
@@ -605,6 +605,29 @@ func (w *InstallWatcher) eventConnector(evt InstallEvent) string {
 	return watcherConnectorName(w.cfg)
 }
 
+func (w *InstallWatcher) logAdmissionScan(ctx context.Context, result *scanner.ScanResult, verdict string, evt InstallEvent) {
+	if w == nil || result == nil {
+		return
+	}
+	if w.logger == nil {
+		w.updateResourceRisk(evt, result, "")
+		return
+	}
+	scanID, err := w.logger.LogScanWithCorrelationID(ctx, result, verdict, audit.ScanCorrelation{
+		AgentID:          evt.AgentID,
+		Connector:        w.eventConnector(evt),
+		StaticResourceID: evt.ResourceID,
+		ResourceRuleID:   evt.ResourceRuleID,
+		ScanProfileID:    evt.ScanProfileID,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[watch] log admission scan %s: %v\n", evt.Path, err)
+		w.updateResourceRisk(evt, result, "")
+		return
+	}
+	w.updateResourceRisk(evt, result, scanID)
+}
+
 // runAdmission applies the full admission gate: block → allow → scan.
 // When the OPA engine is available it delegates the verdict decision to
 // Rego policy; otherwise it falls back to the built-in Go logic.
@@ -788,12 +811,6 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 	defer cancel()
 
 	result, err := s.Scan(scanCtx, evt.Path)
-	if err == nil {
-		// Rule-driven resources carry their static_resources identity on the
-		// event: write the risk verdict (severity bucket + category-driven
-		// malicious flag) back onto the resource row right after the scan.
-		w.updateResourceRisk(evt, result, "")
-	}
 	if err != nil {
 		_ = w.logger.LogAction(string(audit.ActionInstallScanError), evt.Path,
 			fmt.Sprintf("type=%s scanner=%s error=%v", targetType, s.Name(), err))
@@ -826,7 +843,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 		reason := fmt.Sprintf("%s %q is on the block list — rejected", targetType, evt.Name)
 		_ = w.logger.LogAction(string(audit.ActionInstallRejected), evt.Path,
 			fmt.Sprintf("type=%s reason=blocked-post-scan", targetType))
-		_ = w.logger.LogScanWithVerdict(result, "blocked")
+		w.logAdmissionScan(ctx, result, "blocked", evt)
 		w.enforceBlock(ctx, evt)
 		w.recordAdmission(ctx, "blocked", targetType)
 		res = AdmissionResult{
@@ -840,7 +857,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 		reason := fmt.Sprintf("scan found findings but %s %q is allow-listed — skipping enforcement", targetType, evt.Name)
 		_ = w.logger.LogAction(string(audit.ActionInstallAllowed), evt.Path,
 			fmt.Sprintf("type=%s reason=allow-listed-post-scan", targetType))
-		_ = w.logger.LogScanWithVerdict(result, "allowed")
+		w.logAdmissionScan(ctx, result, "allowed", evt)
 		if w.otel != nil {
 			w.otel.EmitPolicyDecision("admission", "allowed", evt.Name, targetType, reason, map[string]string{
 				"scanner": s.Name(),
@@ -888,7 +905,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 				}
 			}
 			w.applyPostScanEnforcement(ctx, pe, out, evt, targetType, result, s.Name())
-			_ = w.logger.LogScanWithVerdict(result, out.Verdict)
+			w.logAdmissionScan(ctx, result, out.Verdict, evt)
 			w.recordAdmission(ctx, out.Verdict, targetType)
 			res = AdmissionResult{
 				Event: evt, Verdict: toVerdict(out.Verdict), Reason: out.Reason,
@@ -917,7 +934,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 		ScanResult: scanInput,
 	}, fallbackProfile)
 	w.applyPostScanEnforcement(ctx, pe, out, evt, targetType, result, s.Name())
-	_ = w.logger.LogScanWithVerdict(result, out.Verdict)
+	w.logAdmissionScan(ctx, result, out.Verdict, evt)
 	w.recordAdmission(ctx, out.Verdict, targetType)
 	res = AdmissionResult{
 		Event: evt, Verdict: toVerdict(out.Verdict), Reason: out.Reason,

@@ -120,6 +120,7 @@ SELECT a.id,
 FROM agents a
 LEFT JOIN agent_types t ON t.id = a.agent_type_id
 WHERE COALESCE(a.status, 'observed') NOT IN ('gone', 'removed', 'disabled', 'retired')
+  AND COALESCE(a."delete", 0) = 0
   AND COALESCE(t."delete", 0) = 0
 ORDER BY a.id`)
 	if err != nil {
@@ -183,7 +184,7 @@ SELECT id, agent_type_id, name, resource_type, path_pattern,
        COALESCE(enabled, 0),
        COALESCE(priority, 100)
 FROM agent_resource_rules
-WHERE agent_type_id = ? AND COALESCE(enabled, 0) = 1
+WHERE agent_type_id = ? AND COALESCE(enabled, 0) = 1 AND COALESCE("delete", 0) = 0
 ORDER BY COALESCE(priority, 100), id`, agentTypeID)
 	if err != nil {
 		return nil, fmt.Errorf("audit: list resource rules for type %d: %w", agentTypeID, err)
@@ -225,8 +226,11 @@ JOIN security_scan_capabilities c ON c.id = pc.capability_id
 JOIN resource_scan_profiles p ON p.id = pc.profile_id
 WHERE pc.profile_id = ?
   AND COALESCE(pc.enabled, 0) = 1
+  AND COALESCE(pc."delete", 0) = 0
   AND COALESCE(c.enabled, 0) = 1
+  AND COALESCE(c."delete", 0) = 0
   AND COALESCE(p.enabled, 0) = 1
+  AND COALESCE(p."delete", 0) = 0
 ORDER BY COALESCE(pc.priority, 100), pc.capability_id`, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("audit: list capabilities for profile %d: %w", profileID, err)
@@ -277,7 +281,7 @@ UPDATE static_resources SET
   status = ?,
   last_scan_id = COALESCE(?, last_scan_id),
   last_seen_at = ?
-WHERE id = ?`,
+WHERE id = ? AND COALESCE("delete", 0) = 0`,
 		risk,
 		malicious,
 		maxSeverity,
@@ -329,6 +333,7 @@ WHERE canonical_agent_id = ?
   AND resource_rule_id IS NOT NULL
   AND status <> 'missing'
   AND COALESCE(status, '') <> 'ignored'
+  AND COALESCE("delete", 0) = 0
   AND julianday(last_seen_at) < julianday(?)`,
 		agentID,
 		observedAt.UTC().Format(time.RFC3339Nano),
@@ -352,7 +357,8 @@ func (s *Store) MarkResourceMissingByPath(agentID, target string) error {
 	if _, err := s.execDB(context.Background(), "static_resource_missing_by_path", `
 UPDATE static_resources SET status = 'missing'
 WHERE canonical_agent_id = ? AND target = ? AND status <> 'missing'
-  AND COALESCE(status, '') <> 'ignored'`,
+  AND COALESCE(status, '') <> 'ignored'
+  AND COALESCE("delete", 0) = 0`,
 		agentID, target,
 	); err != nil {
 		return fmt.Errorf("audit: mark resource missing %q/%q: %w", agentID, target, err)
@@ -368,7 +374,7 @@ func (s *Store) StaticResourceStatus(resourceID string) (string, error) {
 		return "", nil
 	}
 	rows, err := s.queryDB(context.Background(), "static_resource_status_get", `
-SELECT COALESCE(status, '') FROM static_resources WHERE id = ?`, resourceID)
+SELECT COALESCE(status, '') FROM static_resources WHERE id = ? AND COALESCE("delete", 0) = 0`, resourceID)
 	if err != nil {
 		return "", fmt.Errorf("audit: get static resource status %q: %w", resourceID, err)
 	}
@@ -405,10 +411,10 @@ SELECT p.id,
        COALESCE(pc.updated_at, '')
 FROM resource_scan_profiles p
 LEFT JOIN resource_scan_profile_capabilities pc
-       ON pc.profile_id = p.id AND COALESCE(pc.enabled, 0) = 1
+       ON pc.profile_id = p.id AND COALESCE(pc.enabled, 0) = 1 AND COALESCE(pc."delete", 0) = 0
 LEFT JOIN security_scan_capabilities c
-       ON c.id = pc.capability_id AND COALESCE(c.enabled, 0) = 1
-WHERE p.id = ?
+       ON c.id = pc.capability_id AND COALESCE(c.enabled, 0) = 1 AND COALESCE(c."delete", 0) = 0
+WHERE p.id = ? AND COALESCE(p."delete", 0) = 0
 ORDER BY c.capability_key`, profileID)
 	if err != nil {
 		return "", fmt.Errorf("audit: profile fingerprint %d: %w", profileID, err)

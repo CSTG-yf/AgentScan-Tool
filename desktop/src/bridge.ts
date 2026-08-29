@@ -17,6 +17,14 @@ import type {
   GovernanceDiscoveryRule,
   GovernanceDiscoveryRuleInput,
   GovernancePage,
+  GovernancePostScanProfile,
+  GovernancePostScanProfileInput,
+  GovernancePostScanRule,
+  GovernancePostScanRuleInput,
+  GovernancePreScanProfile,
+  GovernancePreScanProfileInput,
+  GovernancePreScanRule,
+  GovernancePreScanRuleInput,
   GovernanceResourceAction,
   GovernanceResourceActionInput,
   GovernanceResourcePreviewResponse,
@@ -215,6 +223,11 @@ export async function getStaticResourceScans(resourceId: string, limit = 50): Pr
   return invoke<StaticResourceScanHistoryResponse>("get_static_resource_scans", { resourceId, limit });
 }
 
+export async function exportStaticResourceTextReport(content: string, defaultFileName?: string): Promise<string | null> {
+  if (!inTauri()) throw new Error("仅桌面应用可以选择路径并导出静态资源报告");
+  return invoke<string | null>("export_static_resource_text_report", { content, defaultFileName });
+}
+
 export async function updateStaticResourceStatus(resourceId: string, status: string): Promise<StaticResourceStatusUpdateResponse> {
   if (!inTauri()) throw new Error("仅桌面应用可以修改资源状态");
   return invoke<StaticResourceStatusUpdateResponse>("update_static_resource_status", { resourceId, status });
@@ -407,6 +420,74 @@ export async function updateGovernanceResourceAction(id: string, body: Governanc
 
 export async function deleteGovernanceResourceAction(id: string): Promise<{ status: string }> {
   return governanceDelete(`/resource-actions/${id}`);
+}
+
+export async function getGovernancePreScanProfiles(query: GovernanceListQuery = {}): Promise<GovernancePage<GovernancePreScanProfile>> {
+  if (!inTauri()) return emptyPage();
+  return governanceGet(`/pre-scan-profiles${governanceQuery(query)}`);
+}
+
+export async function createGovernancePreScanProfile(body: GovernancePreScanProfileInput): Promise<GovernancePreScanProfile> {
+  return governancePost("/pre-scan-profiles", body);
+}
+
+export async function updateGovernancePreScanProfile(id: number, body: GovernancePreScanProfileInput): Promise<GovernancePreScanProfile> {
+  return governancePatch(`/pre-scan-profiles/${id}`, body);
+}
+
+export async function deleteGovernancePreScanProfile(id: number): Promise<{ status: string }> {
+  return governanceDelete(`/pre-scan-profiles/${id}`);
+}
+
+export async function getGovernancePreScanRules(profileId: number, query: GovernanceListQuery = {}): Promise<GovernancePage<GovernancePreScanRule>> {
+  if (!inTauri()) return emptyPage();
+  return governanceGet(`/pre-scan-profiles/${profileId}/rules${governanceQuery(query)}`);
+}
+
+export async function createGovernancePreScanRule(profileId: number, body: GovernancePreScanRuleInput): Promise<GovernancePreScanRule> {
+  return governancePost(`/pre-scan-profiles/${profileId}/rules`, body);
+}
+
+export async function updateGovernancePreScanRule(id: number, body: GovernancePreScanRuleInput): Promise<GovernancePreScanRule> {
+  return governancePatch(`/pre-scan-rules/${id}`, body);
+}
+
+export async function deleteGovernancePreScanRule(id: number): Promise<{ status: string }> {
+  return governanceDelete(`/pre-scan-rules/${id}`);
+}
+
+export async function getGovernancePostScanProfiles(query: GovernanceListQuery = {}): Promise<GovernancePage<GovernancePostScanProfile>> {
+  if (!inTauri()) return emptyPage();
+  return governanceGet(`/post-scan-profiles${governanceQuery(query)}`);
+}
+
+export async function createGovernancePostScanProfile(body: GovernancePostScanProfileInput): Promise<GovernancePostScanProfile> {
+  return governancePost("/post-scan-profiles", body);
+}
+
+export async function updateGovernancePostScanProfile(id: number, body: GovernancePostScanProfileInput): Promise<GovernancePostScanProfile> {
+  return governancePatch(`/post-scan-profiles/${id}`, body);
+}
+
+export async function deleteGovernancePostScanProfile(id: number): Promise<{ status: string }> {
+  return governanceDelete(`/post-scan-profiles/${id}`);
+}
+
+export async function getGovernancePostScanRules(profileId: number, query: GovernanceListQuery = {}): Promise<GovernancePage<GovernancePostScanRule>> {
+  if (!inTauri()) return emptyPage();
+  return governanceGet(`/post-scan-profiles/${profileId}/rules${governanceQuery(query)}`);
+}
+
+export async function createGovernancePostScanRule(profileId: number, body: GovernancePostScanRuleInput): Promise<GovernancePostScanRule> {
+  return governancePost(`/post-scan-profiles/${profileId}/rules`, body);
+}
+
+export async function updateGovernancePostScanRule(id: number, body: GovernancePostScanRuleInput): Promise<GovernancePostScanRule> {
+  return governancePatch(`/post-scan-rules/${id}`, body);
+}
+
+export async function deleteGovernancePostScanRule(id: number): Promise<{ status: string }> {
+  return governanceDelete(`/post-scan-rules/${id}`);
 }
 
 export async function getGovernanceAdmissionMatrix(): Promise<GovernanceAdmissionMatrixResponse> {

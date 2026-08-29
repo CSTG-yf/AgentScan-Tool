@@ -57,6 +57,7 @@ pub fn run() {
             commands::static_assets::trigger_static_resource_scan,
             commands::static_assets::trigger_static_resource_rescan,
             commands::static_assets::get_static_resource_scans,
+            commands::static_assets::export_static_resource_text_report,
             commands::static_assets::update_static_resource_status,
             commands::static_assets::reveal_static_resource_path,
             commands::guard_service::install_process_guard,

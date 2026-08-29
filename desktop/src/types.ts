@@ -80,6 +80,9 @@ export interface AgentSnapshot {
   capturedAt: string;
   agents: AgentInventory[];
   processes: AgentProcess[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
   warning?: string;
 }
 
@@ -947,6 +950,10 @@ export interface GovernanceResourceRule {
   enumeration_mode: string;
   scan_profile_id?: number;
   scan_profile_name?: string;
+  pre_scan_profile_id?: number;
+  pre_scan_profile_name?: string;
+  post_scan_profile_id?: number;
+  post_scan_profile_name?: string;
   enabled: boolean;
   priority: number;
   resource_count: number;
@@ -961,8 +968,124 @@ export interface GovernanceResourceRuleInput {
   path_pattern?: string;
   enumeration_mode?: string;
   scan_profile_id?: number;
+  pre_scan_profile_id?: number;
+  post_scan_profile_id?: number;
   enabled?: boolean;
   priority?: number;
+}
+
+export interface GovernancePreScanRule {
+  id: number;
+  profile_id: number;
+  rule_name: string;
+  priority: number;
+  agent_type_id?: number;
+  agent_type_key?: string;
+  agent_type_name?: string;
+  resource_type: string;
+  path_pattern: string;
+  source_trust: string;
+  decision: string;
+  install_action: string;
+  file_action: string;
+  runtime_action: string;
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GovernancePreScanRuleInput {
+  rule_name?: string;
+  priority?: number;
+  agent_type_id?: number;
+  resource_type?: string;
+  path_pattern?: string;
+  source_trust?: string;
+  decision?: string;
+  install_action?: string;
+  file_action?: string;
+  runtime_action?: string;
+  enabled?: boolean;
+}
+
+export interface GovernancePreScanProfile {
+  id: number;
+  profile_key: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  is_default: boolean;
+  rule_count: number;
+  resource_rule_count: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GovernancePreScanProfileInput {
+  profile_key?: string;
+  name?: string;
+  description?: string;
+  enabled?: boolean;
+  is_default?: boolean;
+  rules?: GovernancePreScanRuleInput[];
+}
+
+export interface GovernancePostScanRule {
+  id: number;
+  profile_id: number;
+  rule_name: string;
+  priority: number;
+  resource_type: string;
+  severity: string;
+  risk_level: string;
+  malicious: boolean;
+  finding_category: string;
+  scanner: string;
+  decision: string;
+  install_action: string;
+  file_action: string;
+  runtime_action: string;
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GovernancePostScanRuleInput {
+  rule_name?: string;
+  priority?: number;
+  resource_type?: string;
+  severity?: string;
+  risk_level?: string;
+  malicious?: boolean;
+  finding_category?: string;
+  scanner?: string;
+  decision?: string;
+  install_action?: string;
+  file_action?: string;
+  runtime_action?: string;
+  enabled?: boolean;
+}
+
+export interface GovernancePostScanProfile {
+  id: number;
+  profile_key: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  is_default: boolean;
+  rule_count: number;
+  resource_rule_count: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GovernancePostScanProfileInput {
+  profile_key?: string;
+  name?: string;
+  description?: string;
+  enabled?: boolean;
+  is_default?: boolean;
+  rules?: GovernancePostScanRuleInput[];
 }
 
 export interface GovernanceProfileCapability {

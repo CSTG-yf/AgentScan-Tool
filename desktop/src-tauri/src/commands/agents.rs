@@ -2,6 +2,8 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::Command,
+    thread,
+    time::{Duration, Instant},
 };
 
 use chrono::Utc;
@@ -33,6 +35,7 @@ pub fn get_agents(app: tauri::AppHandle, query: Option<AgentListQuery>) -> Agent
             captured_at: Utc::now().to_rfc3339(),
             agents: Vec::new(),
             processes: Vec::new(),
+            total: 0,
             warning: Some(format!(
                 "Go Gateway 暂不可用，Agent Inventory 只能由 Go 后端提供：{error}"
             )),
@@ -80,7 +83,7 @@ pub fn export_agents_report_pdf(
 }
 
 fn agent_list_path(query: Option<&AgentListQuery>) -> String {
-    let mut pairs = vec![("page_size".to_string(), "600".to_string())];
+    let mut pairs = vec![("page_size".to_string(), "5000".to_string())];
     if let Some(query) = query {
         if let Some(page) = query.page.filter(|value| *value > 0) {
             pairs.push(("page".to_string(), page.to_string()));
@@ -194,6 +197,10 @@ fn print_html_to_pdf(html_path: &Path, output_path: &Path) -> Result<(), String>
     let browser = find_pdf_browser().ok_or_else(|| {
         "未找到 Microsoft Edge 或 Chrome，无法将 Agent 报告导出为 PDF".to_string()
     })?;
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| format!("创建导出目录失败：{err}"))?;
+    }
+    let _ = fs::remove_file(output_path);
     let profile_dir = env::temp_dir().join(format!(
         "defenseclaw-agent-report-profile-{}",
         Utc::now().timestamp_millis()
@@ -207,24 +214,33 @@ fn print_html_to_pdf(html_path: &Path, output_path: &Path) -> Result<(), String>
         let output = quiet_command(&browser)
             .arg(headless_flag)
             .arg("--disable-gpu")
+            .arg("--disable-extensions")
+            .arg("--disable-background-networking")
             .arg("--no-first-run")
+            .arg("--no-default-browser-check")
+            .arg("--run-all-compositor-stages-before-draw")
+            .arg("--virtual-time-budget=1000")
+            .arg("--print-to-pdf-no-header")
             .arg(format!("--user-data-dir={}", profile_dir.to_string_lossy()))
             .arg(format!("--print-to-pdf={target}"))
             .arg(&source)
             .output()
             .map_err(|err| format!("调用浏览器导出 PDF 失败：{err}"))?;
 
-        if output.status.success()
-            && output_path.exists()
-            && output_path
-                .metadata()
-                .map(|meta| meta.len() > 0)
-                .unwrap_or(false)
-        {
+        if output.status.success() && wait_for_non_empty_file(output_path, Duration::from_secs(8)) {
             let _ = fs::remove_dir_all(&profile_dir);
             return Ok(());
         }
-        last_error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        last_error = [stderr, stdout]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("；");
+        if last_error.is_empty() {
+            last_error = format!("浏览器退出码：{}", output.status);
+        }
     }
 
     let _ = fs::remove_dir_all(&profile_dir);
@@ -236,6 +252,17 @@ fn print_html_to_pdf(html_path: &Path, output_path: &Path) -> Result<(), String>
             format!("：{last_error}")
         }
     ))
+}
+
+fn wait_for_non_empty_file(path: &Path, timeout: Duration) -> bool {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if path.metadata().map(|meta| meta.len() > 0).unwrap_or(false) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(150));
+    }
+    false
 }
 
 fn find_pdf_browser() -> Option<String> {

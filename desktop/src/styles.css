@@ -14,6 +14,7 @@ body { min-height: 100vh; background: #f5f8fc; }
 .sidebar-collapsed .brand-mark { width: 36px; height: 36px; }
 .sidebar .ant-menu { padding: 14px 10px; border: 0 !important; background: transparent !important; }
 .sidebar .ant-menu-item { height: 42px; margin: 4px 0; color: #87a0b7; }
+.sidebar .ant-menu-submenu-title { color: #87a0b7 !important; }
 .sidebar .ant-menu-item-selected { color: #dffff7 !important; background: linear-gradient(90deg, rgba(68, 215, 182, .18), rgba(68, 215, 182, .05)) !important; box-shadow: inset 2px 0 #44d7b6; }
 .sidebar-footer { position: absolute; right: 16px; bottom: 16px; left: 16px; display: flex; align-items: center; gap: 8px; padding: 12px; color: #7991a7; font-size: 12px; border: 1px solid rgba(125, 173, 207, .10); border-radius: 10px; background: rgba(255, 255, 255, .02); }
 .sidebar-footer .version { margin-left: auto; font-family: ui-monospace, monospace; }
@@ -582,7 +583,7 @@ body { min-height: 100vh; background: #f5f8fc; }
 
 @media (max-width: 1180px) {
   .static-page-header, .static-agent-context { align-items: flex-start; flex-direction: column; }
-  .static-header-actions { justify-items: start; }
+  .static-header-actions { justify-content: flex-start; }
   .static-assets-workbench { grid-template-columns: 1fr; }
   .static-agent-panel { position: static; max-height: none; }
   .static-agent-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -766,18 +767,169 @@ body { min-height: 100vh; background: #f5f8fc; }
   border-color: #e7ebf3;
   background: #f8fafc;
 }
-.event-detail-drawer .ant-drawer-content,
-.static-detail-drawer .ant-drawer-content {
+.event-detail-drawer .ant-drawer-content {
   background: #ffffff;
 }
-.event-detail-drawer .ant-drawer-header,
-.static-detail-drawer .ant-drawer-header,
-.static-detail-drawer .ant-drawer-footer {
+.event-detail-drawer .ant-drawer-header {
   border-color: #e7ebf3;
 }
 .static-location { color: #667085 !important; }
 .static-agent-risk,
 .static-type-risk { color: #ef4444 !important; }
+.static-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.static-detail-drawer .ant-drawer-content,
+.static-detail-drawer .ant-drawer-wrapper-body,
+.static-detail-drawer .ant-drawer-header,
+.static-detail-drawer .ant-drawer-body,
+.static-detail-drawer .ant-drawer-footer {
+  color: #f5fbff !important;
+  background: #0d3564 !important;
+}
+.static-detail-drawer .ant-drawer-header,
+.static-detail-drawer .ant-drawer-footer {
+  border-color: rgba(184, 215, 244, .24) !important;
+}
+.static-detail-drawer .ant-drawer-close {
+  color: #b9cbe0 !important;
+}
+.static-detail-drawer .ant-drawer-close:hover {
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, .08) !important;
+}
+.static-detail-drawer .ant-drawer-title,
+.static-detail-drawer .ant-drawer-body,
+.static-detail-drawer .ant-tabs,
+.static-detail-drawer .ant-tabs-tab-btn,
+.static-detail-drawer .ant-tabs-content-holder,
+.static-detail-drawer .ant-descriptions,
+.static-detail-drawer .ant-descriptions-item-content,
+.static-detail-drawer .ant-list,
+.static-detail-drawer .ant-list-item,
+.static-detail-drawer .ant-list-item-meta-title,
+.static-detail-drawer .ant-table,
+.static-detail-drawer .ant-table-thead > tr > th,
+.static-detail-drawer .ant-table-tbody > tr > td,
+.static-detail-drawer .ant-typography,
+.static-detail-drawer .ant-empty-description,
+.static-detail-drawer .static-finding-card,
+.static-detail-drawer .static-finding-card span,
+.static-detail-drawer .static-finding-card strong,
+.static-detail-drawer .static-soft-note,
+.static-detail-drawer .static-history-list {
+  color: #f5fbff !important;
+}
+.static-detail-drawer .ant-typography-secondary,
+.static-detail-drawer .ant-list-item-meta-description,
+.static-detail-drawer .ant-descriptions-item-label,
+.static-detail-drawer .static-history-list .ant-typography-secondary {
+  color: #a9bed4 !important;
+}
+.static-detail-drawer .ant-tabs-nav::before {
+  border-bottom-color: rgba(184, 215, 244, .18) !important;
+}
+.static-detail-drawer .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #48e6c4 !important;
+}
+.static-detail-drawer .ant-tabs-ink-bar {
+  background: #48e6c4 !important;
+}
+.static-detail-drawer .ant-descriptions-view,
+.static-detail-drawer .ant-descriptions-row > th,
+.static-detail-drawer .ant-descriptions-row > td,
+.static-detail-drawer .ant-descriptions-item-label,
+.static-detail-drawer .ant-descriptions-item-content,
+.static-detail-drawer .ant-list-item {
+  border-color: rgba(184, 215, 244, .14) !important;
+  background: transparent !important;
+}
+.static-detail-drawer .ant-table-wrapper,
+.static-detail-drawer .ant-table,
+.static-detail-drawer .ant-table-container,
+.static-detail-drawer .ant-table-content {
+  background: transparent !important;
+}
+.static-detail-drawer .ant-table-thead > tr > th {
+  border-color: rgba(184, 215, 244, .16) !important;
+  background: rgba(255, 255, 255, .08) !important;
+}
+.static-detail-drawer .ant-table-tbody > tr > td {
+  border-color: rgba(184, 215, 244, .12) !important;
+  background: rgba(3, 15, 31, .28) !important;
+}
+.static-detail-drawer .ant-table-tbody > tr:hover > td,
+.static-detail-drawer .ant-table-tbody > tr > td.ant-table-cell-row-hover {
+  background: rgba(72, 230, 196, .11) !important;
+}
+.static-detail-drawer .static-finding-card,
+.static-detail-drawer .static-soft-note,
+.static-detail-drawer .static-relation-item {
+  border-color: rgba(184, 215, 244, .18) !important;
+  background: rgba(3, 15, 31, .48) !important;
+}
+.static-detail-drawer .static-content-preview {
+  color: #f5fbff !important;
+  border-color: rgba(184, 215, 244, .18) !important;
+  background: rgba(2, 8, 16, .52) !important;
+}
+.static-detail-drawer .ant-alert {
+  color: #f5fbff !important;
+  border-color: rgba(184, 215, 244, .22) !important;
+  background: rgba(255, 255, 255, .08) !important;
+}
+.static-detail-drawer .ant-alert-message,
+.static-detail-drawer .ant-alert-description {
+  color: #f5fbff !important;
+}
+.static-detail-drawer .ant-btn:not(.ant-btn-primary):not(.ant-btn-dangerous) {
+  color: #f5fbff !important;
+  border-color: rgba(96, 165, 250, .42) !important;
+  background: rgba(2, 12, 27, .72) !important;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, .18);
+}
+.static-detail-drawer .ant-btn:not(.ant-btn-primary):not(.ant-btn-dangerous):hover,
+.static-detail-drawer .ant-btn:not(.ant-btn-primary):not(.ant-btn-dangerous):focus-visible {
+  color: #ffffff !important;
+  border-color: rgba(72, 230, 196, .62) !important;
+  background: rgba(9, 33, 62, .92) !important;
+}
+.static-detail-drawer .ant-spin-text,
+.static-detail-drawer .ant-spin-dot {
+  color: #48e6c4 !important;
+}
+.static-detail-drawer .ant-tag {
+  color: #f5fbff !important;
+  border-color: rgba(184, 215, 244, .22) !important;
+  background: rgba(255, 255, 255, .10) !important;
+}
+.static-detail-drawer .ant-tag-red,
+.static-detail-drawer .ant-tag-error {
+  color: #fecaca !important;
+  border-color: rgba(248, 113, 113, .42) !important;
+  background: rgba(127, 29, 29, .72) !important;
+}
+.static-detail-drawer .ant-tag-blue,
+.static-detail-drawer .ant-tag-processing {
+  color: #bfdbfe !important;
+  border-color: rgba(96, 165, 250, .42) !important;
+  background: rgba(30, 64, 175, .42) !important;
+}
+.static-detail-drawer .ant-tag-green,
+.static-detail-drawer .ant-tag-success {
+  color: #bbf7d0 !important;
+  border-color: rgba(74, 222, 128, .38) !important;
+  background: rgba(20, 83, 45, .54) !important;
+}
+.static-detail-drawer .ant-tag-orange,
+.static-detail-drawer .ant-tag-warning {
+  color: #fed7aa !important;
+  border-color: rgba(251, 146, 60, .42) !important;
+  background: rgba(124, 45, 18, .56) !important;
+}
 .static-type-card-empty:not(.static-type-card-active) {
   opacity: .78;
   background: #fbfcfe !important;
