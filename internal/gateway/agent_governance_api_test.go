@@ -139,6 +139,9 @@ func TestAgentGovernanceReadEndpointsSmoke(t *testing.T) {
 		"/api/v1/agent-governance/resource-actions",
 		"/api/v1/agent-governance/pre-scan-profiles",
 		"/api/v1/agent-governance/post-scan-profiles",
+		"/api/v1/agent-governance/risk-severity-mappings",
+		"/api/v1/agent-governance/risk-rule-prefix-matches",
+		"/api/v1/agent-governance/risk-category-matches",
 		"/api/v1/agent-governance/admission-matrix",
 		"/api/v1/agent-governance/risk-model",
 	} {
@@ -148,6 +151,93 @@ func TestAgentGovernanceReadEndpointsSmoke(t *testing.T) {
 				t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestAgentGovernanceRiskExplainEndpoints(t *testing.T) {
+	api := newAgentGovernanceAPITest(t)
+
+	severityRec := agentGovernanceRequest(t, api, http.MethodGet, "/api/v1/agent-governance/risk-severity-mappings?page=1&pageSize=2&keyword=high&risk_level=high&enabled=true", nil)
+	if severityRec.Code != http.StatusOK {
+		t.Fatalf("severity mapping status = %d body = %s", severityRec.Code, severityRec.Body.String())
+	}
+	var severityPage audit.GovernanceRiskSeverityMappingPage
+	if err := json.NewDecoder(severityRec.Body).Decode(&severityPage); err != nil {
+		t.Fatalf("decode severity mappings: %v", err)
+	}
+	if severityPage.Total != 1 || len(severityPage.Items) != 1 || severityPage.Items[0].RiskLevel != "high" {
+		t.Fatalf("severity mappings = %+v", severityPage)
+	}
+
+	prefixRec := agentGovernanceRequest(t, api, http.MethodGet, "/api/v1/agent-governance/risk-rule-prefix-matches?keyword=CS-MAL&page_size=5", nil)
+	if prefixRec.Code != http.StatusOK {
+		t.Fatalf("prefix mapping status = %d body = %s", prefixRec.Code, prefixRec.Body.String())
+	}
+	var prefixPage audit.GovernanceRiskRulePrefixMatchPage
+	if err := json.NewDecoder(prefixRec.Body).Decode(&prefixPage); err != nil {
+		t.Fatalf("decode prefix mappings: %v", err)
+	}
+	if prefixPage.Total != 1 || prefixPage.Items[0].RuleIDPrefix != "CS-MAL-" {
+		t.Fatalf("prefix mappings = %+v", prefixPage)
+	}
+
+	categoryRec := agentGovernanceRequest(t, api, http.MethodGet, "/api/v1/agent-governance/risk-category-matches?keyword=credential&page_size=20", nil)
+	if categoryRec.Code != http.StatusOK {
+		t.Fatalf("category mapping status = %d body = %s", categoryRec.Code, categoryRec.Body.String())
+	}
+	var categoryPage audit.GovernanceRiskCategoryMatchPage
+	if err := json.NewDecoder(categoryRec.Body).Decode(&categoryPage); err != nil {
+		t.Fatalf("decode category mappings: %v", err)
+	}
+	if categoryPage.Total < 2 {
+		t.Fatalf("category mappings = %+v", categoryPage)
+	}
+
+	prefixEval := agentGovernanceRequest(t, api, http.MethodPost, "/api/v1/agent-governance/risk-explain/evaluate", map[string]any{
+		"resource_type": "prompt",
+		"severity":      "LOW",
+		"rule_id":       "CS-MAL-001",
+	})
+	if prefixEval.Code != http.StatusOK {
+		t.Fatalf("prefix evaluate status = %d body = %s", prefixEval.Code, prefixEval.Body.String())
+	}
+	var prefixResult audit.GovernanceRiskEvaluateResult
+	if err := json.NewDecoder(prefixEval.Body).Decode(&prefixResult); err != nil {
+		t.Fatalf("decode prefix evaluate: %v", err)
+	}
+	if prefixResult.RiskLevel != "critical" || prefixResult.MatchedType != "rule_id_prefix" {
+		t.Fatalf("prefix result = %+v", prefixResult)
+	}
+
+	categoryEval := agentGovernanceRequest(t, api, http.MethodPost, "/api/v1/agent-governance/risk-explain/evaluate", map[string]any{
+		"resource_type": "skill",
+		"severity":      "LOW",
+		"category":      "malware",
+	})
+	if categoryEval.Code != http.StatusOK {
+		t.Fatalf("category evaluate status = %d body = %s", categoryEval.Code, categoryEval.Body.String())
+	}
+	var categoryResult audit.GovernanceRiskEvaluateResult
+	if err := json.NewDecoder(categoryEval.Body).Decode(&categoryResult); err != nil {
+		t.Fatalf("decode category evaluate: %v", err)
+	}
+	if categoryResult.RiskLevel != "critical" || categoryResult.MatchedType != "category" {
+		t.Fatalf("category result = %+v", categoryResult)
+	}
+
+	severityEval := agentGovernanceRequest(t, api, http.MethodPost, "/api/v1/agent-governance/risk-explain/evaluate", map[string]any{
+		"resource_type": "plugin",
+		"severity":      "HIGH",
+	})
+	if severityEval.Code != http.StatusOK {
+		t.Fatalf("severity evaluate status = %d body = %s", severityEval.Code, severityEval.Body.String())
+	}
+	var severityResult audit.GovernanceRiskEvaluateResult
+	if err := json.NewDecoder(severityEval.Body).Decode(&severityResult); err != nil {
+		t.Fatalf("decode severity evaluate: %v", err)
+	}
+	if severityResult.RiskLevel != "high" || severityResult.MatchedType != "severity" {
+		t.Fatalf("severity result = %+v", severityResult)
 	}
 }
 

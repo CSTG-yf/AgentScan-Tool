@@ -32,7 +32,10 @@ import type {
   GovernanceResourceRuleInput,
   GovernanceRiskEvaluateInput,
   GovernanceRiskEvaluateResponse,
+  GovernanceRiskCategoryMatch,
   GovernanceRiskModelResponse,
+  GovernanceRiskRulePrefixMatch,
+  GovernanceRiskSeverityMapping,
   GovernanceScanCapability,
   GovernanceScanProfile,
   GovernanceScanProfileInput,
@@ -256,11 +259,19 @@ export interface GovernanceListQuery {
   connector?: string;
   actionField?: string;
   actionValue?: string;
+  riskLevel?: string;
   page?: number;
   pageSize?: number;
 }
 
 const emptyPage = <T>(): GovernancePage<T> => ({ total: 0, page: 1, page_size: 20, items: [] });
+
+const mockPage = <T>(items: T[], query: GovernanceListQuery = {}): GovernancePage<T> => {
+  const page = query.page ?? 1;
+  const pageSize = query.pageSize ?? 20;
+  const start = (page - 1) * pageSize;
+  return { total: items.length, page, page_size: pageSize, items: items.slice(start, start + pageSize) };
+};
 
 function governanceQuery(query: GovernanceListQuery = {}): string {
   const params = new URLSearchParams();
@@ -277,6 +288,7 @@ function governanceQuery(query: GovernanceListQuery = {}): string {
   if (query.connector) params.set("connector", query.connector);
   if (query.actionField) params.set("action_field", query.actionField);
   if (query.actionValue) params.set("action_value", query.actionValue);
+  if (query.riskLevel) params.set("risk_level", query.riskLevel);
   if (query.page) params.set("page", String(query.page));
   if (query.pageSize) params.set("page_size", String(query.pageSize));
   const text = params.toString();
@@ -526,18 +538,56 @@ export async function getGovernanceRiskModel(): Promise<GovernanceRiskModelRespo
   return governanceGet("/risk-model");
 }
 
+export async function getGovernanceRiskSeverityMappings(query: GovernanceListQuery = {}): Promise<GovernancePage<GovernanceRiskSeverityMapping>> {
+  if (!inTauri()) {
+    return mockPage([
+      { id: 1, source_severity: "CRITICAL", risk_level: "critical", description: "Critical scanner finding maps to critical resource risk.", priority: 30, enabled: true },
+      { id: 2, source_severity: "HIGH", risk_level: "high", description: "High scanner finding maps to high resource risk.", priority: 31, enabled: true },
+      { id: 3, source_severity: "MEDIUM", risk_level: "medium", description: "Medium scanner finding maps to medium resource risk.", priority: 32, enabled: true },
+      { id: 4, source_severity: "LOW", risk_level: "low", description: "Low scanner finding maps to low resource risk.", priority: 33, enabled: true },
+      { id: 5, source_severity: "INFO", risk_level: "clean", description: "Informational scanner finding maps to clean resource risk.", priority: 34, enabled: true },
+    ], query);
+  }
+  return governanceGet(`/risk-severity-mappings${governanceQuery(query)}`);
+}
+
+export async function getGovernanceRiskRulePrefixMatches(query: GovernanceListQuery = {}): Promise<GovernancePage<GovernanceRiskRulePrefixMatch>> {
+  if (!inTauri()) {
+    return mockPage([
+      { id: 1, rule_id_prefix: "CS-MAL-", risk_level: "critical", description: "ClawShield malware rule IDs are treated as critical before category or severity fallback.", priority: 10, enabled: true },
+    ], query);
+  }
+  return governanceGet(`/risk-rule-prefix-matches${governanceQuery(query)}`);
+}
+
+export async function getGovernanceRiskCategoryMatches(query: GovernanceListQuery = {}): Promise<GovernancePage<GovernanceRiskCategoryMatch>> {
+  if (!inTauri()) {
+    return mockPage(["malware", "reverse_shell", "credential_harvest", "credential_exfiltration", "cryptominer", "c2", "command_execution"].map((category, index) => ({
+      id: index + 1,
+      category,
+      risk_level: "critical",
+      description: `Category ${category} is treated as critical resource risk.`,
+      priority: 20,
+      enabled: true,
+    })), query);
+  }
+  return governanceGet(`/risk-category-matches${governanceQuery(query)}`);
+}
+
 export async function evaluateGovernanceRisk(body: GovernanceRiskEvaluateInput): Promise<GovernanceRiskEvaluateResponse> {
   if (!inTauri()) {
-    const rank: Record<string, number> = { INFO: 0, LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 };
-    const max = body.findings.reduce((acc, finding) => {
-      const severity = String(finding.severity ?? "INFO").toUpperCase();
-      return (rank[severity] ?? 0) > (rank[acc] ?? 0) ? severity : acc;
-    }, "INFO");
-    const risk = max === "CRITICAL" ? "critical" : max === "HIGH" ? "high" : max === "MEDIUM" ? "medium" : max === "LOW" ? "low" : "clean";
-    const malicious = body.findings.some((finding) => finding.rule_id?.startsWith("CS-MAL-") || finding.category === "prompt_injection");
-    return { risk_level: risk, malicious, max_severity: max, finding_count: body.findings.length, matched_indicators: malicious ? [{ match_type: "rule_id_prefix", match_value: "CS-MAL-" }] : [] };
+    const precedence = ["rule_id_prefix", "category", "severity", "default"];
+    if (body.rule_id?.startsWith("CS-MAL-")) {
+      return { risk_level: "critical", matched_type: "rule_id_prefix", matched_value: "CS-MAL-", reason: "Rule ID prefix matched CS-MAL-, mapped to critical.", precedence };
+    }
+    if (["malware", "reverse_shell", "credential_harvest", "credential_exfiltration", "cryptominer", "c2", "command_execution"].includes(String(body.category ?? "").toLowerCase())) {
+      return { risk_level: "critical", matched_type: "category", matched_value: String(body.category), reason: `Category matched ${body.category}, mapped to critical.`, precedence };
+    }
+    const severity = String(body.severity ?? "INFO").toUpperCase();
+    const risk = severity === "CRITICAL" ? "critical" : severity === "HIGH" ? "high" : severity === "MEDIUM" ? "medium" : severity === "LOW" ? "low" : "clean";
+    return { risk_level: risk, matched_type: "severity", matched_value: severity, reason: `Severity matched ${severity}, mapped to ${risk}.`, precedence };
   }
-  return governancePost("/risk/evaluate", body);
+  return governancePost("/risk-explain/evaluate", body);
 }
 
 export async function getRuntimeSecuritySummary(agentId?: string): Promise<RuntimeSecuritySummary> {

@@ -430,6 +430,9 @@ var softDeleteTables = []string{
 	"resource_pre_scan_rules",
 	"resource_post_scan_profiles",
 	"resource_post_scan_rules",
+	"risk_severity_mappings",
+	"risk_rule_prefix_matches",
+	"risk_category_matches",
 	"agent_runtime_sessions",
 	"runtime_detections",
 	"runtime_detection_events",
@@ -2474,6 +2477,52 @@ WHERE id = ?`,
 			return nil
 		},
 	},
+	{
+		description: "agent governance: risk explain mappings",
+		apply: func(ex dbExecer) error {
+			if _, err := ex.Exec(`
+			CREATE TABLE IF NOT EXISTS risk_severity_mappings (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				source_severity TEXT NOT NULL UNIQUE,
+				risk_level TEXT NOT NULL,
+				description TEXT NOT NULL DEFAULT '',
+				priority INTEGER NOT NULL DEFAULT 100,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0
+			);
+			CREATE TABLE IF NOT EXISTS risk_rule_prefix_matches (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				rule_id_prefix TEXT NOT NULL UNIQUE,
+				risk_level TEXT NOT NULL,
+				description TEXT NOT NULL DEFAULT '',
+				priority INTEGER NOT NULL DEFAULT 100,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0
+			);
+			CREATE TABLE IF NOT EXISTS risk_category_matches (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				category TEXT NOT NULL UNIQUE,
+				risk_level TEXT NOT NULL,
+				description TEXT NOT NULL DEFAULT '',
+				priority INTEGER NOT NULL DEFAULT 100,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0
+			);
+			CREATE INDEX IF NOT EXISTS idx_risk_severity_mappings_filter ON risk_severity_mappings(risk_level, enabled, "delete");
+			CREATE INDEX IF NOT EXISTS idx_risk_rule_prefix_matches_filter ON risk_rule_prefix_matches(risk_level, enabled, "delete");
+			CREATE INDEX IF NOT EXISTS idx_risk_category_matches_filter ON risk_category_matches(risk_level, enabled, "delete");
+			`); err != nil {
+				return fmt.Errorf("create risk explain tables: %w", err)
+			}
+			return seedRiskExplainModel(ex)
+		},
+	},
 }
 
 type agentDiscoverySeed struct {
@@ -3092,6 +3141,9 @@ var knownTables = map[string]bool{
 	"resource_pre_scan_rules":            true,
 	"resource_post_scan_profiles":        true,
 	"resource_post_scan_rules":           true,
+	"risk_severity_mappings":             true,
+	"risk_rule_prefix_matches":           true,
+	"risk_category_matches":              true,
 	// runtime detection and response tables
 	"agent_runtime_sessions":      true,
 	"runtime_detections":          true,

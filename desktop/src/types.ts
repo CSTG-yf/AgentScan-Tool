@@ -1206,23 +1206,54 @@ export interface GovernanceRiskModelResponse {
   malicious_indicators: Array<{ match_type: string; match_value: string }>;
 }
 
+export interface GovernanceRiskSeverityMapping {
+  id: number;
+  source_severity: string;
+  risk_level: string;
+  description: string;
+  priority: number;
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GovernanceRiskRulePrefixMatch {
+  id: number;
+  rule_id_prefix: string;
+  risk_level: string;
+  description: string;
+  priority: number;
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GovernanceRiskCategoryMatch {
+  id: number;
+  category: string;
+  risk_level: string;
+  description: string;
+  priority: number;
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface GovernanceRiskEvaluateInput {
   resource_type: string;
-  findings: Array<{
-    rule_id?: string;
-    category?: string;
-    severity: string;
-    title?: string;
-    tags?: string[];
-  }>;
+  severity: string;
+  rule_id?: string;
+  category?: string;
+  tags?: string;
+  title?: string;
 }
 
 export interface GovernanceRiskEvaluateResponse {
   risk_level: string;
-  malicious: boolean;
-  max_severity: string;
-  finding_count: number;
-  matched_indicators: Array<{ match_type: string; match_value: string }>;
+  matched_type: string;
+  matched_value: string;
+  reason: string;
+  precedence: string[];
 }
 
 export interface GovernanceResourcePreviewResponse {

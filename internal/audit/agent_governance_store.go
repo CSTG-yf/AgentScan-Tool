@@ -32,6 +32,7 @@ type GovernancePageFilter struct {
 	Connector     string
 	ActionField   string
 	ActionValue   string
+	RiskLevel     string
 }
 
 type GovernanceAgentTypePage struct {

@@ -63,7 +63,9 @@ import {
   getGovernancePreScanRules,
   getGovernanceResourceActions,
   getGovernanceResourceRules,
-  getGovernanceRiskModel,
+  getGovernanceRiskCategoryMatches,
+  getGovernanceRiskRulePrefixMatches,
+  getGovernanceRiskSeverityMappings,
   getGovernanceScanCapabilities,
   getGovernanceScanProfiles,
   previewGovernanceResourceRule,
@@ -101,8 +103,10 @@ import type {
   GovernanceResourceActionInput,
   GovernanceResourceRule,
   GovernanceResourceRuleInput,
+  GovernanceRiskCategoryMatch,
   GovernanceRiskEvaluateResponse,
-  GovernanceRiskModelResponse,
+  GovernanceRiskRulePrefixMatch,
+  GovernanceRiskSeverityMapping,
   GovernanceScanCapability,
   GovernanceScanProfile,
   GovernanceScanProfileInput,
@@ -115,6 +119,7 @@ const DECISION_RESOURCE_TYPES = ["all", ...RESOURCE_TYPES];
 const ENUMERATION_MODES = ["exact", "children", "glob", "recursive"];
 const SEVERITIES = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
 const RISK_LEVELS = ["clean", "low", "medium", "high", "critical"];
+const RISK_LEVEL_OPTIONS = [{ value: "all", label: "全部风险" }, ...RISK_LEVELS.map((value) => ({ value, label: value }))];
 const PRE_SCAN_DECISIONS = ["scan", "skip", "allow", "alert", "review", "block", "reject"];
 const POST_SCAN_DECISIONS = ["allow", "alert", "review", "block", "reject", "clean", "ignore"];
 const INSTALL_ACTIONS = ["none", "allow", "block"];
@@ -133,6 +138,10 @@ type PageQueryState = {
   enabled: EnabledFilter;
   page: number;
   pageSize: number;
+};
+
+type RiskQueryState = PageQueryState & {
+  riskLevel: string;
 };
 
 type DraftPreScanRule = GovernancePreScanRuleInput & { draft_id: string };
@@ -157,6 +166,13 @@ function queryFromState(state: PageQueryState) {
   };
 }
 
+function riskQueryFromState(state: RiskQueryState) {
+  return {
+    ...queryFromState(state),
+    riskLevel: state.riskLevel === "all" ? undefined : state.riskLevel,
+  };
+}
+
 function tablePagination<T>(page: GovernancePage<T>, query: PageQueryState): TablePaginationConfig {
   return {
     current: page.page || query.page,
@@ -169,6 +185,11 @@ function tablePagination<T>(page: GovernancePage<T>, query: PageQueryState): Tab
 
 function enabledTag(enabled: boolean) {
   return enabled ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>;
+}
+
+function riskLevelTag(value: string) {
+  const color = value === "critical" ? "red" : value === "high" ? "volcano" : value === "medium" ? "orange" : value === "low" ? "blue" : "green";
+  return <Tag color={color}>{value || "-"}</Tag>;
 }
 
 function verdictTag(value: string) {
@@ -237,7 +258,10 @@ export function AgentGovernancePage() {
   const [postScanRulePage, setPostScanRulePage] = useState<GovernancePage<GovernancePostScanRule>>(emptyPage(1, 6));
   const [resourceActions, setResourceActions] = useState<GovernanceResourceAction[]>([]);
   const [admissionMatrix, setAdmissionMatrix] = useState<GovernanceAdmissionMatrixItem[]>([]);
-  const [riskModel, setRiskModel] = useState<GovernanceRiskModelResponse>();
+  const [riskLoading, setRiskLoading] = useState(false);
+  const [riskSeverityPage, setRiskSeverityPage] = useState<GovernancePage<GovernanceRiskSeverityMapping>>(emptyPage(1, 5));
+  const [riskRulePrefixPage, setRiskRulePrefixPage] = useState<GovernancePage<GovernanceRiskRulePrefixMatch>>(emptyPage(1, 5));
+  const [riskCategoryPage, setRiskCategoryPage] = useState<GovernancePage<GovernanceRiskCategoryMatch>>(emptyPage(1, 5));
 
   const [agentQuery, setAgentQuery] = useState<PageQueryState>({ keyword: "", enabled: "all", page: 1, pageSize: 10 });
   const [agentKeyword, setAgentKeyword] = useState("");
@@ -259,6 +283,19 @@ export function AgentGovernancePage() {
   const [postScanQuery, setPostScanQuery] = useState<PageQueryState>({ keyword: "", enabled: "all", page: 1, pageSize: 8 });
   const [postScanKeyword, setPostScanKeyword] = useState("");
   const [postScanEnabled, setPostScanEnabled] = useState<EnabledFilter>("all");
+
+  const [riskSeverityQuery, setRiskSeverityQuery] = useState<RiskQueryState>({ keyword: "", enabled: "all", riskLevel: "all", page: 1, pageSize: 5 });
+  const [riskSeverityKeyword, setRiskSeverityKeyword] = useState("");
+  const [riskSeverityEnabled, setRiskSeverityEnabled] = useState<EnabledFilter>("all");
+  const [riskSeverityLevel, setRiskSeverityLevel] = useState("all");
+  const [riskRulePrefixQuery, setRiskRulePrefixQuery] = useState<RiskQueryState>({ keyword: "", enabled: "all", riskLevel: "all", page: 1, pageSize: 5 });
+  const [riskRulePrefixKeyword, setRiskRulePrefixKeyword] = useState("");
+  const [riskRulePrefixEnabled, setRiskRulePrefixEnabled] = useState<EnabledFilter>("all");
+  const [riskRulePrefixLevel, setRiskRulePrefixLevel] = useState("all");
+  const [riskCategoryQuery, setRiskCategoryQuery] = useState<RiskQueryState>({ keyword: "", enabled: "all", riskLevel: "all", page: 1, pageSize: 5 });
+  const [riskCategoryKeyword, setRiskCategoryKeyword] = useState("");
+  const [riskCategoryEnabled, setRiskCategoryEnabled] = useState<EnabledFilter>("all");
+  const [riskCategoryLevel, setRiskCategoryLevel] = useState("all");
 
   const [agentForm] = Form.useForm<GovernanceAgentTypeInput>();
   const [agentModalOpen, setAgentModalOpen] = useState(false);
@@ -317,7 +354,7 @@ export function AgentGovernancePage() {
   const [riskForm] = Form.useForm();
   const [riskResult, setRiskResult] = useState<GovernanceRiskEvaluateResponse>();
 
-  const loading = referenceLoading || agentLoading || discoveryLoading || resourceLoading || decisionLoading;
+  const loading = referenceLoading || agentLoading || discoveryLoading || resourceLoading || decisionLoading || riskLoading;
 
   const agentTypeOptions = useMemo(
     () => agentTypeCatalog.map((item) => ({ label: `${item.name} (${item.type_key})`, value: item.id })),
@@ -395,16 +432,33 @@ export function AgentGovernancePage() {
     }
   }, [preScanQuery, postScanQuery]);
 
+  const loadRiskExplain = useCallback(async () => {
+    setRiskLoading(true);
+    try {
+      const [severityPage, prefixPage, categoryPage] = await Promise.all([
+        getGovernanceRiskSeverityMappings(riskQueryFromState(riskSeverityQuery)),
+        getGovernanceRiskRulePrefixMatches(riskQueryFromState(riskRulePrefixQuery)),
+        getGovernanceRiskCategoryMatches(riskQueryFromState(riskCategoryQuery)),
+      ]);
+      setRiskSeverityPage(severityPage);
+      setRiskRulePrefixPage(prefixPage);
+      setRiskCategoryPage(categoryPage);
+    } catch (error) {
+      message.error(`读取风险解释规则失败：${String(error)}`);
+    } finally {
+      setRiskLoading(false);
+    }
+  }, [riskSeverityQuery, riskRulePrefixQuery, riskCategoryQuery]);
+
   const loadReferences = useCallback(async () => {
     setReferenceLoading(true);
     try {
-      const [agentCatalog, profilePage, capabilityResp, actionPage, matrix, risk, preProfiles, postProfiles] = await Promise.all([
+      const [agentCatalog, profilePage, capabilityResp, actionPage, matrix, preProfiles, postProfiles] = await Promise.all([
         getGovernanceAgentTypes({ page: 1, pageSize: 500 }),
         getGovernanceScanProfiles({ page: 1, pageSize: 500 }),
         getGovernanceScanCapabilities(),
         getGovernanceResourceActions({ page: 1, pageSize: 200 }),
         getGovernanceAdmissionMatrix(),
-        getGovernanceRiskModel(),
         getGovernancePreScanProfiles({ page: 1, pageSize: 500 }),
         getGovernancePostScanProfiles({ page: 1, pageSize: 500 }),
       ]);
@@ -413,7 +467,6 @@ export function AgentGovernancePage() {
       setScanCapabilities(capabilityResp.items ?? []);
       setResourceActions(actionPage.items ?? []);
       setAdmissionMatrix(matrix.items ?? []);
-      setRiskModel(risk);
       setPreScanProfileCatalog(preProfiles.items ?? []);
       setPostScanProfileCatalog(postProfiles.items ?? []);
     } catch (error) {
@@ -424,8 +477,8 @@ export function AgentGovernancePage() {
   }, []);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([loadReferences(), loadAgentTypes(), loadDiscoveryRules(), loadResourceRules(), loadDecisionProfiles()]);
-  }, [loadReferences, loadAgentTypes, loadDiscoveryRules, loadResourceRules, loadDecisionProfiles]);
+    await Promise.all([loadReferences(), loadAgentTypes(), loadDiscoveryRules(), loadResourceRules(), loadDecisionProfiles(), loadRiskExplain()]);
+  }, [loadReferences, loadAgentTypes, loadDiscoveryRules, loadResourceRules, loadDecisionProfiles, loadRiskExplain]);
 
   useEffect(() => {
     void loadReferences();
@@ -446,6 +499,10 @@ export function AgentGovernancePage() {
   useEffect(() => {
     void loadDecisionProfiles();
   }, [loadDecisionProfiles]);
+
+  useEffect(() => {
+    void loadRiskExplain();
+  }, [loadRiskExplain]);
 
   const applyAgentFilter = () => {
     setAgentQuery((prev) => ({ ...prev, page: 1, keyword: agentKeyword.trim(), enabled: agentEnabled }));
@@ -515,6 +572,39 @@ export function AgentGovernancePage() {
     setPostScanRuleKeyword("");
     setPostScanRuleEnabled("all");
     setPostScanRuleQuery((prev) => ({ ...prev, page: 1, keyword: "", enabled: "all" }));
+  };
+
+  const applyRiskSeverityFilter = () => {
+    setRiskSeverityQuery((prev) => ({ ...prev, page: 1, keyword: riskSeverityKeyword.trim(), enabled: riskSeverityEnabled, riskLevel: riskSeverityLevel }));
+  };
+
+  const resetRiskSeverityFilter = () => {
+    setRiskSeverityKeyword("");
+    setRiskSeverityEnabled("all");
+    setRiskSeverityLevel("all");
+    setRiskSeverityQuery((prev) => ({ ...prev, page: 1, keyword: "", enabled: "all", riskLevel: "all" }));
+  };
+
+  const applyRiskRulePrefixFilter = () => {
+    setRiskRulePrefixQuery((prev) => ({ ...prev, page: 1, keyword: riskRulePrefixKeyword.trim(), enabled: riskRulePrefixEnabled, riskLevel: riskRulePrefixLevel }));
+  };
+
+  const resetRiskRulePrefixFilter = () => {
+    setRiskRulePrefixKeyword("");
+    setRiskRulePrefixEnabled("all");
+    setRiskRulePrefixLevel("all");
+    setRiskRulePrefixQuery((prev) => ({ ...prev, page: 1, keyword: "", enabled: "all", riskLevel: "all" }));
+  };
+
+  const applyRiskCategoryFilter = () => {
+    setRiskCategoryQuery((prev) => ({ ...prev, page: 1, keyword: riskCategoryKeyword.trim(), enabled: riskCategoryEnabled, riskLevel: riskCategoryLevel }));
+  };
+
+  const resetRiskCategoryFilter = () => {
+    setRiskCategoryKeyword("");
+    setRiskCategoryEnabled("all");
+    setRiskCategoryLevel("all");
+    setRiskCategoryQuery((prev) => ({ ...prev, page: 1, keyword: "", enabled: "all", riskLevel: "all" }));
   };
 
   const loadPreScanRules = useCallback(async (profileID = editingPreScanProfile?.id) => {
@@ -1265,6 +1355,33 @@ export function AgentGovernancePage() {
     { title: "来源", dataIndex: "source" },
   ];
 
+  const riskSeverityColumns: ColumnsType<GovernanceRiskSeverityMapping> = [
+    { title: "Severity", dataIndex: "source_severity", width: 140 },
+    { title: "Risk Level", dataIndex: "risk_level", width: 140, render: riskLevelTag },
+    { title: "说明", dataIndex: "description", ellipsis: true },
+    { title: "优先级", dataIndex: "priority", width: 100 },
+    { title: "状态", dataIndex: "enabled", width: 90, render: enabledTag },
+    { title: "更新时间", dataIndex: "updated_at", width: 190 },
+  ];
+
+  const riskRulePrefixColumns: ColumnsType<GovernanceRiskRulePrefixMatch> = [
+    { title: "Rule ID 前缀", dataIndex: "rule_id_prefix", width: 180 },
+    { title: "命中风险等级", dataIndex: "risk_level", width: 150, render: riskLevelTag },
+    { title: "说明", dataIndex: "description", ellipsis: true },
+    { title: "优先级", dataIndex: "priority", width: 100 },
+    { title: "状态", dataIndex: "enabled", width: 90, render: enabledTag },
+    { title: "更新时间", dataIndex: "updated_at", width: 190 },
+  ];
+
+  const riskCategoryColumns: ColumnsType<GovernanceRiskCategoryMatch> = [
+    { title: "Category", dataIndex: "category", width: 220 },
+    { title: "命中风险等级", dataIndex: "risk_level", width: 150, render: riskLevelTag },
+    { title: "说明", dataIndex: "description", ellipsis: true },
+    { title: "优先级", dataIndex: "priority", width: 100 },
+    { title: "状态", dataIndex: "enabled", width: 90, render: enabledTag },
+    { title: "更新时间", dataIndex: "updated_at", width: 190 },
+  ];
+
   const tabs = [
     {
       key: "types",
@@ -1505,30 +1622,151 @@ export function AgentGovernancePage() {
       label: "风险解释",
       children: (
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
-          <Alert type="info" showIcon message="风险模型当前用于解释扫描 finding 如何映射为 clean/low/medium/high/critical，并支持基于 finding 的试算。" />
-          <Table rowKey="severity" size="small" pagination={false} dataSource={riskModel?.severity_mapping ?? []} columns={[
-            { title: "Severity", dataIndex: "severity" },
-            { title: "Risk Level", dataIndex: "risk_level" },
-          ]} />
-          <Table rowKey={(row) => `${row.match_type}-${row.match_value}`} size="small" pagination={{ pageSize: 8 }} dataSource={riskModel?.malicious_indicators ?? []} columns={[
-            { title: "匹配类型", dataIndex: "match_type" },
-            { title: "匹配值", dataIndex: "match_value" },
-          ]} />
-          <Form form={riskForm} layout="inline" onFinish={(values) => evaluateGovernanceRisk({ resource_type: values.resource_type, findings: [{ rule_id: values.rule_id, category: values.category, severity: values.severity, title: values.title, tags: String(values.tags ?? "").split(",").map((item) => item.trim()).filter(Boolean) }] }).then(setRiskResult)}>
-            <Form.Item name="resource_type" initialValue="prompt"><Select style={{ width: 130 }} options={RESOURCE_TYPES.map((value) => ({ value, label: value }))} /></Form.Item>
-            <Form.Item name="severity" initialValue="HIGH"><Select style={{ width: 130 }} options={SEVERITIES.map((value) => ({ value, label: value }))} /></Form.Item>
-            <Form.Item name="rule_id"><Input placeholder="Rule ID" /></Form.Item>
-            <Form.Item name="category"><Input placeholder="Category" /></Form.Item>
-            <Form.Item name="tags"><Input placeholder="tag1,tag2" /></Form.Item>
-            <Form.Item name="title"><Input placeholder="Title" /></Form.Item>
-            <Button htmlType="submit">风险试算</Button>
-          </Form>
-          {riskResult ? <Descriptions bordered size="small" column={4} items={[
-            { key: "risk", label: "风险等级", children: <Tag color={riskResult.risk_level === "critical" || riskResult.risk_level === "high" ? "red" : "blue"}>{riskResult.risk_level}</Tag> },
-            { key: "malicious", label: "恶意", children: riskResult.malicious ? <Tag color="red">是</Tag> : <Tag>否</Tag> },
-            { key: "severity", label: "最高级别", children: riskResult.max_severity },
-            { key: "count", label: "Finding", children: riskResult.finding_count },
-          ]} /> : null}
+          <Alert
+            type="info"
+            showIcon
+            message="风险判定优先级：Rule ID 前缀 > Category > Severity > 默认 clean。前三类规则都只读取启用且未删除的数据。"
+          />
+          <Card bordered={false} className="workspace-table-card">
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <div>
+                <Text strong>Severity 风险等级映射</Text>
+                <br />
+                <Text type="secondary">当 finding 没有命中更高优先级的前缀或 Category 规则时，按扫描器 Severity 映射资源风险等级。</Text>
+              </div>
+              <Space className="governance-toolbar" wrap>
+                <Input.Search
+                  allowClear
+                  placeholder="搜索 Severity / Risk Level / 说明"
+                  value={riskSeverityKeyword}
+                  onChange={(event) => setRiskSeverityKeyword(event.target.value)}
+                  onSearch={applyRiskSeverityFilter}
+                  style={{ width: 280 }}
+                />
+                <Select value={riskSeverityLevel} onChange={setRiskSeverityLevel} options={RISK_LEVEL_OPTIONS} style={{ width: 130 }} />
+                <Select value={riskSeverityEnabled} onChange={setRiskSeverityEnabled} options={[...ENABLED_OPTIONS]} style={{ width: 130 }} />
+                <Button icon={<SearchOutlined />} onClick={applyRiskSeverityFilter}>查询</Button>
+                <Button onClick={resetRiskSeverityFilter}>重置</Button>
+                <Button icon={<ReloadOutlined />} onClick={() => void loadRiskExplain()} />
+              </Space>
+              <Table
+                rowKey="id"
+                size="small"
+                loading={riskLoading}
+                columns={riskSeverityColumns}
+                dataSource={riskSeverityPage.items}
+                scroll={{ x: 980 }}
+                pagination={tablePagination(riskSeverityPage, riskSeverityQuery)}
+                onChange={(pagination) => setRiskSeverityQuery((prev) => ({ ...prev, page: pagination.current ?? 1, pageSize: pagination.pageSize ?? prev.pageSize }))}
+              />
+            </Space>
+          </Card>
+          <Card bordered={false} className="workspace-table-card">
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <div>
+                <Text strong>规则 ID 前缀匹配规则</Text>
+                <br />
+                <Text type="secondary">Rule ID 前缀是最高优先级规则，适合把一类扫描器规则整体提升到指定风险等级。</Text>
+              </div>
+              <Space className="governance-toolbar" wrap>
+                <Input.Search
+                  allowClear
+                  placeholder="搜索 Rule ID 前缀 / Risk Level / 说明"
+                  value={riskRulePrefixKeyword}
+                  onChange={(event) => setRiskRulePrefixKeyword(event.target.value)}
+                  onSearch={applyRiskRulePrefixFilter}
+                  style={{ width: 300 }}
+                />
+                <Select value={riskRulePrefixLevel} onChange={setRiskRulePrefixLevel} options={RISK_LEVEL_OPTIONS} style={{ width: 130 }} />
+                <Select value={riskRulePrefixEnabled} onChange={setRiskRulePrefixEnabled} options={[...ENABLED_OPTIONS]} style={{ width: 130 }} />
+                <Button icon={<SearchOutlined />} onClick={applyRiskRulePrefixFilter}>查询</Button>
+                <Button onClick={resetRiskRulePrefixFilter}>重置</Button>
+                <Button icon={<ReloadOutlined />} onClick={() => void loadRiskExplain()} />
+              </Space>
+              <Table
+                rowKey="id"
+                size="small"
+                loading={riskLoading}
+                columns={riskRulePrefixColumns}
+                dataSource={riskRulePrefixPage.items}
+                scroll={{ x: 980 }}
+                pagination={tablePagination(riskRulePrefixPage, riskRulePrefixQuery)}
+                onChange={(pagination) => setRiskRulePrefixQuery((prev) => ({ ...prev, page: pagination.current ?? 1, pageSize: pagination.pageSize ?? prev.pageSize }))}
+              />
+            </Space>
+          </Card>
+          <Card bordered={false} className="workspace-table-card">
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <div>
+                <Text strong>Category 匹配规则</Text>
+                <br />
+                <Text type="secondary">Category 是第二优先级规则，用于把 malware、c2、credential_harvest 等风险类别映射到资源风险等级。</Text>
+              </div>
+              <Space className="governance-toolbar" wrap>
+                <Input.Search
+                  allowClear
+                  placeholder="搜索 Category / Risk Level / 说明"
+                  value={riskCategoryKeyword}
+                  onChange={(event) => setRiskCategoryKeyword(event.target.value)}
+                  onSearch={applyRiskCategoryFilter}
+                  style={{ width: 300 }}
+                />
+                <Select value={riskCategoryLevel} onChange={setRiskCategoryLevel} options={RISK_LEVEL_OPTIONS} style={{ width: 130 }} />
+                <Select value={riskCategoryEnabled} onChange={setRiskCategoryEnabled} options={[...ENABLED_OPTIONS]} style={{ width: 130 }} />
+                <Button icon={<SearchOutlined />} onClick={applyRiskCategoryFilter}>查询</Button>
+                <Button onClick={resetRiskCategoryFilter}>重置</Button>
+                <Button icon={<ReloadOutlined />} onClick={() => void loadRiskExplain()} />
+              </Space>
+              <Table
+                rowKey="id"
+                size="small"
+                loading={riskLoading}
+                columns={riskCategoryColumns}
+                dataSource={riskCategoryPage.items}
+                scroll={{ x: 980 }}
+                pagination={tablePagination(riskCategoryPage, riskCategoryQuery)}
+                onChange={(pagination) => setRiskCategoryQuery((prev) => ({ ...prev, page: pagination.current ?? 1, pageSize: pagination.pageSize ?? prev.pageSize }))}
+              />
+            </Space>
+          </Card>
+          {/* <Card bordered={false} className="workspace-table-card">
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <div>
+                <Text strong>风险试算器</Text>
+                <br />
+                <Text type="secondary">输入一条 finding 的关键字段，查看最终风险等级、命中的规则类型和值，以及判定原因。</Text>
+              </div>
+              <Form
+                form={riskForm}
+                layout="inline"
+                onFinish={(values) => {
+                  void evaluateGovernanceRisk({
+                    resource_type: values.resource_type,
+                    severity: values.severity,
+                    rule_id: values.rule_id,
+                    category: values.category,
+                    tags: values.tags,
+                    title: values.title,
+                  }).then(setRiskResult).catch((error) => message.error(`风险试算失败：${String(error)}`));
+                }}
+              >
+                <Form.Item name="resource_type" initialValue="prompt"><Select style={{ width: 130 }} options={RESOURCE_TYPES.map((value) => ({ value, label: value }))} /></Form.Item>
+                <Form.Item name="severity" initialValue="HIGH"><Select style={{ width: 130 }} options={SEVERITIES.map((value) => ({ value, label: value }))} /></Form.Item>
+                <Form.Item name="rule_id"><Input placeholder="Rule ID" /></Form.Item>
+                <Form.Item name="category"><Input placeholder="Category" /></Form.Item>
+                <Form.Item name="tags"><Input placeholder="tag1,tag2" /></Form.Item>
+                <Form.Item name="title"><Input placeholder="Title" /></Form.Item>
+                <Button htmlType="submit" type="primary">风险试算</Button>
+              </Form>
+              {riskResult ? <Descriptions bordered size="small" column={2} items={[
+                { key: "risk", label: "最终风险等级", children: riskLevelTag(riskResult.risk_level) },
+                { key: "type", label: "命中规则类型", children: riskResult.matched_type },
+                { key: "value", label: "命中规则值", children: riskResult.matched_value || "-" },
+                { key: "precedence", label: "优先级链路", children: riskResult.precedence.join(" > ") },
+                { key: "reason", label: "判定原因", children: riskResult.reason },
+              ]} /> : null}
+            </Space>
+          </Card> */}
         </Space>
       ),
     },

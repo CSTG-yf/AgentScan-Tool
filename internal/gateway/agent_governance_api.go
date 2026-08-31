@@ -53,6 +53,12 @@ func (a *APIServer) handleAgentGovernanceAPI(w http.ResponseWriter, r *http.Requ
 		a.handleGovernancePostScanProfiles(w, r, parts[1:])
 	case "post-scan-rules":
 		a.handleGovernancePostScanRules(w, r, parts[1:])
+	case "risk-severity-mappings":
+		a.handleGovernanceRiskSeverityMappings(w, r)
+	case "risk-rule-prefix-matches":
+		a.handleGovernanceRiskRulePrefixMatches(w, r)
+	case "risk-category-matches":
+		a.handleGovernanceRiskCategoryMatches(w, r)
 	case "admission-matrix":
 		a.handleGovernanceAdmissionMatrix(w, r)
 	case "admission":
@@ -66,6 +72,12 @@ func (a *APIServer) handleAgentGovernanceAPI(w http.ResponseWriter, r *http.Requ
 	case "risk":
 		if len(parts) == 2 && parts[1] == "evaluate" {
 			a.handleGovernanceRiskEvaluate(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	case "risk-explain":
+		if len(parts) == 2 && parts[1] == "evaluate" {
+			a.handleGovernanceRiskExplainEvaluate(w, r)
 			return
 		}
 		http.NotFound(w, r)
@@ -613,6 +625,33 @@ func (a *APIServer) handleGovernancePostScanRules(w http.ResponseWriter, r *http
 	}
 }
 
+func (a *APIServer) handleGovernanceRiskSeverityMappings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	page, err := a.store.ListGovernanceRiskSeverityMappings(a.governanceFilter(r, true))
+	a.writeGovernanceResult(w, page, err)
+}
+
+func (a *APIServer) handleGovernanceRiskRulePrefixMatches(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	page, err := a.store.ListGovernanceRiskRulePrefixMatches(a.governanceFilter(r, true))
+	a.writeGovernanceResult(w, page, err)
+}
+
+func (a *APIServer) handleGovernanceRiskCategoryMatches(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	page, err := a.store.ListGovernanceRiskCategoryMatches(a.governanceFilter(r, true))
+	a.writeGovernanceResult(w, page, err)
+}
+
 func (a *APIServer) handleGovernanceAdmissionMatrix(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -694,6 +733,19 @@ func (a *APIServer) handleGovernanceRiskEvaluate(w http.ResponseWriter, r *http.
 	})
 }
 
+func (a *APIServer) handleGovernanceRiskExplainEvaluate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body audit.GovernanceRiskEvaluateInput
+	if !a.decodeGovernanceBody(w, r, &body) {
+		return
+	}
+	out, err := a.store.EvaluateGovernanceRisk(body)
+	a.writeGovernanceResult(w, out, err)
+}
+
 func (a *APIServer) handleGovernanceResourceRulePreview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -730,6 +782,10 @@ func (a *APIServer) handleGovernanceResourceRulePreview(w http.ResponseWriter, r
 
 func (a *APIServer) governanceFilter(r *http.Request, includeEnabled bool) audit.GovernancePageFilter {
 	q := r.URL.Query()
+	pageSizeRaw := strings.TrimSpace(q.Get("page_size"))
+	if pageSizeRaw == "" {
+		pageSizeRaw = strings.TrimSpace(q.Get("pageSize"))
+	}
 	f := audit.GovernancePageFilter{
 		Keyword:       strings.TrimSpace(q.Get("keyword")),
 		Kind:          strings.TrimSpace(q.Get("kind")),
@@ -741,8 +797,9 @@ func (a *APIServer) governanceFilter(r *http.Request, includeEnabled bool) audit
 		Connector:     strings.TrimSpace(q.Get("connector")),
 		ActionField:   strings.TrimSpace(q.Get("action_field")),
 		ActionValue:   strings.TrimSpace(q.Get("action_value")),
+		RiskLevel:     strings.TrimSpace(q.Get("risk_level")),
 		Page:          queryInt(q.Get("page"), 1),
-		PageSize:      queryInt(q.Get("page_size"), 20),
+		PageSize:      queryInt(pageSizeRaw, 20),
 		AgentTypeID:   int64(queryInt(q.Get("agent_type_id"), 0)),
 		ScanProfileID: int64(queryInt(q.Get("scan_profile_id"), 0)),
 	}
