@@ -37,7 +37,7 @@ body { min-height: 100vh; background: radial-gradient(circle at 75% -10%, rgba(4
 .section-heading h2 { margin: 7px 0 5px !important; }
 .section-heading.compact { margin-top: 30px; margin-bottom: 14px; }
 .section-heading.compact h4 { margin: 5px 0 0 !important; }
-.component-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.component-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .component-card .ant-card-body { min-height: 174px; padding: 20px; }
 .component-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
 .component-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; background: #14283b; color: #7e9db8; }

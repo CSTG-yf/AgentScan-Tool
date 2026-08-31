@@ -1,7 +1,7 @@
 export type ComponentState = "ready" | "degraded" | "stopped" | "missing" | "unknown";
 
 export interface EnvironmentComponent {
-  id: "gateway" | "docker" | "agentrange" | "processGuard";
+  id: "gateway" | "agentrange" | "processGuard";
   label: string;
   state: ComponentState;
   detail: string;
@@ -28,6 +28,35 @@ export interface AgentProcess {
 export interface AgentSnapshot {
   capturedAt: string;
   processes: AgentProcess[];
+  warning?: string;
+}
+
+export interface StaticScanAsset {
+  id: string;
+  name: string;
+  kind: string;
+  category: string;
+  path: string;
+  risk: "critical" | "high" | "medium" | "low" | "info";
+}
+
+export interface StaticScanFinding {
+  id: string;
+  ruleId: string;
+  title: string;
+  category: string;
+  severity: "critical" | "high" | "medium" | "low" | "info";
+  path: string;
+  line: number;
+  evidence: string;
+}
+
+export interface StaticScanSnapshot {
+  capturedAt: string;
+  root: string;
+  assets: StaticScanAsset[];
+  findings: StaticScanFinding[];
+  scannedFiles: number;
   warning?: string;
 }
 

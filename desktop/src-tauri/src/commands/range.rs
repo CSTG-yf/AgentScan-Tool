@@ -311,7 +311,7 @@ fn default_development_root() -> Option<PathBuf> {
     path.join("docker-compose.yml").is_file().then_some(path)
 }
 
-fn configured_root(app: &tauri::AppHandle) -> Option<PathBuf> {
+pub(crate) fn configured_root(app: &tauri::AppHandle) -> Option<PathBuf> {
     let settings = read_settings(app);
     if !settings.agentrange_root.trim().is_empty() {
         return Some(PathBuf::from(settings.agentrange_root));
@@ -928,7 +928,7 @@ pub fn get_range_status(app: tauri::AppHandle) -> RangeStatus {
             docker_available: false,
             running_services: Vec::new(),
             state: "dockerUnavailable",
-            detail: "Docker Desktop 不可用".to_owned(),
+            detail: "未检测到兼容的容器运行时；靶场为可选功能，不影响核心防护".to_owned(),
         };
     };
     let services = String::from_utf8_lossy(&output.stdout)

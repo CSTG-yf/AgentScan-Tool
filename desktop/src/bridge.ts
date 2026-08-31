@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentRuntimeCatalog, AgentSnapshot, AgentTraceSnapshot, EnvironmentSnapshot, GatewayAuditSnapshot, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus } from "./types";
+import type { AgentRuntimeCatalog, AgentSnapshot, AgentTraceSnapshot, EnvironmentSnapshot, GatewayAuditSnapshot, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus, StaticScanSnapshot } from "./types";
 
 const inTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
@@ -7,8 +7,7 @@ const browserEnvironment = (): EnvironmentSnapshot => ({
   capturedAt: new Date().toISOString(),
   components: [
     { id: "gateway", label: "TraceBastion Gateway", state: "unknown", detail: "桌面宿主未连接" },
-    { id: "docker", label: "Docker Desktop", state: "unknown", detail: "桌面宿主未连接" },
-    { id: "agentrange", label: "AgentRange 靶场", state: "unknown", detail: "桌面宿主未连接" },
+    { id: "agentrange", label: "AgentRange 验证靶场（可选）", state: "unknown", detail: "用于回放模拟攻击与正常业务流量，不影响日常防护" },
     { id: "processGuard", label: "Windows 进程守护", state: "unknown", detail: "桌面宿主未连接", requiresElevation: true },
   ],
 });
@@ -27,6 +26,11 @@ export async function getAgentProcesses(): Promise<AgentSnapshot> {
 export async function getAgentRuntimeCatalog(): Promise<AgentRuntimeCatalog> {
   if (!inTauri()) throw new Error("Agent runtime catalog is available from the desktop host only");
   return invoke<AgentRuntimeCatalog>("get_agent_runtime_catalog");
+}
+
+export async function getStaticScan(): Promise<StaticScanSnapshot> {
+  if (!inTauri()) return { capturedAt: new Date().toISOString(), root: "", assets: [], findings: [], scannedFiles: 0, warning: "浏览器预览模式不执行本机文件扫描" };
+  return invoke<StaticScanSnapshot>("get_static_scan");
 }
 
 export async function getGuardPolicy(): Promise<GuardPolicy> {

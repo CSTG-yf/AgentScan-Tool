@@ -37,10 +37,6 @@ fn tcp_ready(port: u16) -> bool {
 #[tauri::command]
 pub fn get_environment_snapshot() -> EnvironmentSnapshot {
     let gateway_ready = tcp_ready(18_970);
-    let docker_version = run_fixed(
-        "docker.exe",
-        &["version", "--format", "{{.Server.Version}}"],
-    );
     let range_ready = tcp_ready(8_000) || tcp_ready(8_100) || tcp_ready(7_860);
     let guard_status = run_fixed("sc.exe", &["query", "DefenseClawProcessGuard"]);
     let guard_running = guard_status
@@ -64,28 +60,13 @@ pub fn get_environment_snapshot() -> EnvironmentSnapshot {
                 requires_elevation: false,
             },
             EnvironmentComponent {
-                id: "docker",
-                label: "Docker Desktop",
-                state: if docker_version.is_some() {
-                    "ready"
-                } else {
-                    "missing"
-                },
-                detail: docker_version.as_ref().map_or_else(
-                    || "Docker Engine 不可用".to_owned(),
-                    |version| format!("Docker Engine {version}"),
-                ),
-                version: docker_version,
-                requires_elevation: false,
-            },
-            EnvironmentComponent {
                 id: "agentrange",
-                label: "AgentRange 靶场",
+                label: "AgentRange 验证靶场（可选）",
                 state: if range_ready { "ready" } else { "stopped" },
                 detail: if range_ready {
-                    "检测到靶场服务端口"
+                    "模拟攻击与正常业务流量的隔离验证环境正在运行"
                 } else {
-                    "未检测到运行中的靶场服务"
+                    "仅用于安全能力测试与演示，未运行不影响日常防护"
                 }
                 .to_owned(),
                 version: None,

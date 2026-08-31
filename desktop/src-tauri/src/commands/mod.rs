@@ -6,4 +6,5 @@ pub(crate) mod knowledge;
 pub(crate) mod lifecycle;
 pub(crate) mod policy;
 pub(crate) mod range;
+pub(crate) mod static_scan;
 pub(crate) mod trace;

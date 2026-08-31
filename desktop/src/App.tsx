@@ -4,7 +4,6 @@ import {
   AuditOutlined,
   BugOutlined,
   CaretRightOutlined,
-  CloudServerOutlined,
   DashboardOutlined,
   DatabaseOutlined,
   DownloadOutlined,
@@ -21,8 +20,8 @@ import {
 import { Badge, Button, Card, Input, Layout, Menu, message, Modal, Progress, Segmented, Space, Switch, Table, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import ReactECharts from "echarts-for-react";
-import { applyProcessGuardPolicy, getAgentProcesses, getAgentTrace, getEnvironment, getGatewayAudit, getGuardPolicy, getProcessGuardAudit, getRangeReplayStatus, getRangeStatus, installProcessGuard, saveDefenseMode, saveGuardPolicy, saveRangeRoot, setGatewayRunning, setRangeRunning, startRangeReplay, stopRangeReplay, uninstallProcessGuard } from "./bridge";
-import type { AgentProcess, AgentTraceEvent, AgentTraceSnapshot, EnvironmentComponent, EnvironmentSnapshot, GatewayAuditEvent, GatewayAuditSnapshot, GuardAuditEvent, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus } from "./types";
+import { applyProcessGuardPolicy, getAgentProcesses, getAgentTrace, getEnvironment, getGatewayAudit, getGuardPolicy, getProcessGuardAudit, getRangeReplayStatus, getRangeStatus, getStaticScan, installProcessGuard, saveDefenseMode, saveGuardPolicy, saveRangeRoot, setGatewayRunning, setRangeRunning, startRangeReplay, stopRangeReplay, uninstallProcessGuard } from "./bridge";
+import type { AgentProcess, AgentTraceEvent, AgentTraceSnapshot, EnvironmentComponent, EnvironmentSnapshot, GatewayAuditEvent, GatewayAuditSnapshot, GuardAuditEvent, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus, StaticScanSnapshot } from "./types";
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title } = Typography;
@@ -99,19 +98,21 @@ const traceColumns: ColumnsType<AgentTraceEvent> = [
   { title: "来源", dataIndex: "source", width: 180 },
 ];
 
-function ComponentCard({ component, onGatewayAction }: { component: EnvironmentComponent; onGatewayAction: (running: boolean) => void }) {
+function ComponentCard({ component, onGatewayAction, onGuardAction, onOpenRange, guardBusy }: { component: EnvironmentComponent; onGatewayAction: (running: boolean) => void; onGuardAction: (action: "install" | "apply") => void; onOpenRange: () => void; guardBusy: boolean }) {
   const meta = stateMeta[component.state];
   return (
     <Card className="component-card" bordered={false}>
       <div className="component-heading">
         <div className={`component-icon component-icon-${component.state}`}>
-          {component.id === "docker" ? <CloudServerOutlined /> : component.id === "agentrange" ? <ExperimentOutlined /> : component.id === "processGuard" ? <SafetyCertificateOutlined /> : <BugOutlined />}
+          {component.id === "agentrange" ? <ExperimentOutlined /> : component.id === "processGuard" ? <SafetyCertificateOutlined /> : <BugOutlined />}
         </div>
         <Tag color={meta.color}>{meta.text}</Tag>
       </div>
       <Title level={5}>{component.label}</Title>
       <Text type="secondary">{component.detail}</Text>
       {component.id === "gateway" && <div className="component-action"><Button size="small" type={component.state === "ready" ? "default" : "primary"} danger={component.state === "ready"} onClick={() => onGatewayAction(component.state !== "ready")}>{component.state === "ready" ? "停止网关" : "启动网关"}</Button></div>}
+      {component.id === "agentrange" && <div className="component-action"><Button size="small" onClick={onOpenRange}>了解与配置靶场</Button></div>}
+      {component.id === "processGuard" && <div className="component-action"><Button size="small" type="primary" loading={guardBusy} onClick={() => onGuardAction(component.state === "ready" ? "apply" : "install")}>{component.state === "ready" ? "应用当前策略" : component.state === "stopped" ? "启动 / 修复服务" : "安装进程守护"}</Button></div>}
       {component.requiresElevation && <div className="elevation-note">敏感操作按需请求管理员权限</div>}
     </Card>
   );
@@ -405,6 +406,10 @@ function staticRiskTag(risk: StaticRisk) {
   return <Tag color={meta.color}>{meta.label}</Tag>;
 }
 
+function severityRank(risk: StaticRisk): number {
+  return { info: 0, low: 1, medium: 2, high: 3, critical: 4 }[risk];
+}
+
 type EventKind = "security" | "attack";
 type EventStatus = "detected" | "audited" | "blocked" | "pending";
 type EventFilter = "all" | EventKind;
@@ -614,6 +619,7 @@ interface AttackChainStep {
   stack: string[];
   observeResult: string;
   actionResult: string;
+  occurredAt?: string;
 }
 
 interface AttackChainScenario {
@@ -874,11 +880,13 @@ export default function App() {
   const [trace, setTrace] = useState<AgentTraceSnapshot>();
   const [loading, setLoading] = useState(false);
   const [savingPolicy, setSavingPolicy] = useState(false);
+  const [guardBusy, setGuardBusy] = useState(false);
   const [switchingDefenseMode, setSwitchingDefenseMode] = useState(false);
   const [replayBusy, setReplayBusy] = useState(false);
   const [eventFilter, setEventFilter] = useState<EventFilter>("all");
   const [gatewayAudit, setGatewayAudit] = useState<GatewayAuditSnapshot>();
-  const [chainScenarioId, setChainScenarioId] = useState(attackChainScenarios[0].id);
+  const [staticScan, setStaticScan] = useState<StaticScanSnapshot>();
+  const [chainScenarioId, setChainScenarioId] = useState("");
   const [chainStepIndex, setChainStepIndex] = useState(0);
   const [chainPlaying, setChainPlaying] = useState(false);
   const [timelineAnchor] = useState(() => new Date());
@@ -954,13 +962,61 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [active, replayStatus?.running]);
 
-  const activeChainScenarioIndex = useMemo(() => Math.max(attackChainScenarios.findIndex((scenario) => scenario.id === chainScenarioId), 0), [chainScenarioId]);
-  const activeChainScenario = useMemo(() => attackChainScenarios[activeChainScenarioIndex] ?? attackChainScenarios[0], [activeChainScenarioIndex]);
+  useEffect(() => {
+    if (active !== "staticAssets") return;
+    let cancelled = false;
+    void getStaticScan().then((snapshot) => {
+      if (!cancelled) setStaticScan(snapshot);
+    }).catch((error) => {
+      if (!cancelled) message.error(`静态扫描失败：${String(error)}`);
+    });
+    return () => { cancelled = true; };
+  }, [active, rangeStatus?.root]);
+
+  const attackChainScenarios = useMemo<AttackChainScenario[]>(() => {
+    const byTrace = new Map<string, Array<{ timestamp: string; action: string; stage: string; actor: string; prompt: string; tool: string; mcp: string; resource: string; evidence: string; decision: string; severity: StaticRisk; connector: string }>>();
+    const normalizeRisk = (value?: string): StaticRisk => {
+      const risk = value?.toLowerCase();
+      return risk === "critical" || risk === "high" || risk === "medium" || risk === "low" ? risk : "info";
+    };
+    for (const event of gatewayAudit?.events ?? []) {
+      if (!event.traceId) continue;
+      const events = byTrace.get(event.traceId) ?? [];
+      events.push({ timestamp: event.timestamp, action: event.action, stage: event.stage, actor: event.agentName || event.actor, prompt: event.prompt, tool: event.toolName || event.mcpServer, mcp: event.mcpServer, resource: event.destinationApp || event.target, evidence: event.reason || event.details, decision: event.decision || "audit", severity: normalizeRisk(event.severity), connector: event.connector });
+      byTrace.set(event.traceId, events);
+    }
+    for (const event of audit?.events ?? []) {
+      if (!event.traceId) continue;
+      const events = byTrace.get(event.traceId) ?? [];
+      events.push({ timestamp: event.timestamp, action: event.eventType, stage: event.stage || "process-guard", actor: event.agentName || event.agentExecutable || "本机 Agent", prompt: event.prompt || "", tool: event.toolName || event.childExecutable || "", mcp: event.mcpServer || "", resource: event.destinationApp || event.source || "Windows Process Tree", evidence: event.reason || event.detail, decision: event.decision || event.outcome, severity: normalizeRisk(event.severity || "high"), connector: event.connector || "process-guard" });
+      byTrace.set(event.traceId, events);
+    }
+    const chains = [...byTrace.entries()].map(([traceId, events]) => {
+      events.sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
+      const risk = events.reduce<StaticRisk>((highest, event) => severityRank(event.severity) > severityRank(highest) ? event.severity : highest, "info");
+      const blocked = events.filter((event) => ["block", "terminated"].includes(event.decision)).length;
+      const steps: AttackChainStep[] = events.map((event, index) => ({
+        id: `${traceId}-${index}`, order: index + 1, title: event.action || event.stage || "审计事件", stage: event.stage || "runtime",
+        kind: event.mcp ? "mcp" : event.tool ? "tool" : event.stage?.toLowerCase().includes("llm") ? "llm" : event.decision === "block" || event.decision === "terminated" ? "defense" : index === 0 ? "entry" : "agent",
+        severity: event.severity, actor: event.actor || "未知 Agent", prompt: event.prompt || "—", tool: event.tool || "—", resource: event.resource || "—", evidence: event.evidence || "审计记录未包含详情", decision: event.decision,
+        stack: [event.connector, event.stage, event.tool].filter(Boolean), observeResult: event.decision, actionResult: event.decision, occurredAt: event.timestamp,
+      }));
+      return { id: traceId, name: `${steps[0]?.actor || "Agent"} · ${traceId.slice(0, 12)}`, agent: steps[0]?.actor || "Agent", traceId, category: blocked ? "已阻断攻击链" : "运行时审计链", risk, summary: `${events.length} 条真实审计事件按 trace_id 归并，${blocked} 个阻断点。`, baselineResult: "仅展示实际审计记录，不推测 Baseline 结果。", observeResult: `${events.length} 条事件已记录。`, actionResult: blocked ? `${blocked} 个事件已阻断。` : "未记录阻断决策。", steps };
+    });
+    return chains.sort((left, right) => new Date(right.steps.at(-1)?.occurredAt ?? 0).getTime() - new Date(left.steps.at(-1)?.occurredAt ?? 0).getTime());
+  }, [audit, gatewayAudit]);
+  const visibleAttackChains = attackChainScenarios.length ? attackChainScenarios : [{ id: "no-real-trace", name: "暂无真实攻击链", agent: "—", traceId: "—", category: "空状态", risk: "info" as StaticRisk, summary: "运行 Observe / Action 并触发带 trace_id 的审计事件后显示。", baselineResult: "无数据", observeResult: "无数据", actionResult: "无数据", steps: [{ id: "empty", order: 1, title: "等待真实审计事件", stage: "waiting", kind: "entry" as ChainNodeKind, severity: "info" as StaticRisk, actor: "—", prompt: "—", tool: "—", resource: "—", evidence: "当前没有可归并的 trace_id", decision: "未发生", stack: [], observeResult: "无数据", actionResult: "无数据", occurredAt: gatewayAudit?.capturedAt ?? new Date(0).toISOString() }] }];
+  const activeChainScenarioIndex = useMemo(() => Math.max(visibleAttackChains.findIndex((scenario) => scenario.id === chainScenarioId), 0), [chainScenarioId, visibleAttackChains]);
+  const activeChainScenario = visibleAttackChains[activeChainScenarioIndex] ?? visibleAttackChains[0];
   const activeChainStep = activeChainScenario.steps[Math.min(chainStepIndex, activeChainScenario.steps.length - 1)];
-  const chainStartAt = offsetIso(timelineAnchor, -(activeChainScenarioIndex === 0 ? 36 : 22) * 60_000);
-  const chainStepTimestamp = (index: number) => offsetIso(new Date(chainStartAt), index * 45_000);
+  const chainStartAt = activeChainScenario.steps[0]?.occurredAt ?? "";
+  const chainStepTimestamp = (index: number) => activeChainScenario.steps[index]?.occurredAt ?? "";
   const activeChainStepTime = chainStepTimestamp(Math.min(chainStepIndex, activeChainScenario.steps.length - 1));
   const chainEndAt = chainStepTimestamp(activeChainScenario.steps.length - 1);
+
+  useEffect(() => {
+    if (!visibleAttackChains.some((scenario) => scenario.id === chainScenarioId)) setChainScenarioId(visibleAttackChains[0].id);
+  }, [chainScenarioId, visibleAttackChains.map((scenario) => scenario.id).join("|")]);
 
   useEffect(() => {
     setChainStepIndex(0);
@@ -981,8 +1037,9 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [activeChainScenario.steps.length, chainPlaying]);
 
-  const readyCount = environment?.components.filter((item) => item.state === "ready").length ?? 0;
-  const totalCount = environment?.components.length ?? 4;
+  const coreComponents = environment?.components.filter((item) => item.id !== "agentrange") ?? [];
+  const readyCount = coreComponents.filter((item) => item.state === "ready").length;
+  const totalCount = coreComponents.length || 2;
   const enabledRules = policy?.rules.filter((rule) => rule.enabled).length ?? 0;
   const guardComponent = environment?.components.find((component) => component.id === "processGuard");
   const posture = Math.round((readyCount / totalCount) * 100);
@@ -1006,6 +1063,7 @@ export default function App() {
   };
 
   const requestGuardAction = async (action: "install" | "apply" | "uninstall") => {
+    setGuardBusy(true);
     try {
       if (action === "install") await installProcessGuard();
       else if (action === "apply") await applyProcessGuardPolicy();
@@ -1014,6 +1072,8 @@ export default function App() {
       window.setTimeout(() => void refresh(), 3000);
     } catch (error) {
       message.error(`操作失败：${String(error)}`);
+    } finally {
+      setGuardBusy(false);
     }
   };
 
@@ -1125,7 +1185,7 @@ export default function App() {
         { value: Math.max(totalCount - readyCount, 0), name: "待处理", itemStyle: { color: "#213348" } },
       ],
     }],
-    graphic: [{ type: "text", left: "center", top: "42%", style: { text: `${posture}%`, fill: "#edf7ff", font: "700 28px Segoe UI" } }, { type: "text", left: "center", top: "60%", style: { text: "环境就绪度", fill: "#7890a8", font: "12px Segoe UI" } }],
+    graphic: [{ type: "text", left: "center", top: "42%", style: { text: `${posture}%`, fill: "#edf7ff", font: "700 28px Segoe UI" } }, { type: "text", left: "center", top: "60%", style: { text: "核心防护就绪度", fill: "#7890a8", font: "12px Segoe UI" } }],
   }), [posture, readyCount, totalCount]);
 
   const columns: ColumnsType<AgentProcess> = [
@@ -1137,41 +1197,105 @@ export default function App() {
     { title: "状态", render: () => <Badge status="success" text="运行中" /> },
   ];
 
-  const staticAssetRows = useMemo<StaticAssetRow[]>(() => staticAgentInventory.flatMap((agent) => agent.categories.flatMap((category) => category.resources.map((resource) => ({
-    ...resource,
-    key: `${agent.agent}-${category.name}-${resource.path}-${resource.name}`,
-    agent: agent.agent,
-    category: category.name,
-    categoryDescription: category.description,
-  })))), []);
+  const staticAssetRows = useMemo<StaticAssetRow[]>(() => (staticScan?.assets ?? []).map((asset) => {
+    const findings = (staticScan?.findings ?? []).filter((finding) => finding.path === asset.path);
+    return {
+      key: asset.id,
+      agent: "AgentRange / OpsPilot",
+      category: asset.category,
+      categoryDescription: "桌面端原生扫描实际存在的文件",
+      name: asset.name,
+      kind: asset.kind,
+      path: asset.path,
+      risk: asset.risk,
+      focus: findings.length ? findings.map((finding) => `${finding.ruleId}（第 ${finding.line} 行）：${finding.title}`).join("；") : "未命中当前静态风险规则",
+    };
+  }), [staticScan]);
   const staticResourceCount = staticAssetRows.length;
   const staticCategoryCount = useMemo(() => new Set(staticAssetRows.map((row) => row.category)).size, [staticAssetRows]);
   const staticHighRiskCount = staticAssetRows.filter((row) => row.risk === "critical" || row.risk === "high").length;
   const staticAssetColumns: ColumnsType<StaticAssetRow> = [
-    { title: "Agent", dataIndex: "agent", width: 190, render: (value) => <Text strong>{value}</Text> },
+    { title: "扫描对象", dataIndex: "agent", width: 190, render: (value) => <Text strong>{value}</Text> },
     { title: "静态资源种类", dataIndex: "category", width: 180, render: (value, row) => <Space direction="vertical" size={0}><Text>{value}</Text><Text type="secondary">{row.categoryDescription}</Text></Space> },
     { title: "对应静态资源", dataIndex: "name", render: (value, row) => <Space direction="vertical" size={0}><Text strong>{value}</Text><Text type="secondary">{row.kind}</Text><Text code className="static-resource-path">{row.path}</Text></Space> },
     { title: "风险", dataIndex: "risk", width: 86, render: staticRiskTag },
-    { title: "检测重点", dataIndex: "focus" },
+    { title: "真实扫描结果", dataIndex: "focus" },
   ];
   const eventRows = useMemo<EventRow[]>(() => {
-    let sequence = 0;
-    const rows = agentEventInventory.flatMap((agent) => agent.categories.flatMap((category) => category.events.map((event) => {
-      const occurredAt = offsetIso(timelineAnchor, -(150 - sequence * 6) * 60_000);
-      sequence += 1;
+    const normalizeRisk = (value?: string): StaticRisk => {
+      const risk = value?.toLowerCase();
+      return risk === "critical" || risk === "high" || risk === "medium" || risk === "low" ? risk : "info";
+    };
+    const gatewayRows = (gatewayAudit?.events ?? []).map((event, index): EventRow => {
+      const blocked = event.decision === "block" || event.action.toLowerCase().includes("block");
+      const severity = normalizeRisk(event.severity);
+      const categoryKind: EventKind = blocked || severity === "critical" || severity === "high" ? "attack" : "security";
       return {
-        ...event,
-        occurredAt,
-        key: `${agent.agent}-${category.kind}-${category.name}-${event.title}`,
-        agent: agent.agent,
-        runtime: agent.runtime,
-        category: category.name,
-        categoryKind: category.kind,
-        categoryDescription: category.description,
+        key: `gateway-${event.timestamp}-${event.traceId}-${index}`,
+        occurredAt: event.timestamp,
+        agent: event.agentName || event.actor || "AgentRange / OpsPilot",
+        runtime: "TraceBastion Gateway",
+        category: event.stage || event.connector || "网关审计",
+        categoryKind,
+        categoryDescription: "来自网关 audit.db 的真实审计记录",
+        title: event.action || "Agent 运行时事件",
+        subtype: event.toolName || event.mcpServer || event.target || "运行时检查",
+        severity,
+        status: blocked ? "blocked" : event.decision === "alert" ? "detected" : "audited",
+        evidence: event.reason || event.details || event.prompt || "审计记录未包含详情",
+        action: event.decision || "audit",
       };
-    })));
-    return rows.sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime());
-  }, [timelineAnchor]);
+    });
+    const guardRows = (audit?.events ?? []).filter((event) => event.eventType !== "process-guard-service").map((event, index): EventRow => {
+      const blocked = ["terminated", "terminationFailed", "terminationPending"].includes(event.outcome);
+      return {
+        key: `guard-${event.timestamp}-${event.ruleId ?? event.eventType}-${index}`,
+        occurredAt: event.timestamp,
+        agent: event.agentName || event.agentExecutable || "本机 Agent",
+        runtime: "Windows 进程守护",
+        category: event.eventType === "agent-command-rule-matched" ? "危险子进程" : "本机行为审计",
+        categoryKind: blocked || event.eventType === "agent-command-rule-matched" ? "attack" : "security",
+        categoryDescription: "来自 LocalSystem 进程守护的真实审计记录",
+        title: event.ruleId || event.eventType,
+        subtype: event.childExecutable || event.toolName || "进程/文件行为",
+        severity: normalizeRisk(event.severity || (blocked ? "high" : "medium")),
+        status: event.outcome === "terminated" ? "blocked" : event.outcome === "terminationPending" ? "pending" : "audited",
+        evidence: event.reason || event.detail,
+        action: event.action || event.outcome,
+      };
+    });
+    const blacklistRows = (trace?.events ?? []).filter((event) => event.eventType === "blacklistFileAccess").map((event, index): EventRow => ({
+      key: `trace-${event.id}-${index}`,
+      occurredAt: event.timestamp,
+      agent: event.agentExecutable,
+      runtime: "Windows 文件审计",
+      category: "敏感文件访问",
+      categoryKind: "attack",
+      categoryDescription: "来自 SQLite Trace 库的真实黑名单文件访问记录",
+      title: event.eventType,
+      subtype: event.path || "文件访问",
+      severity: "high",
+      status: event.outcome === "terminated" ? "blocked" : "audited",
+      evidence: event.detail,
+      action: event.action || event.outcome,
+    }));
+    return [...gatewayRows, ...guardRows, ...blacklistRows].filter((row) => row.occurredAt).sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime());
+  }, [audit, gatewayAudit, trace]);
+  const liveEventGroups = useMemo<AgentEventInventory[]>(() => {
+    const agentsByName = new Map<string, EventRow[]>();
+    for (const row of eventRows) agentsByName.set(row.agent, [...(agentsByName.get(row.agent) ?? []), row]);
+    return [...agentsByName.entries()].map(([agent, rows]) => ({
+      agent,
+      source: rows[0]?.categoryDescription ?? "真实审计源",
+      runtime: rows[0]?.runtime ?? "审计事件",
+      categories: [...new Map(rows.map((row) => [`${row.categoryKind}:${row.category}`, row])).values()].map((categoryRow) => ({
+        kind: categoryRow.categoryKind,
+        name: categoryRow.category,
+        description: categoryRow.categoryDescription,
+        events: rows.filter((row) => row.categoryKind === categoryRow.categoryKind && row.category === categoryRow.category).map(({ title, subtype, severity, status, evidence, action }) => ({ title, subtype, severity, status, evidence, action })),
+      })),
+    }));
+  }, [eventRows]);
   const filteredEventRows = useMemo(() => eventFilter === "all" ? eventRows : eventRows.filter((row) => row.categoryKind === eventFilter), [eventFilter, eventRows]);
   const securityEventCount = eventRows.filter((row) => row.categoryKind === "security").length;
   const attackEventCount = eventRows.filter((row) => row.categoryKind === "attack").length;
@@ -1296,7 +1420,7 @@ export default function App() {
         <Content className="content">
           {active === "range" ? (
             <section>
-              <div className="section-heading"><div><Text className="eyebrow">AGENTRANGE RUNTIME</Text><Title level={2}>靶场控制</Title><Text type="secondary">验证本地 AgentRange Compose 工程，并通过固定 Docker 参数启动或停止服务。</Text></div><Tag color={rangeStatus?.state === "running" ? "success" : rangeStatus?.state === "invalid" ? "error" : "default"}>{rangeStatus?.state === "running" ? "运行中" : rangeStatus?.state === "stopped" ? "已停止" : "未就绪"}</Tag></div>
+              <div className="section-heading"><div><Text className="eyebrow">AGENTRANGE RUNTIME · OPTIONAL</Text><Title level={2}>验证靶场</Title><Text type="secondary">用于隔离回放提示注入、恶意 Skill/MCP、数据外传等模拟流量，验证检测、阻断和审计效果；不参与日常防护，也不计入核心就绪度。</Text></div><Tag color={rangeStatus?.state === "running" ? "success" : rangeStatus?.state === "invalid" ? "error" : "default"}>{rangeStatus?.state === "running" ? "运行中" : rangeStatus?.state === "stopped" ? "已停止" : "未就绪"}</Tag></div>
               <Card bordered={false} className="range-hero">
                 <div className="range-status-icon"><ExperimentOutlined /></div>
                 <div className="range-status-copy"><Title level={4}>AgentRange-player</Title><Text type="secondary">{rangeStatus?.detail ?? "正在检测靶场环境"}</Text><div className="range-path"><Input value={rangeRoot} onChange={(event) => setRangeRoot(event.target.value)} placeholder="例如 C:\\SecurityLabs\\AgentRange-player" /><Button onClick={() => void configureRange()}>验证并保存</Button></div></div>
@@ -1376,37 +1500,25 @@ export default function App() {
             <section>
               <div className="section-heading"><div><Text className="eyebrow">AGENT ACTIVITY TRACE</Text><Title level={2}>Agent 行为追踪</Title><Text type="secondary">记录 Agent 进程、子命令以及文件读取、写入、新增和删除；文件事件来自 Windows 安全审计。</Text></div><Space><Tag color="cyan">{traceEvents.length} 条事件</Tag><Tag color="blue">{fileTraceCount} 条文件行为</Tag></Space></div>
               {trace?.warning && <div className="inline-warning">{trace.warning}</div>}
-              <Card bordered={false} className="evidence-path"><Text type="secondary">SQLite Trace 库</Text><Text className="mono">agent-trace.db · 本机受保护存储</Text></Card>
+              <Card bordered={false} className="evidence-path"><Text type="secondary">SQLite Trace 库</Text><Text className="mono">{trace?.databasePath || "尚未获得数据库路径"}</Text></Card>
               <Card bordered={false}><Table rowKey="id" columns={traceColumns} dataSource={traceEvents} pagination={{ pageSize: 20 }} locale={{ emptyText: "尚未捕获 Agent 行为" }} /></Card>
             </section>
           ) : active === "staticAssets" ? (
             <section>
               <div className="section-heading">
-                <div><Text className="eyebrow">STATIC ASSET INVENTORY</Text><Title level={2}>静态资源检测</Title><Text type="secondary">按 Agent、静态资源种类和资源明细拆分资产，并标出配置不当、危险工具和供应链风险。</Text></div>
-                <Space><Tag color="cyan">{staticAgentInventory.length} 个 Agent</Tag><Tag color="volcano">{staticHighRiskCount} 项高危资源</Tag></Space>
+                <div><Text className="eyebrow">LIVE STATIC SCAN</Text><Title level={2}>静态资源检测</Title><Text type="secondary">由桌面后端扫描当前配置的 AgentRange 目录；只展示实际存在的文件和真实规则命中。</Text></div>
+                <Space><Tag color="cyan">{staticScan?.scannedFiles ?? 0} 个文件已扫描</Tag><Tag color="volcano">{staticHighRiskCount} 项高危资源</Tag></Space>
               </div>
+              {staticScan?.warning && <div className="inline-warning">{staticScan.warning}</div>}
+              {staticScan?.root && <Card bordered={false} className="evidence-path"><Text type="secondary">扫描目录</Text><Text className="mono">{staticScan.root}</Text><Text type="secondary">更新于 {formatTimestamp(staticScan.capturedAt)}</Text></Card>}
               <div className="static-summary-grid">
-                <Card bordered={false} className="static-metric-card"><Text type="secondary">Agent 覆盖</Text><div className="static-metric-value">{staticAgentInventory.length}</div><Text>靶场与本机 Agent 统一纳管</Text></Card>
+                <Card bordered={false} className="static-metric-card"><Text type="secondary">实际资产</Text><div className="static-metric-value">{staticAssetRows.length}</div><Text>由文件系统扫描发现</Text></Card>
                 <Card bordered={false} className="static-metric-card"><Text type="secondary">资源种类</Text><div className="static-metric-value">{staticCategoryCount}</div><Text>框架、模型、Skills、MCP、插件、配置</Text></Card>
-                <Card bordered={false} className="static-metric-card"><Text type="secondary">资源明细</Text><div className="static-metric-value">{staticResourceCount}</div><Text>逐项记录路径、类型和检测重点</Text></Card>
-                <Card bordered={false} className="static-metric-card"><Text type="secondary">高风险项</Text><div className="static-metric-value danger">{staticHighRiskCount}</div><Text>命令执行、MCP、密钥和越权访问优先处置</Text></Card>
-              </div>
-              <div className="static-agent-grid">
-                {staticAgentInventory.map((agent) => {
-                  const resourceCount = agent.categories.reduce((total, category) => total + category.resources.length, 0);
-                  const highCount = agent.categories.flatMap((category) => category.resources).filter((resource) => resource.risk === "critical" || resource.risk === "high").length;
-                  return (
-                    <Card key={agent.agent} bordered={false} className="static-agent-card">
-                      <div className="static-agent-heading"><div><Title level={4}>{agent.agent}</Title><Text className="static-card-meta">{agent.source}</Text></div><Tag color={highCount ? "volcano" : "blue"}>{agent.protectionScope}</Tag></div>
-                      <Text type="secondary">{agent.description}</Text>
-                      <div className="static-category-list">{agent.categories.map((category) => <Tag key={`${agent.agent}-${category.name}`} color="geekblue">{category.name} · {category.resources.length}</Tag>)}</div>
-                      <div className="static-agent-footer"><Text type="secondary">{resourceCount} 项资源</Text><Text type="secondary">{highCount} 项高风险</Text></div>
-                    </Card>
-                  );
-                })}
+                <Card bordered={false} className="static-metric-card"><Text type="secondary">规则命中</Text><div className="static-metric-value">{staticScan?.findings.length ?? 0}</div><Text>包含真实文件和行号证据</Text></Card>
+                <Card bordered={false} className="static-metric-card"><Text type="secondary">高风险项</Text><div className="static-metric-value danger">{staticHighRiskCount}</div><Text>严重与高危命中文件</Text></Card>
               </div>
               <Card bordered={false} title="Agent 静态资源分层清单">
-                <Table rowKey="key" columns={staticAssetColumns} dataSource={staticAssetRows} pagination={{ pageSize: 12 }} />
+                <Table rowKey="key" columns={staticAssetColumns} dataSource={staticAssetRows} pagination={{ pageSize: 12 }} locale={{ emptyText: "未发现真实静态资产，请先配置有效的 AgentRange 目录" }} />
               </Card>
             </section>
           ) : active === "events" ? (
@@ -1430,7 +1542,7 @@ export default function App() {
                 <Card bordered={false} className="event-metric-card"><Text type="secondary">已阻断</Text><div className="event-metric-value blocked">{blockedEventCount}</div><Text>时间范围 {oldestEventTime ? `${formatClock(oldestEventTime)} - ${formatClock(latestEventTime)}` : "—"}</Text></Card>
               </div>
               <div className="event-agent-grid">
-                {agentEventInventory.map((agent) => {
+                {liveEventGroups.map((agent) => {
                   const securityCategories = agent.categories.filter((category) => category.kind === "security");
                   const attackCategories = agent.categories.filter((category) => category.kind === "attack");
                   const agentRows = eventRows.filter((row) => row.agent === agent.agent);
@@ -1508,7 +1620,7 @@ export default function App() {
                     <Text type="secondary">攻击场景</Text>
                     <Segmented
                       value={chainScenarioId}
-                      options={attackChainScenarios.map((scenario) => ({ label: scenario.name, value: scenario.id }))}
+                      options={visibleAttackChains.map((scenario) => ({ label: scenario.name, value: scenario.id }))}
                       onChange={(value) => setChainScenarioId(String(value))}
                     />
                   </Space>
@@ -1516,7 +1628,7 @@ export default function App() {
                     <Button icon={<StepBackwardOutlined />} disabled={chainStepIndex === 0} onClick={() => setChainStepIndex((index) => Math.max(index - 1, 0))}>上一步</Button>
                     <Button type="primary" icon={chainPlaying ? <PauseOutlined /> : <CaretRightOutlined />} onClick={() => setChainPlaying((playing) => !playing)}>{chainPlaying ? "暂停" : "播放"}</Button>
                     <Button icon={<StepForwardOutlined />} disabled={chainStepIndex >= activeChainScenario.steps.length - 1} onClick={() => setChainStepIndex((index) => Math.min(index + 1, activeChainScenario.steps.length - 1))}>下一步</Button>
-                    <Button icon={<DownloadOutlined />} onClick={exportChainMarkdown}>导出证据</Button>
+                    <Button icon={<DownloadOutlined />} disabled={activeChainScenario.id === "no-real-trace"} onClick={exportChainMarkdown}>导出证据</Button>
                   </Space>
                 </div>
                 <div className="chain-mode-grid">
@@ -1577,12 +1689,12 @@ export default function App() {
           ) : active === "evidence" ? (
             <section>
               <div className="section-heading"><div><Text className="eyebrow">LOCAL JSONL EVIDENCE</Text><Title level={2}>报告与证据</Title><Text type="secondary">审计先落盘后执行终止；证据写入失败时系统不会执行破坏性动作。</Text></div><Tag color="geekblue">{audit?.events.length ?? 0} 条载入</Tag></div>
-              <Card bordered={false} className="evidence-path"><Text type="secondary">本机证据文件</Text><Text className="mono">process-guard.jsonl · 本机受保护存储</Text></Card>
+              <Card bordered={false} className="evidence-path"><Text type="secondary">本机证据文件</Text><Text className="mono">{audit?.path || "尚未获得审计文件路径"}</Text></Card>
               <Card bordered={false}><Table rowKey={(row) => `${row.timestamp}-${row.eventType}-${row.outcome}`} columns={auditColumns} dataSource={guardEvents} pagination={{ pageSize: 20 }} locale={{ emptyText: "尚无审计证据" }} /></Card>
             </section>
           ) : active === "settings" ? (
             <section>
-              <div className="section-heading"><div><Text className="eyebrow">PRIVILEGE BOUNDARY</Text><Title level={2}>系统设置</Title><Text type="secondary">桌面 UI 保持普通权限，仅服务安装、系统策略应用和服务卸载触发 UAC。</Text></div>{outcomeTag(guardComponent?.state === "ready" ? "debugPrivilegeEnabled" : "observed")}</div>
+              <div className="section-heading"><div><Text className="eyebrow">PRIVILEGE BOUNDARY</Text><Title level={2}>系统设置</Title><Text type="secondary">桌面 UI 保持普通权限，仅服务安装、系统策略应用和服务卸载触发 UAC。</Text></div><Tag color={guardComponent?.state === "ready" ? "success" : "default"}>{guardComponent?.state === "ready" ? "守护服务运行中" : "守护服务未运行"}</Tag></div>
               <div className="settings-grid">
                 <Card bordered={false} title="Windows 进程守护"><Space direction="vertical" size="middle"><Text>{guardComponent?.detail ?? "正在检测服务状态"}</Text><Space><Button type="primary" disabled={guardComponent?.state === "ready"} onClick={() => void requestGuardAction("install")}>安装 / 修复服务</Button><Button disabled={guardComponent?.state !== "ready"} onClick={() => void requestGuardAction("apply")}>应用当前策略</Button><Button danger disabled={guardComponent?.state === "missing"} onClick={() => void requestGuardAction("uninstall")}>卸载服务</Button></Space></Space></Card>
                 <Card bordered={false} title="权限模型"><Space direction="vertical"><Badge status="success" text="UI：当前用户、非提权" /><Badge status="processing" text="守护：LocalSystem Windows Service" /><Badge status="warning" text="终止：PID + 创建时间二次校验" /><Badge status="default" text="受保护进程：仅审计，不承诺终止" /></Space></Card>
@@ -1592,13 +1704,13 @@ export default function App() {
             <section>
               <div className="hero-grid">
                 <Card bordered={false} className="hero-card">
-                  <div><Text className="eyebrow">TRACEBASTION POSTURE</Text><Title>本机 AI Agent 安全控制台</Title><Text type="secondary">统一查看网关、靶场、Agent 进程与命令策略。敏感动作由独立管理员服务执行并写入审计证据。</Text><div className="hero-actions"><Button type="primary" size="large" onClick={() => setActive("agents")}>查看 Agent 列表</Button><Button size="large" onClick={() => setActive("policies")}>配置防护规则</Button></div></div>
+                  <div><Text className="eyebrow">TRACEBASTION POSTURE</Text><Title>本机 AI Agent 安全控制台</Title><Text type="secondary">统一查看网关、Agent 进程与命令策略；可选靶场用于安全测试。敏感动作由独立管理员服务执行并写入审计证据。</Text><div className="hero-actions"><Button type="primary" size="large" onClick={() => setActive("agents")}>查看 Agent 列表</Button><Button size="large" onClick={() => setActive("policies")}>配置防护规则</Button></div></div>
                   <ReactECharts option={chartOption} className="posture-chart" />
                 </Card>
                 <Card bordered={false} className="signal-card"><Text className="eyebrow">LIVE SIGNALS</Text><div className="signal-number">{agents.length}</div><Text>运行中的常见 Agent 进程</Text><div className="signal-divider" /><Space direction="vertical"><Badge status={policy?.mode === "enforce" ? "error" : "processing"} text={`进程守护：${policy?.enabled ? policy.mode : "未启用"}`} /><Badge status={enabledRules ? "warning" : "default"} text={`${enabledRules} 条命令规则已启用`} /></Space></Card>
               </div>
               <div className="section-heading compact"><div><Text className="eyebrow">RUNTIME HEALTH</Text><Title level={4}>运行环境</Title></div><Text type="secondary">更新于 {environment ? new Date(environment.capturedAt).toLocaleTimeString() : "—"}</Text></div>
-              <div className="component-grid">{environment?.components.map((component) => <ComponentCard key={component.id} component={component} onGatewayAction={(running) => void changeGatewayState(running)} />) ?? <Progress percent={20} status="active" />}</div>
+              <div className="component-grid">{environment?.components.map((component) => <ComponentCard key={component.id} component={component} onGatewayAction={(running) => void changeGatewayState(running)} onGuardAction={(action) => void requestGuardAction(action)} onOpenRange={() => setActive("range")} guardBusy={guardBusy} />) ?? <Progress percent={20} status="active" />}</div>
             </section>
           )}
         </Content>

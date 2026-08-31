@@ -33,6 +33,7 @@ pub fn run() {
             commands::range::get_range_replay_status,
             commands::range::start_range_replay,
             commands::range::stop_range_replay,
+            commands::static_scan::get_static_scan,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run TraceBastion Desktop");
