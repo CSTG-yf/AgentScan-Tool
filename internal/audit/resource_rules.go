@@ -27,15 +27,17 @@ import (
 // AgentResourceRule answers "for this agent type, where do we look for
 // which resources?" — one row of agent_resource_rules.
 type AgentResourceRule struct {
-	ID              int64  `json:"id"`
-	AgentTypeID     int64  `json:"agentTypeId"`
-	Name            string `json:"name"`
-	ResourceType    string `json:"resourceType"`    // skill / mcp / plugin / config / prompt / credential / environment
-	PathPattern     string `json:"pathPattern"`     // e.g. ${WORKSPACE_ROOT}/skills
-	EnumerationMode string `json:"enumerationMode"` // exact / children / glob / recursive
-	ScanProfileID   int64  `json:"scanProfileId,omitempty"`
-	Enabled         bool   `json:"enabled"`
-	Priority        int    `json:"priority"`
+	ID                int64  `json:"id"`
+	AgentTypeID       int64  `json:"agentTypeId"`
+	Name              string `json:"name"`
+	ResourceType      string `json:"resourceType"`    // skill / mcp / plugin / config / prompt / credential / environment
+	PathPattern       string `json:"pathPattern"`     // e.g. ${WORKSPACE_ROOT}/skills
+	EnumerationMode   string `json:"enumerationMode"` // exact / children / glob / recursive
+	ScanProfileID     int64  `json:"scanProfileId,omitempty"`
+	PreScanProfileID  int64  `json:"preScanProfileId,omitempty"`
+	PostScanProfileID int64  `json:"postScanProfileId,omitempty"`
+	Enabled           bool   `json:"enabled"`
+	Priority          int    `json:"priority"`
 }
 
 // ResourceScanProfile answers "once a resource is found, which security
@@ -181,6 +183,8 @@ func (s *Store) ListResourceRulesByAgentType(agentTypeID int64) ([]AgentResource
 SELECT id, agent_type_id, name, resource_type, path_pattern,
        COALESCE(enumeration_mode, 'children'),
        COALESCE(scan_profile_id, 0),
+       COALESCE(pre_scan_profile_id, 0),
+       COALESCE(post_scan_profile_id, 0),
        COALESCE(enabled, 0),
        COALESCE(priority, 100)
 FROM agent_resource_rules
@@ -197,7 +201,8 @@ ORDER BY COALESCE(priority, 100), id`, agentTypeID)
 		var enabled int
 		if err := rows.Scan(
 			&rule.ID, &rule.AgentTypeID, &rule.Name, &rule.ResourceType, &rule.PathPattern,
-			&rule.EnumerationMode, &rule.ScanProfileID, &enabled, &rule.Priority,
+			&rule.EnumerationMode, &rule.ScanProfileID, &rule.PreScanProfileID, &rule.PostScanProfileID,
+			&enabled, &rule.Priority,
 		); err != nil {
 			return nil, fmt.Errorf("audit: scan resource rule row: %w", err)
 		}

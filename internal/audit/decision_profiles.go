@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 )
@@ -203,6 +204,37 @@ type GovernancePostScanRulePatch struct {
 	FileAction      *string `json:"file_action,omitempty"`
 	RuntimeAction   *string `json:"runtime_action,omitempty"`
 	Enabled         *bool   `json:"enabled,omitempty"`
+}
+
+type ResourcePreScanDecisionInput struct {
+	AgentTypeID    int64
+	ResourceRuleID int64
+	ResourceType   string
+	Path           string
+	SourceTrust    string
+}
+
+type ResourcePostScanDecisionInput struct {
+	ResourceType      string
+	MaxSeverity       string
+	RiskLevel         string
+	Malicious         bool
+	FindingCategories []string
+	Scanner           string
+	FindingScanners   []string
+}
+
+type ResourceDecisionResult struct {
+	Matched       bool
+	Phase         string
+	ProfileID     int64
+	RuleID        int64
+	RuleName      string
+	Decision      string
+	InstallAction string
+	FileAction    string
+	RuntimeAction string
+	Reason        string
 }
 
 func (s *Store) ListGovernancePreScanProfiles(f GovernancePageFilter) (*GovernancePreScanProfilePage, error) {
@@ -842,7 +874,7 @@ INSERT INTO resource_post_scan_rules (
   decision, install_action, file_action, runtime_action, enabled, created_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		profileID, strings.TrimSpace(in.RuleName), normalizePriority(in.Priority), normalizeDecisionResourceType(in.ResourceType),
-		normalizeSeverity(in.Severity), normalizeRiskLevel(in.RiskLevel), boolInt(in.Malicious),
+		normalizePostScanSeverity(in.Severity), normalizePostScanRiskLevel(in.RiskLevel), boolInt(in.Malicious),
 		strings.TrimSpace(in.FindingCategory), strings.TrimSpace(in.Scanner), normalizePostScanDecision(in.Decision),
 		normalizeInstallAction(in.InstallAction), normalizeFileAction(in.FileAction), normalizeRuntimeAction(in.RuntimeAction),
 		boolInt(in.Enabled), now, now)
@@ -884,16 +916,16 @@ func (s *Store) UpdateGovernancePostScanRule(id int64, patch GovernancePostScanR
 		args = append(args, rtype)
 	}
 	if patch.Severity != nil {
-		severity := normalizeSeverity(*patch.Severity)
-		if !validSeverity(severity) {
+		severity := normalizePostScanSeverity(*patch.Severity)
+		if !validPostScanSeverity(severity) {
 			return GovernancePostScanRuleRow{}, false, fmt.Errorf("audit: unsupported severity %q", *patch.Severity)
 		}
 		sets = append(sets, "severity = ?")
 		args = append(args, severity)
 	}
 	if patch.RiskLevel != nil {
-		risk := normalizeRiskLevel(*patch.RiskLevel)
-		if !validRiskLevel(risk) {
+		risk := normalizePostScanRiskLevel(*patch.RiskLevel)
+		if !validPostScanRiskLevel(risk) {
 			return GovernancePostScanRuleRow{}, false, fmt.Errorf("audit: unsupported risk_level %q", *patch.RiskLevel)
 		}
 		sets = append(sets, "risk_level = ?")
@@ -984,6 +1016,139 @@ WHERE id = ? AND COALESCE("delete",0) = 0`, id)
 	}
 	item, err := scanGovernancePostScanRule(rows)
 	return item, err == nil, err
+}
+
+func (s *Store) EvaluateResourcePreScan(profileID int64, in ResourcePreScanDecisionInput) (ResourceDecisionResult, bool, error) {
+	if s == nil || s.db == nil || profileID <= 0 {
+		return ResourceDecisionResult{}, false, nil
+	}
+	resourceType := normalizeDecisionResourceType(in.ResourceType)
+	rows, err := s.queryDB(context.Background(), "resource_pre_scan_evaluate", `
+SELECT r.id,
+       COALESCE(r.rule_name,''),
+       COALESCE(r.path_pattern,''),
+       COALESCE(r.source_trust,''),
+       COALESCE(r.decision,'scan'),
+       COALESCE(r.install_action,'none'),
+       COALESCE(r.file_action,'none'),
+       COALESCE(r.runtime_action,'allow')
+FROM resource_pre_scan_rules r
+JOIN resource_pre_scan_profiles p ON p.id = r.profile_id
+WHERE r.profile_id = ?
+  AND COALESCE(p.enabled,0) = 1
+  AND COALESCE(p."delete",0) = 0
+  AND COALESCE(r.enabled,0) = 1
+  AND COALESCE(r."delete",0) = 0
+  AND (LOWER(COALESCE(r.resource_type,'all')) = 'all' OR LOWER(COALESCE(r.resource_type,'')) = ?)
+  AND (COALESCE(r.agent_type_id,0) = 0 OR COALESCE(r.agent_type_id,0) = ?)
+ORDER BY COALESCE(r.priority,100), r.id`, profileID, resourceType, in.AgentTypeID)
+	if err != nil {
+		return ResourceDecisionResult{}, false, fmt.Errorf("audit: evaluate pre-scan profile %d: %w", profileID, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var ruleID int64
+		var name, pattern, trust, decision, installAction, fileAction, runtimeAction string
+		if err := rows.Scan(&ruleID, &name, &pattern, &trust, &decision, &installAction, &fileAction, &runtimeAction); err != nil {
+			return ResourceDecisionResult{}, false, fmt.Errorf("audit: scan pre-scan evaluation row: %w", err)
+		}
+		if !decisionPathMatches(pattern, in.Path) || !decisionTokenMatches(trust, in.SourceTrust) {
+			continue
+		}
+		decision = normalizePreScanDecision(decision)
+		return ResourceDecisionResult{
+			Matched:       true,
+			Phase:         "pre_scan",
+			ProfileID:     profileID,
+			RuleID:        ruleID,
+			RuleName:      name,
+			Decision:      decision,
+			InstallAction: normalizeInstallAction(installAction),
+			FileAction:    normalizeFileAction(fileAction),
+			RuntimeAction: normalizeRuntimeAction(runtimeAction),
+			Reason:        fmt.Sprintf("pre-scan rule %q matched resource type %s", name, resourceType),
+		}, true, nil
+	}
+	if err := rows.Err(); err != nil {
+		return ResourceDecisionResult{}, false, err
+	}
+	return ResourceDecisionResult{}, false, nil
+}
+
+func (s *Store) EvaluateResourcePostScan(profileID int64, in ResourcePostScanDecisionInput) (ResourceDecisionResult, bool, error) {
+	if s == nil || s.db == nil || profileID <= 0 {
+		return ResourceDecisionResult{}, false, nil
+	}
+	resourceType := normalizeDecisionResourceType(in.ResourceType)
+	rows, err := s.queryDB(context.Background(), "resource_post_scan_evaluate", `
+SELECT r.id,
+       COALESCE(r.rule_name,''),
+       COALESCE(r.severity,'all'),
+       COALESCE(r.risk_level,'all'),
+       COALESCE(r.malicious,0),
+       COALESCE(r.finding_category,''),
+       COALESCE(r.scanner,''),
+       COALESCE(r.decision,'alert'),
+       COALESCE(r.install_action,'none'),
+       COALESCE(r.file_action,'none'),
+       COALESCE(r.runtime_action,'allow')
+FROM resource_post_scan_rules r
+JOIN resource_post_scan_profiles p ON p.id = r.profile_id
+WHERE r.profile_id = ?
+  AND COALESCE(p.enabled,0) = 1
+  AND COALESCE(p."delete",0) = 0
+  AND COALESCE(r.enabled,0) = 1
+  AND COALESCE(r."delete",0) = 0
+  AND (LOWER(COALESCE(r.resource_type,'all')) = 'all' OR LOWER(COALESCE(r.resource_type,'')) = ?)
+ORDER BY COALESCE(r.priority,100), r.id`, profileID, resourceType)
+	if err != nil {
+		return ResourceDecisionResult{}, false, fmt.Errorf("audit: evaluate post-scan profile %d: %w", profileID, err)
+	}
+	defer rows.Close()
+
+	categories := decisionTokenSet(in.FindingCategories...)
+	scanners := decisionTokenSet(append(in.FindingScanners, in.Scanner)...)
+	for rows.Next() {
+		var ruleID int64
+		var maliciousRule int
+		var name, severity, risk, category, scannerName, decision, installAction, fileAction, runtimeAction string
+		if err := rows.Scan(&ruleID, &name, &severity, &risk, &maliciousRule, &category, &scannerName, &decision, &installAction, &fileAction, &runtimeAction); err != nil {
+			return ResourceDecisionResult{}, false, fmt.Errorf("audit: scan post-scan evaluation row: %w", err)
+		}
+		if !decisionSeverityMatches(severity, in.MaxSeverity) {
+			continue
+		}
+		if !decisionRiskMatches(risk, in.RiskLevel) {
+			continue
+		}
+		if maliciousRule != 0 && !in.Malicious {
+			continue
+		}
+		if !decisionSetMatches(category, categories) {
+			continue
+		}
+		if !decisionSetMatches(scannerName, scanners) {
+			continue
+		}
+		decision = normalizePostScanDecision(decision)
+		return ResourceDecisionResult{
+			Matched:       true,
+			Phase:         "post_scan",
+			ProfileID:     profileID,
+			RuleID:        ruleID,
+			RuleName:      name,
+			Decision:      decision,
+			InstallAction: normalizeInstallAction(installAction),
+			FileAction:    normalizeFileAction(fileAction),
+			RuntimeAction: normalizeRuntimeAction(runtimeAction),
+			Reason:        fmt.Sprintf("post-scan rule %q matched severity %s risk %s", name, normalizeSeverity(in.MaxSeverity), normalizeRiskLevel(in.RiskLevel)),
+		}, true, nil
+	}
+	if err := rows.Err(); err != nil {
+		return ResourceDecisionResult{}, false, err
+	}
+	return ResourceDecisionResult{}, false, nil
 }
 
 func (s *Store) DefaultPreScanProfileID() int64 {
@@ -1155,8 +1320,8 @@ ON CONFLICT(profile_id, rule_name) DO UPDATE SET
   updated_at = excluded.updated_at,
   "delete" = 0`,
 		profileID, strings.TrimSpace(in.RuleName), normalizePriority(in.Priority),
-		normalizeDecisionResourceType(in.ResourceType), normalizeSeverity(in.Severity),
-		normalizeRiskLevel(in.RiskLevel), boolInt(in.Malicious), strings.TrimSpace(in.FindingCategory),
+		normalizeDecisionResourceType(in.ResourceType), normalizePostScanSeverity(in.Severity),
+		normalizePostScanRiskLevel(in.RiskLevel), boolInt(in.Malicious), strings.TrimSpace(in.FindingCategory),
 		strings.TrimSpace(in.Scanner), normalizePostScanDecision(in.Decision),
 		normalizeInstallAction(in.InstallAction), normalizeFileAction(in.FileAction),
 		normalizeRuntimeAction(in.RuntimeAction), boolInt(in.Enabled), now, now)
@@ -1198,10 +1363,10 @@ func validatePostScanRuleInput(profileID int64, in GovernancePostScanRuleInput) 
 	if !validDecisionResourceType(normalizeDecisionResourceType(in.ResourceType)) {
 		return fmt.Errorf("audit: unsupported resource_type %q", in.ResourceType)
 	}
-	if !validSeverity(normalizeSeverity(in.Severity)) {
+	if !validPostScanSeverity(normalizePostScanSeverity(in.Severity)) {
 		return fmt.Errorf("audit: unsupported severity %q", in.Severity)
 	}
-	if !validRiskLevel(normalizeRiskLevel(in.RiskLevel)) {
+	if !validPostScanRiskLevel(normalizePostScanRiskLevel(in.RiskLevel)) {
 		return fmt.Errorf("audit: unsupported risk_level %q", in.RiskLevel)
 	}
 	if !validPostScanDecision(normalizePostScanDecision(in.Decision)) {
@@ -1274,6 +1439,36 @@ func validPostScanDecision(v string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizePostScanSeverity(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || strings.EqualFold(v, "all") || v == "*" {
+		return "all"
+	}
+	return normalizeSeverity(v)
+}
+
+func validPostScanSeverity(v string) bool {
+	if normalizePostScanSeverity(v) == "all" {
+		return true
+	}
+	return validSeverity(v)
+}
+
+func normalizePostScanRiskLevel(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || strings.EqualFold(v, "all") || v == "*" {
+		return "all"
+	}
+	return normalizeRiskLevel(v)
+}
+
+func validPostScanRiskLevel(v string) bool {
+	if normalizePostScanRiskLevel(v) == "all" {
+		return true
+	}
+	return validRiskLevel(v)
 }
 
 func normalizeInstallAction(v string) string {
@@ -1359,6 +1554,97 @@ func validRiskLevel(v string) bool {
 	default:
 		return false
 	}
+}
+
+func decisionPathMatches(pattern, value string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if decisionIsWildcard(pattern) {
+		return true
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	p := decisionNormalizePath(pattern)
+	v := decisionNormalizePath(value)
+	if ok, _ := path.Match(p, v); ok {
+		return true
+	}
+	if ok, _ := path.Match(p, path.Base(v)); ok {
+		return true
+	}
+	return strings.Contains(v, p)
+}
+
+func decisionTokenMatches(ruleValue, inputValue string) bool {
+	if decisionIsWildcard(ruleValue) {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(ruleValue), strings.TrimSpace(inputValue))
+}
+
+func decisionSeverityMatches(ruleValue, current string) bool {
+	if decisionIsWildcard(ruleValue) {
+		return true
+	}
+	return normalizeSeverity(ruleValue) == normalizeSeverity(current)
+}
+
+func decisionRiskMatches(ruleValue, current string) bool {
+	if decisionIsWildcard(ruleValue) {
+		return true
+	}
+	return normalizeRiskLevel(ruleValue) == normalizeRiskLevel(current)
+}
+
+func decisionSetMatches(ruleValue string, candidates map[string]bool) bool {
+	if decisionIsWildcard(ruleValue) {
+		return true
+	}
+	for _, token := range splitDecisionTokens(ruleValue) {
+		if candidates[token] {
+			return true
+		}
+	}
+	return false
+}
+
+func decisionTokenSet(values ...string) map[string]bool {
+	out := map[string]bool{}
+	for _, value := range values {
+		for _, token := range splitDecisionTokens(value) {
+			out[token] = true
+		}
+	}
+	return out
+}
+
+func splitDecisionTokens(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';' || r == '|'
+	})
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.ToLower(strings.TrimSpace(part))
+		if part != "" && part != "all" && part != "*" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func decisionIsWildcard(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return value == "" || value == "all" || value == "*"
+}
+
+func decisionNormalizePath(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "\\", "/")
+	for strings.Contains(value, "//") {
+		value = strings.ReplaceAll(value, "//", "/")
+	}
+	return strings.ToLower(value)
 }
 
 func seedResourceDecisionProfiles(ex dbExecer) error {

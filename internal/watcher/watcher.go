@@ -63,10 +63,13 @@ type InstallEvent struct {
 	// static_resources row it maps to, which agent_resource_rules row
 	// produced it, and which resource_scan_profiles detection plan
 	// applies. Empty/zero for legacy events (skill dirs, MCP config).
-	AgentID        string
-	ResourceID     string
-	ResourceRuleID int64
-	ScanProfileID  int64
+	AgentID           string
+	AgentTypeID       int64
+	ResourceID        string
+	ResourceRuleID    int64
+	ScanProfileID     int64
+	PreScanProfileID  int64
+	PostScanProfileID int64
 	// Connector is the owning connector for this install, used to scope
 	// per-connector enforcement on the admit path (most-specific-wins:
 	// connector-scoped state, then the bare global state). Empty ⇒ resolve the
@@ -158,11 +161,14 @@ type InstallWatcher struct {
 // classified with full lineage (agent / rule / profile / resource type)
 // instead of guessing from fixed skill/plugin directories.
 type resourceWatchContext struct {
-	AgentID      string
-	RuleID       int64
-	ProfileID    int64
-	Type         InstallType
-	ResourceType string
+	AgentID           string
+	AgentTypeID       int64
+	RuleID            int64
+	ProfileID         int64
+	PreScanProfileID  int64
+	PostScanProfileID int64
+	Type              InstallType
+	ResourceType      string
 	// Root is the directory registered with fsnotify.
 	Root string
 	// Mode is the rule's enumeration_mode (children / recursive / exact /
@@ -711,8 +717,70 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 		}
 	}
 
+	if blocked, bErr := pe.IsBlocked(targetType, evt.Name); bErr == nil && blocked {
+		reason := fmt.Sprintf("%s %q is on the block list - rejected", targetType, evt.Name)
+		_ = w.logger.LogAction(string(audit.ActionInstallRejected), evt.Path,
+			fmt.Sprintf("type=%s reason=blocked", targetType))
+		if w.otel != nil {
+			w.otel.EmitPolicyDecision("admission", "blocked", evt.Name, targetType, reason, nil)
+		}
+		w.enforceBlock(ctx, evt)
+		w.recordAdmission(ctx, "blocked", targetType)
+		res = AdmissionResult{Event: evt, Verdict: VerdictBlocked, Reason: reason, InstallAction: "block"}
+		return res
+	}
+
+	skipLegacyPreScan := false
+	if dbPre, matched, err := w.evaluateResourcePreScanDecision(evt); err != nil {
+		fmt.Fprintf(os.Stderr, "[watch] evaluate pre-scan profile %d: %v\n", evt.PreScanProfileID, err)
+	} else if matched {
+		switch dbPre.Decision {
+		case "block", "reject", "rejected":
+			_ = w.logger.LogAction(string(audit.ActionInstallRejected), evt.Path,
+				fmt.Sprintf("type=%s reason=%s", targetType, dbPre.Reason))
+			if w.otel != nil {
+				w.otel.EmitPolicyDecision("resource-pre-scan", "blocked", evt.Name, targetType, dbPre.Reason, nil)
+			}
+			w.applyResourcePreScanAction(ctx, pe, dbPre, evt, targetType)
+			w.recordAdmission(ctx, "blocked", targetType)
+			res = AdmissionResult{
+				Event: evt, Verdict: VerdictBlocked, Reason: dbPre.Reason,
+				InstallAction: dbPre.InstallAction,
+				FileAction:    dbPre.FileAction,
+				RuntimeAction: dbPre.RuntimeAction,
+			}
+			return res
+		case "allow", "skip":
+			_ = w.logger.LogAction(string(audit.ActionInstallAllowed), evt.Path,
+				fmt.Sprintf("type=%s reason=%s", targetType, dbPre.Reason))
+			if w.otel != nil {
+				w.otel.EmitPolicyDecision("resource-pre-scan", "allowed", evt.Name, targetType, dbPre.Reason, nil)
+			}
+			w.applyResourcePreScanAction(ctx, pe, dbPre, evt, targetType)
+			w.recordAdmission(ctx, "allowed", targetType)
+			res = AdmissionResult{
+				Event: evt, Verdict: VerdictAllowed, Reason: dbPre.Reason,
+				InstallAction: dbPre.InstallAction,
+				FileAction:    dbPre.FileAction,
+				RuntimeAction: dbPre.RuntimeAction,
+			}
+			return res
+		case "alert", "review":
+			_ = w.logger.LogAction(string(audit.ActionInstallWarning), evt.Path,
+				fmt.Sprintf("type=%s phase=pre-scan reason=%s", targetType, dbPre.Reason))
+			if w.otel != nil {
+				w.otel.EmitPolicyDecision("resource-pre-scan", "warning", evt.Name, targetType, dbPre.Reason, nil)
+			}
+			skipLegacyPreScan = true
+		case "scan":
+			_ = w.logger.LogAction("resource-pre-scan-scan", evt.Path,
+				fmt.Sprintf("type=%s reason=%s", targetType, dbPre.Reason))
+			skipLegacyPreScan = true
+		}
+	}
+
 	// Phase 1: pre-scan OPA evaluation (no scan_result yet).
-	if w.opa != nil {
+	if !skipLegacyPreScan && w.opa != nil {
 		input := policy.AdmissionInput{
 			TargetType: targetType,
 			TargetName: evt.Name,
@@ -773,7 +841,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 			res = AdmissionResult{Event: evt, Verdict: VerdictAllowed, Reason: fallbackOut.Reason}
 			return res
 		}
-	} else {
+	} else if !skipLegacyPreScan {
 		input := policy.AdmissionInput{
 			TargetType: targetType,
 			TargetName: evt.Name,
@@ -868,6 +936,30 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 			Event: evt, Verdict: VerdictAllowed, Reason: reason,
 			MaxSeverity: string(result.MaxSeverity()), FindingCount: len(result.Findings),
 			InstallAction: "allow",
+		}
+		return res
+	}
+
+	riskSummary := w.resourceRiskSummary(result)
+	if dbPost, matched, err := w.evaluateResourcePostScanDecision(evt, result, s.Name(), riskSummary); err != nil {
+		fmt.Fprintf(os.Stderr, "[watch] evaluate post-scan profile %d: %v\n", evt.PostScanProfileID, err)
+	} else if matched {
+		if w.otel != nil {
+			w.otel.EmitPolicyDecision("resource-post-scan", dbPost.Verdict, evt.Name, targetType, dbPost.Reason, map[string]string{
+				"scanner":      s.Name(),
+				"max_severity": riskSummary.MaxSeverity,
+				"risk_level":   riskSummary.RiskLevel,
+			})
+		}
+		w.applyResourcePostScanAction(ctx, pe, dbPost, evt, targetType, result, s.Name())
+		w.logAdmissionScan(ctx, result, dbPost.Verdict, evt)
+		w.recordAdmission(ctx, dbPost.Verdict, targetType)
+		res = AdmissionResult{
+			Event: evt, Verdict: toVerdict(dbPost.Verdict), Reason: dbPost.Reason,
+			MaxSeverity: riskSummary.MaxSeverity, FindingCount: len(result.Findings),
+			InstallAction: dbPost.InstallAction,
+			FileAction:    dbPost.FileAction,
+			RuntimeAction: dbPost.RuntimeAction,
 		}
 		return res
 	}

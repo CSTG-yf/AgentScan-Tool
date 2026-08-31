@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,6 +149,267 @@ func TestShouldRescan(t *testing.T) {
 				t.Error("shouldRescan() returned empty reason")
 			}
 		})
+	}
+}
+
+func TestRescan_PreScanDecisionControlsScanner(t *testing.T) {
+	tests := []struct {
+		name      string
+		decision  string
+		wantCalls int
+		want      rescanOutcome
+		wantMark  bool
+	}{
+		{name: "block", decision: "block", wantCalls: 0, want: rescanSkipped, wantMark: true},
+		{name: "skip", decision: "skip", wantCalls: 0, want: rescanSkipped, wantMark: true},
+		{name: "scan", decision: "scan", wantCalls: 1, want: rescanScanned},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, store, logger, _ := setupTestEnv(t)
+			installAction := "none"
+			if tc.decision == "block" {
+				installAction = "block"
+			}
+			profile, err := store.CreateGovernancePreScanProfile(audit.GovernancePreScanProfileInput{
+				ProfileKey: "rescan-pre-" + tc.name,
+				Name:       "Rescan Pre " + tc.name,
+				Enabled:    true,
+				Rules: []audit.GovernancePreScanRuleInput{{
+					RuleName:      "rescan " + tc.name,
+					Priority:      1,
+					ResourceType:  "prompt",
+					PathPattern:   "*resource*",
+					Decision:      tc.decision,
+					InstallAction: installAction,
+					FileAction:    "none",
+					RuntimeAction: "allow",
+					Enabled:       true,
+				}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			fake := &countingScanner{name: "rescan-decision-scanner"}
+			w := New(cfg, nil, nil, store, logger, nil, nil, nil, nil)
+			w.scannerFactory = func(InstallEvent) scanner.Scanner { return fake }
+
+			target := filepath.Join(t.TempDir(), "resource.prompt")
+			if err := os.WriteFile(target, []byte("prompt"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			outcome := w.rescanTarget(context.Background(), InstallEvent{
+				Type:             InstallPrompt,
+				Name:             filepath.Base(target),
+				Path:             target,
+				PreScanProfileID: profile.ID,
+				Timestamp:        time.Now(),
+			}, map[string]string{})
+
+			if outcome != tc.want {
+				t.Fatalf("rescan outcome = %v, want %v", outcome, tc.want)
+			}
+			if fake.calls != tc.wantCalls {
+				t.Fatalf("scanner calls = %d, want %d", fake.calls, tc.wantCalls)
+			}
+			baseline, err := store.GetTargetSnapshot(string(InstallPrompt), target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hasMarker := strings.HasPrefix(baseline.ScanID, rescanPreScanSnapshotIDPrefix)
+			if hasMarker != tc.wantMark {
+				t.Fatalf("pre-scan snapshot marker = %v in %q, want %v", hasMarker, baseline.ScanID, tc.wantMark)
+			}
+		})
+	}
+}
+
+func TestRescan_PreScanDisabledAndDeletedRulesFallbackToScanner(t *testing.T) {
+	cfg, store, logger, _ := setupTestEnv(t)
+	profile, err := store.CreateGovernancePreScanProfile(audit.GovernancePreScanProfileInput{
+		ProfileKey: "rescan-pre-disabled",
+		Name:       "Rescan Pre Disabled",
+		Enabled:    true,
+		Rules: []audit.GovernancePreScanRuleInput{{
+			RuleName:      "disabled block",
+			Priority:      1,
+			ResourceType:  "prompt",
+			PathPattern:   "*",
+			Decision:      "block",
+			InstallAction: "block",
+			RuntimeAction: "allow",
+			Enabled:       false,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deletedRule, err := store.CreateGovernancePreScanRule(profile.ID, audit.GovernancePreScanRuleInput{
+		RuleName:      "deleted block",
+		Priority:      2,
+		ResourceType:  "prompt",
+		PathPattern:   "*",
+		Decision:      "block",
+		InstallAction: "block",
+		RuntimeAction: "allow",
+		Enabled:       true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := store.DeleteGovernancePreScanRule(deletedRule.ID); err != nil || !ok {
+		t.Fatalf("delete pre-scan rule ok=%v err=%v", ok, err)
+	}
+
+	fake := &countingScanner{name: "rescan-decision-scanner"}
+	w := New(cfg, nil, nil, store, logger, nil, nil, nil, nil)
+	w.scannerFactory = func(InstallEvent) scanner.Scanner { return fake }
+
+	target := filepath.Join(t.TempDir(), "fallback.prompt")
+	if err := os.WriteFile(target, []byte("prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outcome := w.rescanTarget(context.Background(), InstallEvent{
+		Type:             InstallPrompt,
+		Name:             filepath.Base(target),
+		Path:             target,
+		PreScanProfileID: profile.ID,
+		Timestamp:        time.Now(),
+	}, map[string]string{})
+
+	if outcome != rescanScanned {
+		t.Fatalf("rescan outcome = %v, want %v", outcome, rescanScanned)
+	}
+	if fake.calls != 1 {
+		t.Fatalf("disabled/deleted pre-scan rules must fall back to scanner, got %d calls", fake.calls)
+	}
+}
+
+func TestRescan_PostScanDecisionAppliesAfterScanner(t *testing.T) {
+	cfg, store, logger, _ := setupTestEnv(t)
+	profile, err := store.CreateGovernancePostScanProfile(audit.GovernancePostScanProfileInput{
+		ProfileKey: "rescan-post-block",
+		Name:       "Rescan Post Block",
+		Enabled:    true,
+		Rules: []audit.GovernancePostScanRuleInput{{
+			RuleName:        "critical malware block",
+			Priority:        1,
+			ResourceType:    "prompt",
+			Severity:        "all",
+			RiskLevel:       "critical",
+			FindingCategory: "malware",
+			Scanner:         "rescan-decision-scanner",
+			Decision:        "block",
+			InstallAction:   "block",
+			FileAction:      "none",
+			RuntimeAction:   "allow",
+			Enabled:         true,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &countingScanner{
+		name: "rescan-decision-scanner",
+		findings: []scanner.Finding{{
+			Severity: scanner.SeverityLow,
+			Category: "malware",
+			Title:    "malware category should be critical by risk config",
+		}},
+	}
+	w := New(cfg, nil, nil, store, logger, nil, nil, nil, nil)
+	w.scannerFactory = func(InstallEvent) scanner.Scanner { return fake }
+
+	target := filepath.Join(t.TempDir(), "malware.prompt")
+	if err := os.WriteFile(target, []byte("prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outcome := w.rescanTarget(context.Background(), InstallEvent{
+		Type:              InstallPrompt,
+		Name:              filepath.Base(target),
+		Path:              target,
+		PostScanProfileID: profile.ID,
+		Timestamp:         time.Now(),
+	}, map[string]string{})
+
+	if outcome != rescanScanned {
+		t.Fatalf("rescan outcome = %v, want %v", outcome, rescanScanned)
+	}
+	if fake.calls != 1 {
+		t.Fatalf("post-scan must run after scanner, got %d scanner calls", fake.calls)
+	}
+	blocked, err := store.HasAction(string(InstallPrompt), filepath.Base(target), "install", "block")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !blocked {
+		t.Fatal("expected post-scan block action to be persisted")
+	}
+}
+
+func TestRescan_UpdatesStaticResourceRiskFromConfiguredRiskTables(t *testing.T) {
+	cfg, store, logger, _ := setupTestEnv(t)
+	agent, err := store.EnsureAgent(audit.AgentIdentityInput{
+		AgentID:   "rescan-risk-agent",
+		AgentName: "Rescan Risk Agent",
+		Source:    "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "risk.prompt")
+	if err := os.WriteFile(target, []byte("prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resourceID, err := store.EnsureStaticResource(audit.StaticResourceInput{
+		CanonicalAgentID: agent.ID,
+		ResourceType:     "prompt",
+		Name:             filepath.Base(target),
+		Target:           target,
+		Source:           "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &countingScanner{
+		name: "rescan-decision-scanner",
+		findings: []scanner.Finding{{
+			Severity: scanner.SeverityLow,
+			Category: "malware",
+			Title:    "low severity finding mapped by category",
+		}},
+	}
+	w := New(cfg, nil, nil, store, logger, nil, nil, nil, nil)
+	w.scannerFactory = func(InstallEvent) scanner.Scanner { return fake }
+
+	outcome := w.rescanTarget(context.Background(), InstallEvent{
+		Type:       InstallPrompt,
+		Name:       filepath.Base(target),
+		Path:       target,
+		AgentID:    agent.ID,
+		ResourceID: resourceID,
+		Timestamp:  time.Now(),
+	}, map[string]string{})
+	if outcome != rescanScanned {
+		t.Fatalf("rescan outcome = %v, want %v", outcome, rescanScanned)
+	}
+
+	detail, err := store.GetStaticResourceDetail(resourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail == nil {
+		t.Fatal("expected static resource detail")
+	}
+	if detail.RiskLevel != "critical" {
+		t.Fatalf("risk_level = %q, want critical", detail.RiskLevel)
+	}
+	if !detail.Malicious {
+		t.Fatal("expected configured category risk to mark resource malicious")
 	}
 }
 

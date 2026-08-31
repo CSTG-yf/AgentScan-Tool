@@ -36,6 +36,7 @@ import (
 
 	"github.com/defenseclaw/defenseclaw/internal/audit"
 	"github.com/defenseclaw/defenseclaw/internal/config"
+	"github.com/defenseclaw/defenseclaw/internal/enforce"
 	"github.com/defenseclaw/defenseclaw/internal/gatewaylog"
 	"github.com/defenseclaw/defenseclaw/internal/scanner"
 	"github.com/defenseclaw/defenseclaw/internal/version"
@@ -210,6 +211,22 @@ const (
 	rescanSkipped rescanOutcome = iota
 	rescanScanned
 )
+
+type rescanScanStatus int
+
+const (
+	rescanScanFailed rescanScanStatus = iota
+	rescanScanCompleted
+	rescanScanSkippedByPreScan
+)
+
+const rescanPreScanSnapshotIDPrefix = "rescan-pre-scan:"
+
+type rescanScanResult struct {
+	result *scanner.ScanResult
+	scanID string
+	status rescanScanStatus
+}
 
 // runRescanCycle enumerates all installed targets and re-scans each one.
 //
@@ -463,9 +480,9 @@ func (w *InstallWatcher) rescanTarget(ctx context.Context, evt InstallEvent, fpC
 		if errors.Is(err, sql.ErrNoRows) {
 			// First time we've seen this target: scan once to establish a
 			// baseline that future cycles can diff against.
-			result, scanID := w.scanAndEmit(ctx, evt)
-			w.persistSnapshot(evt, currentSnap, scanID, fingerprint)
-			if result == nil {
+			scan := w.scanAndEmit(ctx, evt)
+			w.persistSnapshot(evt, currentSnap, scan.scanID, fingerprint)
+			if scan.status != rescanScanCompleted {
 				return rescanSkipped
 			}
 			return rescanScanned
@@ -495,8 +512,15 @@ func (w *InstallWatcher) rescanTarget(ctx context.Context, evt InstallEvent, fpC
 
 	// Drift, fingerprint change, or recovery: run the scanner exactly once
 	// and diff its findings against the previous baseline scan.
-	result, scanID := w.scanAndEmit(ctx, evt)
-	deltas = append(deltas, w.findingDrift(baseline, result)...)
+	scanResult := w.scanAndEmit(ctx, evt)
+	if scanResult.status == rescanScanSkippedByPreScan {
+		if len(deltas) > 0 {
+			w.emitDriftAlerts(evt, deltas)
+		}
+		w.persistSnapshot(evt, currentSnap, scanResult.scanID, fingerprint)
+		return rescanSkipped
+	}
+	deltas = append(deltas, w.findingDrift(baseline, scanResult.result)...)
 
 	if len(deltas) > 0 {
 		w.emitDriftAlerts(evt, deltas)
@@ -512,14 +536,17 @@ func (w *InstallWatcher) rescanTarget(ctx context.Context, evt InstallEvent, fpC
 	// retries and upgrades the baseline. When there is no prior scan id
 	// (first-time/recovery baseline) there is no trust state to lose, so
 	// we fall through and persist.
-	if scanID == "" && baseline.ScanID != "" {
+	if scanResult.scanID == "" && baseline.ScanID != "" {
 		fmt.Fprintf(os.Stderr,
 			"[rescan] refusing to overwrite baseline for %s without scanner evidence (F-3188)\n",
 			evt.Path)
 		return rescanScanned
 	}
-	w.persistSnapshot(evt, currentSnap, scanID, fingerprint)
-	return rescanScanned
+	w.persistSnapshot(evt, currentSnap, scanResult.scanID, fingerprint)
+	if scanResult.status == rescanScanCompleted {
+		return rescanScanned
+	}
+	return rescanSkipped
 }
 
 // shouldRescan decides whether a target with an existing baseline needs a fresh
@@ -547,14 +574,44 @@ func shouldRescan(baseline *audit.SnapshotRow, snap *TargetSnapshot, fingerprint
 	return false, "unchanged"
 }
 
-// scanAndEmit runs the scanner for evt once and fans the result through the
-// unified emission pipeline (one scan_results row + per-finding rows + events).
-// Returns the result and the generated scan ID, or (nil, "") when no scanner is
-// configured or the scan fails.
-func (w *InstallWatcher) scanAndEmit(ctx context.Context, evt InstallEvent) (*scanner.ScanResult, string) {
+// scanAndEmit applies rescan pre-scan policy, runs the configured scanner when
+// policy allows scanning, persists the scan result, then applies post-scan
+// policy against the persisted risk summary.
+func (w *InstallWatcher) scanAndEmit(ctx context.Context, evt InstallEvent) rescanScanResult {
+	targetType := string(evt.Type)
+	pe := enforce.NewPolicyEngine(w.store)
+	if dbPre, matched, err := w.evaluateResourcePreScanDecision(evt); err != nil {
+		fmt.Fprintf(os.Stderr, "[rescan] evaluate pre-scan profile %d: %v\n", evt.PreScanProfileID, err)
+	} else if matched {
+		switch dbPre.Decision {
+		case "block", "reject", "rejected":
+			_ = w.logger.LogAction(string(audit.ActionInstallRejected), evt.Path,
+				fmt.Sprintf("type=%s phase=rescan-pre-scan reason=%s", targetType, dbPre.Reason))
+			w.applyResourcePreScanAction(ctx, pe, dbPre, evt, targetType)
+			return rescanScanResult{
+				scanID: rescanPreScanSnapshotID(dbPre.Decision),
+				status: rescanScanSkippedByPreScan,
+			}
+		case "allow", "skip":
+			_ = w.logger.LogAction(string(audit.ActionInstallAllowed), evt.Path,
+				fmt.Sprintf("type=%s phase=rescan-pre-scan reason=%s", targetType, dbPre.Reason))
+			w.applyResourcePreScanAction(ctx, pe, dbPre, evt, targetType)
+			return rescanScanResult{
+				scanID: rescanPreScanSnapshotID(dbPre.Decision),
+				status: rescanScanSkippedByPreScan,
+			}
+		case "alert", "review":
+			_ = w.logger.LogAction(string(audit.ActionInstallWarning), evt.Path,
+				fmt.Sprintf("type=%s phase=rescan-pre-scan reason=%s", targetType, dbPre.Reason))
+		case "scan":
+			_ = w.logger.LogAction("resource-rescan-pre-scan-scan", evt.Path,
+				fmt.Sprintf("type=%s reason=%s", targetType, dbPre.Reason))
+		}
+	}
+
 	s := w.newScanner(evt)
 	if s == nil {
-		return nil, ""
+		return rescanScanResult{status: rescanScanFailed}
 	}
 
 	scanCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -563,12 +620,52 @@ func (w *InstallWatcher) scanAndEmit(ctx context.Context, evt InstallEvent) (*sc
 	result, err := s.Scan(scanCtx, w.scanTargetFor(evt))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[rescan] scan %s: %v\n", evt.Path, err)
-		return nil, ""
+		return rescanScanResult{status: rescanScanFailed}
 	}
 	if result == nil {
-		return nil, ""
+		return rescanScanResult{status: rescanScanFailed}
 	}
-	return result, w.emitRescanResult(scanCtx, result, evt)
+	scanID := w.emitRescanResult(scanCtx, result, evt)
+	w.applyRescanPostScanDecision(scanCtx, pe, evt, result, s.Name())
+	return rescanScanResult{
+		result: result,
+		scanID: scanID,
+		status: rescanScanCompleted,
+	}
+}
+
+func rescanPreScanSnapshotID(decision string) string {
+	decision = strings.ToLower(strings.TrimSpace(decision))
+	if decision == "" {
+		decision = "matched"
+	}
+	return rescanPreScanSnapshotIDPrefix + decision
+}
+
+func isRescanPreScanSnapshotID(scanID string) bool {
+	return strings.HasPrefix(strings.TrimSpace(scanID), rescanPreScanSnapshotIDPrefix)
+}
+
+func (w *InstallWatcher) applyRescanPostScanDecision(ctx context.Context, pe *enforce.PolicyEngine, evt InstallEvent, result *scanner.ScanResult, scannerName string) {
+	riskSummary := w.resourceRiskSummary(result)
+	dbPost, matched, err := w.evaluateResourcePostScanDecision(evt, result, scannerName, riskSummary)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[rescan] evaluate post-scan profile %d: %v\n", evt.PostScanProfileID, err)
+		return
+	}
+	if !matched {
+		return
+	}
+	targetType := string(evt.Type)
+	if w.otel != nil {
+		w.otel.EmitPolicyDecision("resource-post-scan", dbPost.Verdict, evt.Name, targetType, dbPost.Reason, map[string]string{
+			"scanner":      scannerName,
+			"max_severity": riskSummary.MaxSeverity,
+			"risk_level":   riskSummary.RiskLevel,
+			"surface":      "rescan",
+		})
+	}
+	w.applyResourcePostScanAction(ctx, pe, dbPost, evt, targetType, result, scannerName)
 }
 
 // persistSnapshot upserts the baseline snapshot (content/dep/config/endpoint
@@ -588,7 +685,7 @@ func (w *InstallWatcher) persistSnapshot(evt InstallEvent, snap *TargetSnapshot,
 // stored scan, returning finding-level and severity-escalation deltas. It does
 // NOT run the scanner — the caller passes the already-computed current result.
 func (w *InstallWatcher) findingDrift(baseline *audit.SnapshotRow, current *scanner.ScanResult) []DriftDelta {
-	if baseline == nil || baseline.ScanID == "" || current == nil {
+	if baseline == nil || baseline.ScanID == "" || current == nil || isRescanPreScanSnapshotID(baseline.ScanID) {
 		return nil
 	}
 

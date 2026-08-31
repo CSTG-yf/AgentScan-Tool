@@ -225,7 +225,7 @@ func (a *APIServer) handleStaticResourceScans(w http.ResponseWriter, r *http.Req
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if _, _, _, _, _, ok, err := a.store.GetStaticResourceTargetPath(resourceID); err != nil {
+	if _, _, _, _, _, _, _, _, ok, err := a.store.GetStaticResourceTargetPath(resourceID); err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	} else if !ok {

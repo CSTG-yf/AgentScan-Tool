@@ -564,15 +564,18 @@ func (w *InstallWatcher) enumerateResourcesForAgent(agent audit.AgentResourceRec
 					continue
 				}
 				events = append(events, InstallEvent{
-					Type:           InstallType(rule.ResourceType),
-					Name:           filepath.Base(target),
-					Path:           target,
-					AgentID:        agent.ID,
-					ResourceID:     resourceID,
-					ResourceRuleID: rule.ID,
-					ScanProfileID:  rule.ScanProfileID,
-					Connector:      connector,
-					Timestamp:      observedAt,
+					Type:              InstallType(rule.ResourceType),
+					Name:              filepath.Base(target),
+					Path:              target,
+					AgentID:           agent.ID,
+					AgentTypeID:       agent.AgentTypeID,
+					ResourceID:        resourceID,
+					ResourceRuleID:    rule.ID,
+					ScanProfileID:     rule.ScanProfileID,
+					PreScanProfileID:  rule.PreScanProfileID,
+					PostScanProfileID: rule.PostScanProfileID,
+					Connector:         connector,
+					Timestamp:         observedAt,
 				})
 			}
 		}
@@ -795,15 +798,15 @@ var maliciousRuleIDPrefixes = []string{"CS-MAL-"}
 // "injection" tag is deliberately excluded because weak heuristic findings
 // (verb density, entropy) carry it too.
 var maliciousTags = map[string]bool{
-	"malware":              true,
-	"reverse_shell":        true,
-	"credential_harvest":   true,
-	"cryptominer":          true,
-	"c2":                   true,
-	"zip_slip":             true,
-	"role_override":        true,
+	"malware":               true,
+	"reverse_shell":         true,
+	"credential_harvest":    true,
+	"cryptominer":           true,
+	"c2":                    true,
+	"zip_slip":              true,
+	"role_override":         true,
 	"instruction_injection": true,
-	"delimiter_injection":  true,
+	"delimiter_injection":   true,
 }
 
 // maliciousTitleKeywords is the last-resort fallback for scanners that emit
@@ -876,18 +879,18 @@ func containsMaliciousFinding(findings []scanner.Finding) bool {
 }
 
 // updateResourceRisk writes the post-scan verdict back onto the
-// rule-produced static_resources row: risk bucket derived from the highest
-// finding severity, malicious flag derived from finding categories, and the
-// scan reference (empty keeps the previously recorded one).
+// rule-produced static_resources row. Risk is derived from the configurable
+// governance risk tables first, with legacy heuristics only as compatibility
+// fallback when those tables cannot evaluate a finding.
 func (w *InstallWatcher) updateResourceRisk(evt InstallEvent, result *scanner.ScanResult, scanID string) {
 	if w == nil || w.store == nil || evt.ResourceID == "" || result == nil {
 		return
 	}
-	maxSeverity := string(result.MaxSeverity())
+	risk := w.resourceRiskSummary(result)
 	if err := w.store.UpdateStaticResourceRisk(evt.ResourceID, audit.ResourceRiskUpdate{
-		RiskLevel:    audit.ResourceRiskLevel(maxSeverity),
-		Malicious:    containsMaliciousFinding(result.Findings),
-		MaxSeverity:  maxSeverity,
+		RiskLevel:    risk.RiskLevel,
+		Malicious:    risk.Malicious,
+		MaxSeverity:  risk.MaxSeverity,
 		FindingCount: len(result.Findings),
 		LastScanID:   scanID,
 		LastSeenAt:   time.Now().UTC(),
@@ -927,12 +930,15 @@ func (w *InstallWatcher) buildResourceWatchContexts() []resourceWatchContext {
 			}
 			for _, path := range w.expandResourceRulePath(agent, rule.PathPattern) {
 				ctx := resourceWatchContext{
-					AgentID:      agent.ID,
-					RuleID:       rule.ID,
-					ProfileID:    rule.ScanProfileID,
-					Type:         InstallType(rule.ResourceType),
-					ResourceType: rule.ResourceType,
-					Mode:         strings.ToLower(strings.TrimSpace(rule.EnumerationMode)),
+					AgentID:           agent.ID,
+					AgentTypeID:       agent.AgentTypeID,
+					RuleID:            rule.ID,
+					ProfileID:         rule.ScanProfileID,
+					PreScanProfileID:  rule.PreScanProfileID,
+					PostScanProfileID: rule.PostScanProfileID,
+					Type:              InstallType(rule.ResourceType),
+					ResourceType:      rule.ResourceType,
+					Mode:              strings.ToLower(strings.TrimSpace(rule.EnumerationMode)),
 				}
 				switch ctx.Mode {
 				case "exact":
@@ -1006,14 +1012,17 @@ func (w *InstallWatcher) ruleEventForPath(path string) (InstallEvent, bool) {
 			continue
 		}
 		evt := InstallEvent{
-			Type:           ctx.Type,
-			Name:           filepath.Base(target),
-			Path:           target,
-			AgentID:        ctx.AgentID,
-			ResourceRuleID: ctx.RuleID,
-			ScanProfileID:  ctx.ProfileID,
-			Connector:      watcherConnectorName(w.cfg),
-			Timestamp:      time.Now().UTC(),
+			Type:              ctx.Type,
+			Name:              filepath.Base(target),
+			Path:              target,
+			AgentID:           ctx.AgentID,
+			AgentTypeID:       ctx.AgentTypeID,
+			ResourceRuleID:    ctx.RuleID,
+			ScanProfileID:     ctx.ProfileID,
+			PreScanProfileID:  ctx.PreScanProfileID,
+			PostScanProfileID: ctx.PostScanProfileID,
+			Connector:         watcherConnectorName(w.cfg),
+			Timestamp:         time.Now().UTC(),
 		}
 		if w.store != nil {
 			resourceID, err := w.store.EnsureStaticResource(audit.StaticResourceInput{

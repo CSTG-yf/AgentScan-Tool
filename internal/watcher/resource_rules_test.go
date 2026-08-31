@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/defenseclaw/defenseclaw/internal/audit"
-	"github.com/defenseclaw/defenseclaw/internal/scanner"
 	"github.com/defenseclaw/defenseclaw/internal/sandbox"
+	"github.com/defenseclaw/defenseclaw/internal/scanner"
 )
 
 // seededWorkspaceRuleType finds a seeded agent type whose rules all expand
@@ -227,6 +227,9 @@ func TestRuleEventClassification(t *testing.T) {
 	if evt.ScanProfileID == 0 {
 		t.Fatalf("expected scan profile on event (seeded rules bind profiles): %+v", evt)
 	}
+	if evt.AgentTypeID == 0 || evt.PreScanProfileID == 0 || evt.PostScanProfileID == 0 {
+		t.Fatalf("expected agent type and pre/post profile lineage on event: %+v", evt)
+	}
 
 	// A loose file directly under the root is not a children-mode resource.
 	if err := os.WriteFile(filepath.Join(skills, "README.md"), []byte("x"), 0o600); err != nil {
@@ -253,60 +256,60 @@ func TestRuleEventClassification(t *testing.T) {
 // title must never change the verdict.
 func TestIsMaliciousFindingPriority(t *testing.T) {
 	cases := []struct {
-		name  string
-		f     scanner.Finding
-		want  bool
+		name   string
+		f      scanner.Finding
+		want   bool
 		reason string
 	}{
 		{
-			name:  "rule id prefix (ClawShield malware family)",
-			f:     scanner.Finding{RuleID: "CS-MAL-RS-DEVTCP", Severity: scanner.SeverityCritical},
-			want:  true,
+			name: "rule id prefix (ClawShield malware family)",
+			f:    scanner.Finding{RuleID: "CS-MAL-RS-DEVTCP", Severity: scanner.SeverityCritical},
+			want: true,
 		},
 		{
-			name:  "structured category",
-			f:     scanner.Finding{Category: "command_execution"},
-			want:  true,
+			name: "structured category",
+			f:    scanner.Finding{Category: "command_execution"},
+			want: true,
 		},
 		{
-			name:  "category survives title rewording",
-			f:     scanner.Finding{Category: "command_execution", Title: "Dangerous shell invocation"},
-			want:  true,
+			name: "category survives title rewording",
+			f:    scanner.Finding{Category: "command_execution", Title: "Dangerous shell invocation"},
+			want: true,
 		},
 		{
-			name:  "structured tag",
-			f:     scanner.Finding{Tags: []string{"clawshield", "reverse_shell"}},
-			want:  true,
+			name: "structured tag",
+			f:    scanner.Finding{Tags: []string{"clawshield", "reverse_shell"}},
+			want: true,
 		},
 		{
-			name:  "finding id prefix without rule id",
-			f:     scanner.Finding{ID: "CS-MAL-MAGIC-ELF"},
-			want:  true,
+			name: "finding id prefix without rule id",
+			f:    scanner.Finding{ID: "CS-MAL-MAGIC-ELF"},
+			want: true,
 		},
 		{
-			name:  "title fallback keyword",
-			f:     scanner.Finding{Title: "Possible command execution risk"},
-			want:  true,
+			name: "title fallback keyword",
+			f:    scanner.Finding{Title: "Possible command execution risk"},
+			want: true,
 		},
 		{
-			name:  "benign title no structured fields",
-			f:     scanner.Finding{Title: "Outdated dependency: requests 2.31"},
-			want:  false,
+			name: "benign title no structured fields",
+			f:    scanner.Finding{Title: "Outdated dependency: requests 2.31"},
+			want: false,
 		},
 		{
-			name:  "weak heuristic injection tag alone is not malicious",
-			f:     scanner.Finding{Title: "Suspicious imperative verb density: 12.0%", Tags: []string{"injection", "statistical", "clawshield"}},
-			want:  false,
+			name: "weak heuristic injection tag alone is not malicious",
+			f:    scanner.Finding{Title: "Suspicious imperative verb density: 12.0%", Tags: []string{"injection", "statistical", "clawshield"}},
+			want: false,
 		},
 		{
-			name:  "concrete injection pattern tag is malicious",
-			f:     scanner.Finding{Title: "Prompt injection: instruction override attempt", Tags: []string{"injection", "instruction_injection", "clawshield"}},
-			want:  true,
+			name: "concrete injection pattern tag is malicious",
+			f:    scanner.Finding{Title: "Prompt injection: instruction override attempt", Tags: []string{"injection", "instruction_injection", "clawshield"}},
+			want: true,
 		},
 		{
-			name:  "risk-only finding stays non-malicious",
-			f:     scanner.Finding{Category: "weak_config", Severity: scanner.SeverityMedium},
-			want:  false,
+			name: "risk-only finding stays non-malicious",
+			f:    scanner.Finding{Category: "weak_config", Severity: scanner.SeverityMedium},
+			want: false,
 		},
 	}
 	for _, tc := range cases {

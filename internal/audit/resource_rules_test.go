@@ -220,3 +220,63 @@ func TestScanProfileFingerprint(t *testing.T) {
 		t.Fatalf("unknown profile should yield empty fingerprint, got %q (%v)", fp, err)
 	}
 }
+
+func TestListResourceRulesByAgentTypeReturnsDecisionProfiles(t *testing.T) {
+	store, done := newTestStore(t)
+	defer done()
+
+	agentType, err := store.CreateGovernanceAgentType(GovernanceAgentTypeInput{
+		TypeKey:     "decision-profile-test",
+		Name:        "Decision Profile Test",
+		Vendor:      "test",
+		Kind:        "workspace",
+		Runtime:     "local",
+		Description: "test agent type",
+		Enabled:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pre, err := store.CreateGovernancePreScanProfile(GovernancePreScanProfileInput{
+		ProfileKey: "list-resource-rules-pre",
+		Name:       "List Resource Rules Pre",
+		Enabled:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	post, err := store.CreateGovernancePostScanProfile(GovernancePostScanProfileInput{
+		ProfileKey: "list-resource-rules-post",
+		Name:       "List Resource Rules Post",
+		Enabled:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.CreateGovernanceResourceRule(GovernanceResourceRuleInput{
+		AgentTypeID:       agentType.ID,
+		Name:              "Prompts",
+		ResourceType:      "prompt",
+		PathPattern:       "${WORKSPACE_ROOT}/prompts/*.md",
+		EnumerationMode:   "glob",
+		ScanProfileID:     1,
+		PreScanProfileID:  pre.ID,
+		PostScanProfileID: post.ID,
+		Enabled:           true,
+		Priority:          10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rules, err := store.ListResourceRulesByAgentType(agentType.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("expected one runtime resource rule, got %d", len(rules))
+	}
+	if rules[0].ID != created.ID || rules[0].PreScanProfileID != pre.ID || rules[0].PostScanProfileID != post.ID {
+		t.Fatalf("expected pre/post profile lineage in runtime rule, got %+v", rules[0])
+	}
+}

@@ -516,28 +516,37 @@ ORDER BY COALESCE(pc.priority, 100), c.id`, profileID)
 	return out, rows.Err()
 }
 
-// GetStaticResourceTargetPath returns the on-disk target of one resource row
-// (used by the on-demand scan trigger to rebuild its InstallEvent).
-func (s *Store) GetStaticResourceTargetPath(resourceID string) (target, agentID, resourceType string, ruleID, profileID int64, ok bool, err error) {
+// GetStaticResourceTargetPath returns the on-disk target and rule lineage of
+// one resource row (used by the on-demand scan trigger to rebuild its
+// InstallEvent).
+func (s *Store) GetStaticResourceTargetPath(resourceID string) (target, agentID, resourceType string, ruleID, profileID, agentTypeID, preScanProfileID, postScanProfileID int64, ok bool, err error) {
 	if s == nil || s.db == nil || strings.TrimSpace(resourceID) == "" {
-		return "", "", "", 0, 0, false, nil
+		return "", "", "", 0, 0, 0, 0, 0, false, nil
 	}
 	rows, err := s.queryDB(context.Background(), "static_resource_target_get", `
-SELECT COALESCE(target,''), COALESCE(canonical_agent_id,''), COALESCE(resource_type,''),
-       COALESCE(resource_rule_id,0), COALESCE(scan_profile_id,0)
-FROM static_resources
-WHERE id = ? AND COALESCE("delete", 0) = 0`, resourceID)
+SELECT COALESCE(sr.target,''),
+       COALESCE(sr.canonical_agent_id,''),
+       COALESCE(sr.resource_type,''),
+       COALESCE(sr.resource_rule_id,0),
+       COALESCE(NULLIF(sr.scan_profile_id,0), rr.scan_profile_id, 0),
+       COALESCE(rr.agent_type_id, a.agent_type_id, 0),
+       COALESCE(rr.pre_scan_profile_id, 0),
+       COALESCE(rr.post_scan_profile_id, 0)
+FROM static_resources sr
+LEFT JOIN agent_resource_rules rr ON rr.id = sr.resource_rule_id AND COALESCE(rr."delete",0) = 0
+LEFT JOIN agents a ON a.id = sr.canonical_agent_id AND COALESCE(a."delete",0) = 0
+WHERE sr.id = ? AND COALESCE(sr."delete", 0) = 0`, resourceID)
 	if err != nil {
-		return "", "", "", 0, 0, false, fmt.Errorf("audit: static resource target %q: %w", resourceID, err)
+		return "", "", "", 0, 0, 0, 0, 0, false, fmt.Errorf("audit: static resource target %q: %w", resourceID, err)
 	}
 	defer rows.Close()
 	if !rows.Next() {
-		return "", "", "", 0, 0, false, rows.Err()
+		return "", "", "", 0, 0, 0, 0, 0, false, rows.Err()
 	}
-	if err := rows.Scan(&target, &agentID, &resourceType, &ruleID, &profileID); err != nil {
-		return "", "", "", 0, 0, false, fmt.Errorf("audit: static resource target row: %w", err)
+	if err := rows.Scan(&target, &agentID, &resourceType, &ruleID, &profileID, &agentTypeID, &preScanProfileID, &postScanProfileID); err != nil {
+		return "", "", "", 0, 0, 0, 0, 0, false, fmt.Errorf("audit: static resource target row: %w", err)
 	}
-	return target, agentID, resourceType, ruleID, profileID, target != "", rows.Err()
+	return target, agentID, resourceType, ruleID, profileID, agentTypeID, preScanProfileID, postScanProfileID, target != "", rows.Err()
 }
 
 // StaticResourceFindingRow is one finding of a resource's latest scan.

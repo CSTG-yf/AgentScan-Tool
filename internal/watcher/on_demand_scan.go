@@ -22,7 +22,7 @@ func (w *InstallWatcher) ScanResourceByID(ctx context.Context, resourceID string
 	if w == nil || w.store == nil {
 		return AdmissionResult{}, fmt.Errorf("watcher: store unavailable")
 	}
-	target, agentID, resourceType, ruleID, profileID, ok, err := w.store.GetStaticResourceTargetPath(resourceID)
+	target, agentID, resourceType, ruleID, profileID, agentTypeID, preScanProfileID, postScanProfileID, ok, err := w.store.GetStaticResourceTargetPath(resourceID)
 	if err != nil {
 		return AdmissionResult{}, err
 	}
@@ -34,15 +34,18 @@ func (w *InstallWatcher) ScanResourceByID(ctx context.Context, resourceID string
 	}
 
 	evt := InstallEvent{
-		Type:           InstallType(resourceType),
-		Name:           filepath.Base(target),
-		Path:           target,
-		AgentID:        agentID,
-		ResourceID:     resourceID,
-		ResourceRuleID: ruleID,
-		ScanProfileID:  profileID,
-		Connector:      watcherConnectorName(w.cfg),
-		Timestamp:      time.Now().UTC(),
+		Type:              InstallType(resourceType),
+		Name:              filepath.Base(target),
+		Path:              target,
+		AgentID:           agentID,
+		AgentTypeID:       agentTypeID,
+		ResourceID:        resourceID,
+		ResourceRuleID:    ruleID,
+		ScanProfileID:     profileID,
+		PreScanProfileID:  preScanProfileID,
+		PostScanProfileID: postScanProfileID,
+		Connector:         watcherConnectorName(w.cfg),
+		Timestamp:         time.Now().UTC(),
 	}
 	res := w.runAdmission(ctx, evt)
 	return res, nil
