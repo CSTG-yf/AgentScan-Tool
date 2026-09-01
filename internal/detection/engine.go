@@ -25,6 +25,7 @@
 package detection
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -143,6 +144,17 @@ func (e *Engine) Policy() *PolicyEngine {
 // must be cheap and failure-tolerant: detection problems never break
 // the request path.
 func (e *Engine) EvaluateEvent(eventID int64) {
+	e.evaluateEvent(eventID, "")
+}
+
+// EvaluateEventForJob is used by historical replay jobs. It preserves the
+// normal live-event behaviour while attaching the replay job id to every
+// detection created or refreshed by the evaluation.
+func (e *Engine) EvaluateEventForJob(eventID int64, jobID string) {
+	e.evaluateEvent(eventID, jobID)
+}
+
+func (e *Engine) evaluateEvent(eventID int64, evaluationJobID string) {
 	if e == nil || e.store == nil || eventID <= 0 || len(e.rules) == 0 {
 		return
 	}
@@ -160,7 +172,7 @@ func (e *Engine) EvaluateEvent(eventID int64) {
 	for _, rule := range e.rules {
 		results := rule.Evaluate(ctx)
 		for _, res := range results {
-			e.record(event, rule, res)
+			e.record(event, rule, res, evaluationJobID)
 		}
 	}
 }
@@ -231,26 +243,39 @@ func (e *Engine) loadWindow(ev audit.BehaviorEvent) []audit.BehaviorEvent {
 
 // record persists one rule verdict with evidence links. Sequence
 // numbers follow the evidence slice order (chain order).
-func (e *Engine) record(trigger audit.BehaviorEvent, rule Rule, res DetectionResult) {
+func (e *Engine) record(trigger audit.BehaviorEvent, rule Rule, res DetectionResult, evaluationJobID string) {
 	if res.DetectionType == "" {
 		return
 	}
+	source := "runtime_detection"
+	if len(res.Evidence) > 1 {
+		source = "correlation_engine"
+	}
+	if res.Attributes == nil {
+		res.Attributes = map[string]any{}
+	}
+	if raw, ok := res.Attributes["source"].(string); ok && strings.TrimSpace(raw) != "" {
+		source = strings.TrimSpace(raw)
+	}
+	res.Attributes["source"] = source
 	in := audit.RuntimeDetectionInput{
-		AgentID:       trigger.CanonicalAgentID,
-		AgentName:     trigger.AgentName,
-		SessionID:     trigger.SessionID,
-		TraceID:       trigger.TraceID,
-		DetectionType: res.DetectionType,
-		Category:      res.Category,
-		Severity:      res.Severity,
-		Confidence:    res.Confidence,
-		RuleID:        rule.ID(),
-		RuleVersion:   RuleVersion,
-		Title:         res.Title,
-		Detail:        res.Detail,
-		Remediation:   res.Remediation,
-		Attributes:    res.Attributes,
-		SeenAt:        time.Now().UTC(),
+		AgentID:         trigger.CanonicalAgentID,
+		AgentName:       trigger.AgentName,
+		SessionID:       trigger.SessionID,
+		TraceID:         trigger.TraceID,
+		DetectionType:   res.DetectionType,
+		Category:        res.Category,
+		Severity:        res.Severity,
+		Confidence:      res.Confidence,
+		RuleID:          rule.ID(),
+		RuleVersion:     RuleVersion,
+		Source:          source,
+		EvaluationJobID: evaluationJobID,
+		Title:           res.Title,
+		Detail:          res.Detail,
+		Remediation:     res.Remediation,
+		Attributes:      res.Attributes,
+		SeenAt:          time.Now().UTC(),
 	}
 	seq := 0
 	for _, ev := range res.Evidence {

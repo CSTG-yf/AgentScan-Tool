@@ -274,8 +274,11 @@ type pageAttackChain struct {
 	Evidence      []pageAttackEvidenceRow `json:"evidence"`
 	// Phase 3: links to the detection and the policy decision behind
 	// this persisted chain (empty for legacy page-correlated chains).
-	DetectionID string `json:"detectionId,omitempty"`
-	DecisionID  string `json:"decisionId,omitempty"`
+	DetectionID     string `json:"detectionId,omitempty"`
+	DecisionID      string `json:"decisionId,omitempty"`
+	BuilderVersion  string `json:"builderVersion,omitempty"`
+	PolicyVersion   string `json:"policyVersion,omitempty"`
+	EvaluationJobID string `json:"evaluationJobId,omitempty"`
 }
 
 type pageAttackChainStep struct {
@@ -690,8 +693,11 @@ func pageAttackChainFromRuntime(c audit.RuntimeAttackChain) pageAttackChain {
 		EndedAt:   c.EndTime.UTC().Format(time.RFC3339Nano),
 		Summary: fmt.Sprintf("Persisted attack chain %s: %s (%s), correlated by the detection engine.",
 			c.AttackChainID, c.AttackType, strings.ToUpper(c.Severity)),
-		DetectionID: c.DetectionID,
-		DecisionID:  c.DecisionID,
+		DetectionID:     c.DetectionID,
+		DecisionID:      c.DecisionID,
+		BuilderVersion:  c.BuilderVersion,
+		PolicyVersion:   c.PolicyVersion,
+		EvaluationJobID: c.EvaluationJobID,
 	}
 }
 

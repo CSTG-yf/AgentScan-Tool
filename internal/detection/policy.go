@@ -37,11 +37,11 @@ type PolicyEngine struct {
 	store *audit.Store
 	// mode caches the runtime security mode (observe default) so
 	// policy evaluation stays off the hot DB path.
-	modeMu    sync.RWMutex
-	mode      string
-	modeRead  time.Time
-	modeTTL   time.Duration
-	blocklist *NetworkBlocklist
+	modeMu     sync.RWMutex
+	mode       string
+	modeRead   time.Time
+	modeTTL    time.Duration
+	blocklist  *NetworkBlocklist
 	executorMu sync.RWMutex
 	executors  map[string]RuntimeExecutor
 }
@@ -57,7 +57,7 @@ func NewPolicyEngine(store *audit.Store) *PolicyEngine {
 		mode:      audit.RuntimeSecurityModeObserve,
 		modeTTL:   5 * time.Second,
 		blocklist: NewNetworkBlocklist(),
-		executors:  map[string]RuntimeExecutor{},
+		executors: map[string]RuntimeExecutor{},
 	}
 	p.blocklist.setPersistTarget(store)
 	p.RegisterExecutor(ProcessExecutor{})
@@ -310,14 +310,22 @@ func (p *PolicyEngine) dispatchResponse(decision audit.RuntimeDecision, actionTy
 		hosts := evidenceHosts(evidence)
 		if mode == audit.RuntimeSecurityModeAction && len(hosts) > 0 {
 			added := p.blocklist.AddHosts(hosts, decision.DecisionID)
+			target := strings.Join(added, ", ")
+			if target == "" {
+				// An already-blocked host is still the target of this response;
+				// retaining it keeps the persisted action linked to the live
+				// blocklist row and makes rollback/replay deterministic.
+				target = strings.Join(hosts, ", ")
+			}
 			_, _ = p.store.RecordResponseAction(audit.ResponseActionInput{
-				DecisionID: decision.DecisionID,
-				ActionType: actionType,
-				Executor:   "proxy",
-				Target:     strings.Join(added, ", "),
-				Status:     audit.ResponseStatusExecuted,
-				Result:     "host(s) added to runtime network blocklist; proxy returns 403",
-				ExecutedAt: time.Now().UTC(),
+				DecisionID:        decision.DecisionID,
+				ActionType:        actionType,
+				Executor:          "proxy",
+				Target:            target,
+				Status:            audit.ResponseStatusExecuted,
+				Result:            "host(s) added to runtime network blocklist; proxy returns 403",
+				RollbackSupported: true,
+				ExecutedAt:        time.Now().UTC(),
 			})
 			return
 		}
@@ -330,13 +338,14 @@ func (p *PolicyEngine) dispatchResponse(decision audit.RuntimeDecision, actionTy
 			result = "action mode: no network host evidence is available for proxy blocking"
 		}
 		_, _ = p.store.RecordResponseAction(audit.ResponseActionInput{
-			DecisionID: decision.DecisionID,
-			ActionType: actionType,
-			Executor:   "proxy",
-			Target:     strings.Join(hosts, ", "),
-			Status:     status,
-			Result:     result,
-			ExecutedAt: time.Now().UTC(),
+			DecisionID:        decision.DecisionID,
+			ActionType:        actionType,
+			Executor:          "proxy",
+			Target:            strings.Join(hosts, ", "),
+			Status:            status,
+			Result:            result,
+			RollbackSupported: true,
+			ExecutedAt:        time.Now().UTC(),
 		})
 	default:
 		status, target, result := p.ExecuteNonProxy(context.Background(), decision, actionType, evidence, mode != audit.RuntimeSecurityModeObserve)

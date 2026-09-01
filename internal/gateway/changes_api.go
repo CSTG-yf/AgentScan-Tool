@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-
-	"github.com/defenseclaw/defenseclaw/internal/audit"
 )
 
 var changeDomains = []string{

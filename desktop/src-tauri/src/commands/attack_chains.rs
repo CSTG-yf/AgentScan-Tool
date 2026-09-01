@@ -42,6 +42,12 @@ struct AttackChain {
     detection_id: String,
     #[serde(default)]
     decision_id: String,
+    #[serde(default)]
+    builder_version: String,
+    #[serde(default)]
+    policy_version: String,
+    #[serde(default)]
+    evaluation_job_id: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]

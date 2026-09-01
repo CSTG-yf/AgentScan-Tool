@@ -7,6 +7,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -435,29 +436,34 @@ func recordEgressRuntimeEvent(ctx context.Context, p gatewaylog.EgressPayload) {
 // network.connect — the activity that never flows through Prompt, LLM
 // or Tool Hook pipelines and where exploit chains live.
 type runtimeEventPostRequest struct {
-	EventType string `json:"event_type"`
-	AgentID   string `json:"agent_id,omitempty"`
-	AgentName string `json:"agent_name,omitempty"`
-	SessionID string `json:"session_id,omitempty"`
-	TraceID   string `json:"trace_id,omitempty"`
-	PID       uint32 `json:"pid,omitempty"`
-	PPID      uint32 `json:"ppid,omitempty"`
+	EventType       string `json:"event_type"`
+	AgentID         string `json:"agent_id,omitempty"`
+	AgentName       string `json:"agent_name,omitempty"`
+	SessionID       string `json:"session_id,omitempty"`
+	TraceID         string `json:"trace_id,omitempty"`
+	PID             uint32 `json:"pid,omitempty"`
+	PPID            uint32 `json:"ppid,omitempty"`
 	AgentExecutable string `json:"agent_executable,omitempty"`
 	ActorPID        uint32 `json:"actor_pid,omitempty"`
 	ActorExecutable string `json:"actor_executable,omitempty"`
 	AgentInstanceID string `json:"agent_instance_id,omitempty"`
 	Path            string `json:"path,omitempty"`
 	Action          string `json:"action,omitempty"`
-	Operation string `json:"operation,omitempty"`
-	Target    string `json:"target,omitempty"`
-	ToolName  string `json:"tool_name,omitempty"`
-	Severity  string `json:"severity,omitempty"`
-	Outcome   string `json:"outcome,omitempty"`
-	Detail    string `json:"detail,omitempty"`
+	Operation       string `json:"operation,omitempty"`
+	Target          string `json:"target,omitempty"`
+	ToolName        string `json:"tool_name,omitempty"`
+	Severity        string `json:"severity,omitempty"`
+	Outcome         string `json:"outcome,omitempty"`
+	Detail          string `json:"detail,omitempty"`
+	Timestamp       string `json:"timestamp,omitempty"`
 	// Redacted upstream: the sensor must scrub command lines and paths
 	// before reporting; the gateway re-redacts defensively.
 	Command  string         `json:"command,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+type runtimeEventBatchRequest struct {
+	Events []runtimeEventPostRequest `json:"events"`
 }
 
 type runtimeDetectionListItem struct {
@@ -570,6 +576,7 @@ func runtimeDetectionFilterFromQuery(r *http.Request, limitDefault, limitMax int
 		DetectionType: firstNonEmpty(strings.TrimSpace(q.Get("detection_type")), strings.TrimSpace(q.Get("type"))),
 		Category:      strings.TrimSpace(q.Get("category")),
 		Severity:      strings.TrimSpace(q.Get("severity")),
+		Source:        strings.TrimSpace(q.Get("source")),
 		Status:        status,
 		Keyword:       strings.TrimSpace(q.Get("keyword")),
 		StartTime:     parseAPITime(q.Get("start_time")),
@@ -609,6 +616,9 @@ func runtimeDetectionListItemFromAudit(d audit.RuntimeDetection) runtimeDetectio
 }
 
 func runtimeDetectionSource(d audit.RuntimeDetection) string {
+	if source := strings.TrimSpace(d.Source); source != "" {
+		return source
+	}
 	if source, ok := runtimeStringFromAttributes(d.Attributes, "source"); ok {
 		return source
 	}
@@ -697,6 +707,14 @@ func (a *APIServer) handleRuntimeEvents(w http.ResponseWriter, r *http.Request) 
 	}
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/runtime-events"), "/")
 	if rest != "" {
+		if rest == "batch" {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			a.handleRuntimeEventsBatch(w, r)
+			return
+		}
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -877,6 +895,124 @@ func (a *APIServer) handleRuntimeEventsGet(w http.ResponseWriter, r *http.Reques
 }
 
 func (a *APIServer) handleRuntimeEventsPost(w http.ResponseWriter, r *http.Request) {
+	if activeRuntimeEventStore() == nil {
+		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime event store unavailable"})
+		return
+	}
+	var req runtimeEventPostRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	eventID, err := a.ingestRuntimeEvent(req)
+	if err != nil {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	a.writeJSON(w, http.StatusCreated, map[string]any{"event_id": eventID, "evaluated": activeDetectionEngine() != nil})
+}
+
+// handleRuntimeEventsBatch accepts either {"events":[...]} or a bare JSON
+// array. Each event is normalized and evaluated independently; one malformed
+// item does not discard successfully persisted siblings.
+func (a *APIServer) handleRuntimeEventsBatch(w http.ResponseWriter, r *http.Request) {
+	if activeRuntimeEventStore() == nil {
+		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime event store unavailable"})
+		return
+	}
+	var raw json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	var events []runtimeEventPostRequest
+	if strings.HasPrefix(strings.TrimSpace(string(raw)), "[") {
+		if err := json.Unmarshal(raw, &events); err != nil {
+			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "events must be a JSON array"})
+			return
+		}
+	} else {
+		var body runtimeEventBatchRequest
+		if err := json.Unmarshal(raw, &body); err != nil {
+			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid batch JSON body"})
+			return
+		}
+		events = body.Events
+	}
+	if len(events) == 0 || len(events) > 1000 {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "events must contain between 1 and 1000 items"})
+		return
+	}
+	items := make([]map[string]any, 0, len(events))
+	failed := 0
+	for i, event := range events {
+		eventID, err := a.ingestRuntimeEvent(event)
+		if err != nil {
+			failed++
+			items = append(items, map[string]any{"index": i, "error": err.Error()})
+			continue
+		}
+		items = append(items, map[string]any{"index": i, "event_id": eventID, "evaluated": activeDetectionEngine() != nil})
+	}
+	status := http.StatusCreated
+	if failed > 0 {
+		status = http.StatusMultiStatus
+	}
+	a.writeJSON(w, status, map[string]any{"items": items, "count": len(items), "failed": failed})
+}
+
+func (a *APIServer) ingestRuntimeEvent(req runtimeEventPostRequest) (int64, error) {
+	store := activeRuntimeEventStore()
+	if store == nil {
+		return 0, fmt.Errorf("runtime event store unavailable")
+	}
+	req.EventType = strings.TrimSpace(req.EventType)
+	if req.EventType == "" {
+		return 0, fmt.Errorf("event_type is required")
+	}
+	timestamp := time.Now().UTC()
+	if parsed := parseAPITime(req.Timestamp); !parsed.IsZero() {
+		timestamp = parsed
+	}
+	in := audit.RuntimeEventInput{
+		EventType:        req.EventType,
+		EventSource:      audit.RuntimeSourceOSSensor,
+		CanonicalAgentID: req.AgentID,
+		AgentName:        req.AgentName,
+		SessionID:        req.SessionID,
+		TraceID:          req.TraceID,
+		PID:              req.PID,
+		PPID:             req.PPID,
+		AgentExecutable:  req.AgentExecutable,
+		ActorPID:         req.ActorPID,
+		ActorExecutable:  req.ActorExecutable,
+		AgentInstanceID:  req.AgentInstanceID,
+		Path:             req.Path,
+		Action:           req.Action,
+		Operation:        req.Operation,
+		Target:           truncate(redaction.ForSinkString(firstNonEmpty(req.Target, req.Path, req.Command)), 300),
+		ToolName:         req.ToolName,
+		Severity:         strings.ToUpper(req.Severity),
+		Outcome:          firstNonEmpty(req.Outcome, "observed"),
+		Detail:           truncate(redaction.ForSinkString(req.Detail), 300),
+		Timestamp:        timestamp,
+	}
+	if len(req.Metadata) > 0 {
+		in.Attributes = req.Metadata
+	}
+	eventID, err := store.RecordRuntimeEvent(in)
+	if err != nil {
+		return 0, err
+	}
+	if engine := activeDetectionEngine(); engine != nil {
+		engine.EvaluateEvent(eventID)
+	}
+	return eventID, nil
+}
+
+// Legacy implementation retained as a compatibility reference while callers
+// use the normalized helper above.
+func (a *APIServer) handleRuntimeEventsPostLegacy(w http.ResponseWriter, r *http.Request) {
 	store := activeRuntimeEventStore()
 	if store == nil {
 		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime event store unavailable"})

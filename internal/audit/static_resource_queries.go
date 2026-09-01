@@ -111,6 +111,18 @@ type StaticResourceDetail struct {
 	ScanCapabilities []StaticResourceCapability `json:"scan_capabilities,omitempty"`
 }
 
+// StaticResourceRelation is a deterministic, explainable relationship
+// between two resources. It deliberately exposes the relation type so an
+// empty result is not confused with an unsupported graph.
+type StaticResourceRelation struct {
+	ResourceID   string `json:"resource_id"`
+	Name         string `json:"name"`
+	ResourceType string `json:"resource_type"`
+	RelationType string `json:"relation_type"`
+	RiskLevel    string `json:"risk_level"`
+	Malicious    bool   `json:"malicious"`
+}
+
 // StaticResourceAgentRef identifies the owning agent on detail payloads.
 type StaticResourceAgentRef struct {
 	AgentID   string `json:"agent_id"`
@@ -471,6 +483,44 @@ WHERE r.id = ? AND COALESCE(r."delete", 0) = 0`, resourceID)
 		d.ScanCapabilities = caps
 	}
 	return &d, nil
+}
+
+// ListStaticResourceRelations returns related resources using persisted
+// ownership and target identity. Same-agent resources are the strongest
+// relation; resources sharing a canonical target are marked as aliases.
+func (s *Store) ListStaticResourceRelations(resourceID string, limit int) ([]StaticResourceRelation, error) {
+	if s == nil || s.db == nil || strings.TrimSpace(resourceID) == "" {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := s.queryDB(context.Background(), "static_resource_relations", `
+SELECT r.id, COALESCE(r.name, ''), COALESCE(r.resource_type, ''),
+       CASE WHEN r.canonical_agent_id = base.canonical_agent_id THEN 'same_agent' ELSE 'same_target' END,
+       COALESCE(r.risk_level, 'clean'), COALESCE(r.malicious, 0)
+FROM static_resources r
+JOIN static_resources base ON base.id = ? AND COALESCE(base."delete", 0) = 0
+WHERE r.id <> base.id AND COALESCE(r."delete", 0) = 0
+  AND (r.canonical_agent_id = base.canonical_agent_id OR (COALESCE(r.target, '') <> '' AND r.target = base.target))
+ORDER BY CASE WHEN r.canonical_agent_id = base.canonical_agent_id THEN 0 ELSE 1 END,
+         r.last_seen_at DESC, r.id
+LIMIT ?`, resourceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StaticResourceRelation
+	for rows.Next() {
+		var row StaticResourceRelation
+		var malicious int
+		if err := rows.Scan(&row.ResourceID, &row.Name, &row.ResourceType, &row.RelationType, &row.RiskLevel, &malicious); err != nil {
+			return nil, err
+		}
+		row.Malicious = malicious != 0
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 // listProfileCapabilities resolves the security capabilities configured on

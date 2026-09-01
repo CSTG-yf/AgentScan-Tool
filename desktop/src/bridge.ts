@@ -214,17 +214,18 @@ export async function getStaticResourceRelations(resourceId: string): Promise<St
   return invoke<StaticResourceRelationsResponse>("get_static_resource_relations", { resourceId });
 }
 
-export async function triggerStaticResourceScan(resourceId: string): Promise<StaticResourceScanAccepted> {
-  return invoke<StaticResourceScanAccepted>("trigger_static_resource_scan", { resourceId });
+export async function triggerStaticResourceScan(resourceId: string, idempotencyKey?: string): Promise<StaticResourceScanAccepted> {
+  return invoke<StaticResourceScanAccepted>("trigger_static_resource_scan", { resourceId, idempotencyKey });
 }
 
-export async function triggerStaticResourceRescan(agentId?: string): Promise<StaticResourceScanAccepted> {
-  return invoke<StaticResourceScanAccepted>("trigger_static_resource_rescan", { agentId: agentId ?? null });
+export async function triggerStaticResourceRescan(agentId?: string, idempotencyKey?: string): Promise<StaticResourceScanAccepted> {
+  return invoke<StaticResourceScanAccepted>("trigger_static_resource_rescan", { agentId: agentId ?? null, idempotencyKey });
 }
 
 export async function getScanStatus(scanId: string): Promise<StaticResourceScanAccepted> {
   if (!inTauri()) return { scan_id: scanId, status: "preview", progress: 0 };
-  return invoke<StaticResourceScanAccepted>("get_scan_status", { scanId });
+  const status = await invoke<StaticResourceScanAccepted>("get_scan_status", { scanId });
+  return { ...status, scan_id: status.scan_id ?? status.job_id, job_id: status.job_id ?? status.scan_id, type: status.type ?? status.kind };
 }
 
 export interface RuntimeEventReplayScope {
@@ -237,18 +238,20 @@ export interface RuntimeEventReplayScope {
 
 export async function createRuntimeEventReplay(scope: RuntimeEventReplayScope = {}): Promise<StaticResourceScanAccepted> {
   if (!inTauri()) return { status: "preview", progress: 0 };
-  return invoke<StaticResourceScanAccepted>("create_event_replay_job", {
+  const status = await invoke<StaticResourceScanAccepted>("create_event_replay_job", {
     agentId: scope.agentId,
     sessionId: scope.sessionId,
     traceId: scope.traceId,
     startTime: scope.startTime,
     endTime: scope.endTime,
   });
+  return { ...status, scan_id: status.scan_id ?? status.job_id, job_id: status.job_id ?? status.scan_id, type: status.type ?? status.kind };
 }
 
 export async function createAttackChainRebuildJob(limit = 5000): Promise<StaticResourceScanAccepted> {
   if (!inTauri()) return { status: "preview", progress: 0 };
-  return invoke<StaticResourceScanAccepted>("create_attack_chain_rebuild_job", { limit });
+  const status = await invoke<StaticResourceScanAccepted>("create_attack_chain_rebuild_job", { limit });
+  return { ...status, scan_id: status.scan_id ?? status.job_id, job_id: status.job_id ?? status.scan_id, type: status.type ?? status.kind };
 }
 
 export async function getChanges(cursor = 0, domains?: string[]): Promise<ChangeCursor> {
@@ -726,14 +729,19 @@ export async function setRuntimeSecurityMode(mode: RuntimeSecurityMode): Promise
   return invoke<RuntimeSecurityMode>("set_runtime_security_mode", { mode });
 }
 
-export async function blockRuntimeDetection(detectionId: string, actionType = "BLOCK", reason = "manual_operator_action"): Promise<RuntimeEnforcementResult> {
-  if (!inTauri()) return { status: "preview" };
-  return invoke<RuntimeEnforcementResult>("block_runtime_detection", { detectionId, actionType, reason });
+export interface RuntimeEnforcementOptions {
+  preview?: boolean;
+  idempotencyKey?: string;
 }
 
-export async function enforceRuntimeDecision(decisionId: string): Promise<RuntimeEnforcementResult> {
+export async function blockRuntimeDetection(detectionId: string, actionType?: string, reason = "manual_operator_action", options: RuntimeEnforcementOptions = {}): Promise<RuntimeEnforcementResult> {
   if (!inTauri()) return { status: "preview" };
-  return invoke<RuntimeEnforcementResult>("enforce_runtime_decision", { decisionId });
+  return invoke<RuntimeEnforcementResult>("block_runtime_detection", { detectionId, actionType, reason, preview: options.preview, idempotencyKey: options.idempotencyKey });
+}
+
+export async function enforceRuntimeDecision(decisionId: string, options: RuntimeEnforcementOptions = {}): Promise<RuntimeEnforcementResult> {
+  if (!inTauri()) return { status: "preview" };
+  return invoke<RuntimeEnforcementResult>("enforce_runtime_decision", { decisionId, preview: options.preview, idempotencyKey: options.idempotencyKey });
 }
 
 export async function getRuntimeEnforcements(): Promise<RuntimeEnforcementListResponse> {
@@ -779,9 +787,15 @@ export async function getAgents(query: AgentListQuery = {}): Promise<AgentSnapsh
   return invoke<AgentSnapshot>("get_agents", { query });
 }
 
-export async function triggerAgentScan(mode = "full"): Promise<StaticResourceScanAccepted> {
+export async function rollbackRuntimeEnforcement(enforcementId: string): Promise<RuntimeEnforcementResult> {
+  if (!inTauri()) return { status: "preview", removed: 0 };
+  return invoke<RuntimeEnforcementResult>("rollback_runtime_enforcement", { enforcementId });
+}
+
+export async function triggerAgentScan(mode = "full", idempotencyKey?: string): Promise<StaticResourceScanAccepted> {
   if (!inTauri()) return { status: "preview", progress: 0 };
-  return invoke<StaticResourceScanAccepted>("trigger_agent_scan", { mode });
+  const status = await invoke<StaticResourceScanAccepted>("trigger_agent_scan", { mode, idempotencyKey });
+  return { ...status, scan_id: status.scan_id ?? status.job_id, job_id: status.job_id ?? status.scan_id, type: status.type ?? status.kind };
 }
 
 export async function getAgentDetail(agentId: string): Promise<AgentInventory> {

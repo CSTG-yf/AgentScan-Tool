@@ -91,6 +91,8 @@ type APIServer struct {
 	staticRescan  func(agentID string) error
 	scanStatusMu  sync.RWMutex
 	scanStatuses  map[string]apiScanStatus
+	scanCancelMu  sync.Mutex
+	scanCancels   map[string]context.CancelFunc
 
 	// otlpPathTokenMu guards otlpPathTokens — the in-memory map of
 	// per-source OTLP path tokens loaded from

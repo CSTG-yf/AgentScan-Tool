@@ -36,6 +36,12 @@ pub struct RuntimeDecision {
     pub(crate) mode: String,
     #[serde(default, alias = "would_block")]
     pub(crate) would_block: bool,
+    #[serde(default, alias = "idempotency_key")]
+    pub(crate) idempotency_key: String,
+    #[serde(default)]
+    pub(crate) source: String,
+    #[serde(default, alias = "policy_version")]
+    pub(crate) policy_version: String,
     #[serde(default, alias = "created_at")]
     pub(crate) created_at: String,
 }
@@ -98,6 +104,8 @@ pub struct RuntimeResponseAction {
     pub(crate) status: String,
     #[serde(default)]
     pub(crate) result: String,
+    #[serde(default, alias = "rollback_supported")]
+    pub(crate) rollback_supported: bool,
     #[serde(default, alias = "executed_at")]
     pub(crate) executed_at: String,
 }
@@ -231,10 +239,24 @@ pub fn block_runtime_detection(
     detection_id: String,
     action_type: Option<String>,
     reason: Option<String>,
+    preview: Option<bool>,
+    idempotency_key: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let detection_id = detection_id.trim();
     if detection_id.is_empty() {
         return Err("detection_id 不能为空".to_owned());
+    }
+    let mut body = serde_json::json!({
+        "reason": reason.unwrap_or_else(|| "manual_operator_action".to_owned()),
+    });
+    if let Some(action_type) = action_type.filter(|value| !value.trim().is_empty()) {
+        body["action_type"] = serde_json::Value::String(action_type);
+    }
+    if preview.unwrap_or(false) {
+        body["preview"] = serde_json::Value::Bool(true);
+    }
+    if let Some(key) = idempotency_key.filter(|value| !value.trim().is_empty()) {
+        body["idempotency_key"] = serde_json::Value::String(key);
     }
     crate::commands::gateway_api::post_json::<serde_json::Value, _>(
         &app,
@@ -242,10 +264,7 @@ pub fn block_runtime_detection(
             "/api/v1/runtime-detections/{}/actions/block",
             urlencode(detection_id)
         ),
-        &serde_json::json!({
-            "action_type": action_type.unwrap_or_else(|| "BLOCK".to_owned()),
-            "reason": reason.unwrap_or_else(|| "manual_operator_action".to_owned()),
-        }),
+        &body,
     )
     .map_err(|error| format!("执行运行时检测阻断失败：{error}"))
 }
@@ -254,10 +273,19 @@ pub fn block_runtime_detection(
 pub fn enforce_runtime_decision(
     app: tauri::AppHandle,
     decision_id: String,
+    preview: Option<bool>,
+    idempotency_key: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let decision_id = decision_id.trim();
     if decision_id.is_empty() {
         return Err("decision_id 不能为空".to_owned());
+    }
+    let mut body = serde_json::json!({});
+    if preview.unwrap_or(false) {
+        body["preview"] = serde_json::Value::Bool(true);
+    }
+    if let Some(key) = idempotency_key.filter(|value| !value.trim().is_empty()) {
+        body["idempotency_key"] = serde_json::Value::String(key);
     }
     crate::commands::gateway_api::post_json::<serde_json::Value, _>(
         &app,
@@ -265,9 +293,29 @@ pub fn enforce_runtime_decision(
             "/api/v1/runtime-decisions/{}/enforce",
             urlencode(decision_id)
         ),
-        &serde_json::json!({}),
+        &body,
     )
     .map_err(|error| format!("执行运行时决策失败：{error}"))
+}
+
+#[tauri::command]
+pub fn rollback_runtime_enforcement(
+    app: tauri::AppHandle,
+    enforcement_id: String,
+) -> Result<serde_json::Value, String> {
+    let enforcement_id = enforcement_id.trim();
+    if enforcement_id.is_empty() {
+        return Err("enforcement_id 不能为空".to_owned());
+    }
+    crate::commands::gateway_api::post_json::<serde_json::Value, _>(
+        &app,
+        &format!(
+            "/api/v1/enforcements/{}/rollback",
+            urlencode(enforcement_id)
+        ),
+        &serde_json::json!({}),
+    )
+    .map_err(|error| format!("回滚运行时阻断失败：{error}"))
 }
 
 #[tauri::command]

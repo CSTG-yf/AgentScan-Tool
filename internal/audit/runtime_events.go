@@ -96,14 +96,14 @@ type RuntimeEventInput struct {
 	ParentSpanID     string
 
 	// Process identity when observable.
-	PID              uint32
-	PPID             uint32
-	AgentExecutable  string
-	ActorPID         uint32
-	ActorExecutable  string
-	AgentInstanceID  string
-	Path             string
-	Action           string
+	PID             uint32
+	PPID            uint32
+	AgentExecutable string
+	ActorPID        uint32
+	ActorExecutable string
+	AgentInstanceID string
+	Path            string
+	Action          string
 
 	// What happened, on what.
 	Operation string
@@ -226,9 +226,12 @@ INSERT INTO behavior_events (
 		nullStr(in.SpanID),
 		nullStr(in.ParentSpanID),
 		in.PID,
-		nullStr(in.AgentExecutable),
+		// The legacy behavior_events schema declares executable columns
+		// NOT NULL. Preserve an empty string when the sensor did not expose
+		// process metadata instead of binding SQL NULL.
+		in.AgentExecutable,
 		in.ActorPID,
-		nullStr(in.ActorExecutable),
+		in.ActorExecutable,
 		nullStr(in.Path),
 		nullStr(in.Action),
 		in.PPID,
@@ -522,8 +525,8 @@ type RuntimeEventFilter struct {
 	// IncludeDesktop includes legacy desktop-behavior rows. Normal page
 	// timelines omit them, while historical replay can opt in explicitly.
 	IncludeDesktop bool
-	Offset        int
-	Limit         int
+	Offset         int
+	Limit          int
 }
 
 func runtimeEventWhereClause(f RuntimeEventFilter) (string, []any) {

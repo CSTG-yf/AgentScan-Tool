@@ -36,25 +36,27 @@ const (
 // behavior_events answers "发生了什么？" — a detection is the risk
 // verdict derived from one or more events by a generic detection rule.
 type RuntimeDetection struct {
-	DetectionID   string         `json:"detection_id"`
-	AgentID       string         `json:"agent_id"`
-	AgentName     string         `json:"agent_name,omitempty"`
-	SessionID     string         `json:"session_id,omitempty"`
-	TraceID       string         `json:"trace_id,omitempty"`
-	DetectionType string         `json:"detection_type"`
-	Category      string         `json:"category"`
-	Severity      string         `json:"severity"`
-	Confidence    float64        `json:"confidence"`
-	RuleID        string         `json:"rule_id"`
-	RuleVersion   string         `json:"rule_version,omitempty"`
-	Status        string         `json:"status"`
-	Title         string         `json:"title"`
-	Detail        string         `json:"detail,omitempty"`
-	Remediation   string         `json:"remediation,omitempty"`
-	Attributes    map[string]any `json:"attributes,omitempty"`
-	FirstSeenAt   time.Time      `json:"first_seen_at"`
-	LastSeenAt    time.Time      `json:"last_seen_at"`
-	EventCount    int            `json:"event_count"`
+	DetectionID     string         `json:"detection_id"`
+	AgentID         string         `json:"agent_id"`
+	AgentName       string         `json:"agent_name,omitempty"`
+	SessionID       string         `json:"session_id,omitempty"`
+	TraceID         string         `json:"trace_id,omitempty"`
+	DetectionType   string         `json:"detection_type"`
+	Category        string         `json:"category"`
+	Severity        string         `json:"severity"`
+	Confidence      float64        `json:"confidence"`
+	RuleID          string         `json:"rule_id"`
+	RuleVersion     string         `json:"rule_version,omitempty"`
+	Source          string         `json:"source,omitempty"`
+	EvaluationJobID string         `json:"evaluation_job_id,omitempty"`
+	Status          string         `json:"status"`
+	Title           string         `json:"title"`
+	Detail          string         `json:"detail,omitempty"`
+	Remediation     string         `json:"remediation,omitempty"`
+	Attributes      map[string]any `json:"attributes,omitempty"`
+	FirstSeenAt     time.Time      `json:"first_seen_at"`
+	LastSeenAt      time.Time      `json:"last_seen_at"`
+	EventCount      int            `json:"event_count"`
 }
 
 // DetectionEvidenceLink binds one behavior event to a detection.
@@ -76,20 +78,22 @@ type DetectionEvidence struct {
 
 // RuntimeDetectionInput is the detection engine's write shape.
 type RuntimeDetectionInput struct {
-	AgentID       string
-	AgentName     string
-	SessionID     string
-	TraceID       string
-	DetectionType string
-	Category      string
-	Severity      string
-	Confidence    float64
-	RuleID        string
-	RuleVersion   string
-	Title         string
-	Detail        string
-	Remediation   string
-	Attributes    map[string]any
+	AgentID         string
+	AgentName       string
+	SessionID       string
+	TraceID         string
+	DetectionType   string
+	Category        string
+	Severity        string
+	Confidence      float64
+	RuleID          string
+	RuleVersion     string
+	Source          string
+	EvaluationJobID string
+	Title           string
+	Detail          string
+	Remediation     string
+	Attributes      map[string]any
 	// Evidence events supporting this detection, in chain order. Must
 	// reference behavior_events.id rows that already exist.
 	Evidence []DetectionEvidenceInput
@@ -129,6 +133,13 @@ func (s *Store) RecordRuntimeDetection(in RuntimeDetectionInput) (RuntimeDetecti
 	}
 	if in.RuleID == "" {
 		in.RuleID = in.DetectionType
+	}
+	if strings.TrimSpace(in.Source) == "" {
+		if value, ok := in.Attributes["source"].(string); ok && strings.TrimSpace(value) != "" {
+			in.Source = strings.TrimSpace(value)
+		} else {
+			in.Source = "runtime_detection"
+		}
 	}
 	if in.Category == "" {
 		in.Category = "suspicious"
@@ -185,12 +196,16 @@ UPDATE runtime_detections
 SET last_seen_at = ?, severity = ?, confidence = ?,
     status = ?, event_count = ?,
     rule_version = CASE WHEN ? != '' THEN ? ELSE rule_version END,
+    source = CASE WHEN ? != '' THEN ? ELSE source END,
+    evaluation_job_id = CASE WHEN ? != '' THEN ? ELSE evaluation_job_id END,
     detail = CASE WHEN ? != '' THEN ? ELSE detail END,
     trace_id = COALESCE(NULLIF(?, ''), trace_id)
 WHERE detection_id = ?`,
 			nowStr, strings.ToUpper(newSeverity), confidence,
 			in.detectionStatusFromEvidence(status), eventCount,
 			in.RuleVersion, in.RuleVersion,
+			in.Source, in.Source,
+			in.EvaluationJobID, in.EvaluationJobID,
 			in.Detail, in.Detail,
 			in.TraceID,
 			existingID,
@@ -221,12 +236,12 @@ WHERE detection_id = ?`,
 INSERT INTO runtime_detections (
   detection_id, agent_id, agent_name, session_id, trace_id,
   detection_type, category, severity, confidence, rule_id, status,
-  rule_version, title, detail, remediation, attributes_json,
+  rule_version, source, evaluation_job_id, title, detail, remediation, attributes_json,
   first_seen_at, last_seen_at, event_count
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		detectionID, in.AgentID, nullStr(in.AgentName), nullStr(in.SessionID), nullStr(in.TraceID),
 		in.DetectionType, in.Category, strings.ToUpper(in.Severity), in.Confidence, in.RuleID,
-		in.detectionStatusFromEvidence(RuntimeDetectionStatusOpen), in.RuleVersion,
+		in.detectionStatusFromEvidence(RuntimeDetectionStatusOpen), in.RuleVersion, in.Source, in.EvaluationJobID,
 		in.Title, nullStr(in.Detail), nullStr(in.Remediation), nullStr(attrsJSON),
 		nowStr, nowStr, len(in.Evidence),
 	); err != nil {
@@ -281,25 +296,27 @@ VALUES (?, ?, ?, ?, ?)`,
 
 func (in RuntimeDetectionInput) toDetection(detectionID string) RuntimeDetection {
 	return RuntimeDetection{
-		DetectionID:   detectionID,
-		AgentID:       in.AgentID,
-		AgentName:     in.AgentName,
-		SessionID:     in.SessionID,
-		TraceID:       in.TraceID,
-		DetectionType: in.DetectionType,
-		Category:      in.Category,
-		Severity:      strings.ToUpper(in.Severity),
-		Confidence:    in.Confidence,
-		RuleID:        in.RuleID,
-		RuleVersion:   in.RuleVersion,
-		Status:        in.detectionStatusFromEvidence(RuntimeDetectionStatusOpen),
-		Title:         in.Title,
-		Detail:        in.Detail,
-		Remediation:   in.Remediation,
-		Attributes:    in.Attributes,
-		FirstSeenAt:   in.SeenAt,
-		LastSeenAt:    in.SeenAt,
-		EventCount:    len(in.Evidence),
+		DetectionID:     detectionID,
+		AgentID:         in.AgentID,
+		AgentName:       in.AgentName,
+		SessionID:       in.SessionID,
+		TraceID:         in.TraceID,
+		DetectionType:   in.DetectionType,
+		Category:        in.Category,
+		Severity:        strings.ToUpper(in.Severity),
+		Confidence:      in.Confidence,
+		RuleID:          in.RuleID,
+		RuleVersion:     in.RuleVersion,
+		Source:          in.Source,
+		EvaluationJobID: in.EvaluationJobID,
+		Status:          in.detectionStatusFromEvidence(RuntimeDetectionStatusOpen),
+		Title:           in.Title,
+		Detail:          in.Detail,
+		Remediation:     in.Remediation,
+		Attributes:      in.Attributes,
+		FirstSeenAt:     in.SeenAt,
+		LastSeenAt:      in.SeenAt,
+		EventCount:      len(in.Evidence),
 	}
 }
 
@@ -312,6 +329,7 @@ type RuntimeDetectionFilter struct {
 	Category      string
 	Severity      string
 	Status        string
+	Source        string
 	Keyword       string
 	StartTime     time.Time
 	EndTime       time.Time
@@ -355,6 +373,23 @@ func runtimeDetectionWhereClause(f RuntimeDetectionFilter) (string, []any) {
 	}
 	if values := runtimeDetectionFilterValues(f.Status, strings.ToLower); len(values) > 0 {
 		conds = append(conds, "LOWER(status) IN ("+runtimeDetectionPlaceholders(len(values))+")")
+		for _, value := range values {
+			args = append(args, value)
+		}
+	}
+	if values := runtimeDetectionFilterValues(f.Source, strings.ToLower); len(values) > 0 {
+		// New rows persist source directly. The JSON fallback keeps filters
+		// useful for rows written before the source column was introduced.
+		placeholders := runtimeDetectionPlaceholders(len(values))
+		correlationFallback := "(COALESCE(source, '') = '' AND (event_count > 1 OR LOWER(detection_type) LIKE '%exfiltration%' OR LOWER(detection_type) LIKE '%exploit%') AND 'correlation_engine' IN (" + placeholders + "))"
+		runtimeFallback := "(COALESCE(source, '') = '' AND event_count <= 1 AND 'runtime_detection' IN (" + placeholders + "))"
+		conds = append(conds, "(LOWER(COALESCE(source, '')) IN ("+placeholders+") OR "+correlationFallback+" OR "+runtimeFallback+")")
+		for _, value := range values {
+			args = append(args, value)
+		}
+		for _, value := range values {
+			args = append(args, value)
+		}
 		for _, value := range values {
 			args = append(args, value)
 		}
@@ -459,7 +494,7 @@ func (s *Store) ListRuntimeDetections(f RuntimeDetectionFilter) ([]RuntimeDetect
 	rows, err := s.queryDB(context.Background(), "runtime_detections_list", `
 SELECT detection_id, agent_id, COALESCE(agent_name, ''), COALESCE(session_id, ''),
        COALESCE(trace_id, ''), detection_type, category, severity, confidence,
-       rule_id, COALESCE(rule_version, ''), status, title, COALESCE(detail, ''), COALESCE(remediation, ''),
+       rule_id, COALESCE(rule_version, ''), COALESCE(source, ''), COALESCE(evaluation_job_id, ''), status, title, COALESCE(detail, ''), COALESCE(remediation, ''),
        COALESCE(attributes_json, ''), first_seen_at, last_seen_at, event_count
 FROM runtime_detections
 `+where+`
@@ -482,7 +517,7 @@ LIMIT ? OFFSET ?`, args...)
 		)
 		if err := rows.Scan(
 			&d.DetectionID, &d.AgentID, &d.AgentName, &d.SessionID, &d.TraceID,
-			&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID, &d.RuleVersion,
+			&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID, &d.RuleVersion, &d.Source, &d.EvaluationJobID,
 			&d.Status, &d.Title, &d.Detail, &d.Remediation, &attrs,
 			&firstSeen, &lastSeen, &eventCount,
 		); err != nil {
@@ -625,12 +660,12 @@ func (s *Store) GetRuntimeDetectionDetail(detectionID string) (RuntimeDetection,
 	err := s.db.QueryRowContext(context.Background(), `
 SELECT detection_id, agent_id, COALESCE(agent_name, ''), COALESCE(session_id, ''),
        COALESCE(trace_id, ''), detection_type, category, severity, confidence,
-       rule_id, COALESCE(rule_version, ''), status, title, COALESCE(detail, ''), COALESCE(remediation, ''),
+       rule_id, COALESCE(rule_version, ''), COALESCE(source, ''), COALESCE(evaluation_job_id, ''), status, title, COALESCE(detail, ''), COALESCE(remediation, ''),
        COALESCE(attributes_json, ''), first_seen_at, last_seen_at, event_count
 FROM runtime_detections WHERE detection_id = ? AND "delete" = 0`, detectionID,
 	).Scan(
 		&d.DetectionID, &d.AgentID, &d.AgentName, &d.SessionID, &d.TraceID,
-		&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID, &d.RuleVersion,
+		&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID, &d.RuleVersion, &d.Source, &d.EvaluationJobID,
 		&d.Status, &d.Title, &d.Detail, &d.Remediation, &attrs,
 		&firstSeen, &lastSeen, &eventCount,
 	)
@@ -742,7 +777,7 @@ func (s *Store) DetectionIDsForEvents(eventIDs []int64) (map[int64][]RuntimeDete
 SELECT l.event_id,
        d.detection_id, d.agent_id, COALESCE(d.agent_name, ''), COALESCE(d.session_id, ''),
        COALESCE(d.trace_id, ''), d.detection_type, d.category, d.severity, d.confidence,
-       d.rule_id, COALESCE(d.rule_version, ''), d.status, d.title, COALESCE(d.detail, ''), COALESCE(d.remediation, ''),
+       d.rule_id, COALESCE(d.rule_version, ''), COALESCE(d.source, ''), COALESCE(d.evaluation_job_id, ''), d.status, d.title, COALESCE(d.detail, ''), COALESCE(d.remediation, ''),
        '' AS attributes, d.first_seen_at, d.last_seen_at, d.event_count
 FROM runtime_detection_events l
 JOIN runtime_detections d ON d.detection_id = l.detection_id
@@ -764,7 +799,7 @@ WHERE l."delete" = 0 AND d."delete" = 0 AND l.event_id IN (`+strings.Join(placeh
 		if err := rows.Scan(
 			&eventID,
 			&d.DetectionID, &d.AgentID, &d.AgentName, &d.SessionID, &d.TraceID,
-			&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID, &d.RuleVersion,
+			&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID, &d.RuleVersion, &d.Source, &d.EvaluationJobID,
 			&d.Status, &d.Title, &d.Detail, &d.Remediation,
 			&firstSeen, &lastSeen, &eventCount,
 		); err != nil {

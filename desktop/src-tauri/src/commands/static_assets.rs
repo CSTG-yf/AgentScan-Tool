@@ -150,11 +150,12 @@ pub fn get_static_resource_relations(
 pub fn trigger_static_resource_scan(
     app: tauri::AppHandle,
     resource_id: String,
+    idempotency_key: Option<String>,
 ) -> Result<Value, String> {
     crate::commands::gateway_api::post_json::<Value, Value>(
         &app,
         &format!("/api/v1/static-resources/{}/scan", urlencode(&resource_id)),
-        &serde_json::json!({}),
+        &serde_json::json!({"idempotency_key": idempotency_key}),
     )
     .map_err(|error| format!("触发资源扫描失败：{error}"))
 }
@@ -163,6 +164,7 @@ pub fn trigger_static_resource_scan(
 pub fn trigger_static_resource_rescan(
     app: tauri::AppHandle,
     agent_id: Option<String>,
+    idempotency_key: Option<String>,
 ) -> Result<Value, String> {
     let path = match agent_id
         .as_deref()
@@ -175,8 +177,12 @@ pub fn trigger_static_resource_rescan(
         ),
         None => "/api/v1/static-resources/rescan".to_owned(),
     };
-    crate::commands::gateway_api::post_json::<Value, Value>(&app, &path, &serde_json::json!({}))
-        .map_err(|error| format!("触发重新扫描失败：{error}"))
+    crate::commands::gateway_api::post_json::<Value, Value>(
+        &app,
+        &path,
+        &serde_json::json!({"agent_id": agent_id, "idempotency_key": idempotency_key}),
+    )
+    .map_err(|error| format!("触发重新扫描失败：{error}"))
 }
 
 #[tauri::command]

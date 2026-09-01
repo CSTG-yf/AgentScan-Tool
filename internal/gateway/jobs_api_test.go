@@ -5,6 +5,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -104,4 +105,43 @@ func TestChangesAPIProvidesCursorInvalidations(t *testing.T) {
 	if response.NextCursor <= 0 || len(response.ChangedDomains) != 1 || response.ChangedDomains[0] != "scan_jobs" {
 		t.Fatalf("changes response = %+v", response)
 	}
+}
+
+func TestStartAPIScanIdempotencyReturnsExistingDurableJob(t *testing.T) {
+	store, err := audit.NewStore(filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := store.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	started := make(chan struct{})
+	api := &APIServer{store: store}
+	first := api.startAPIScanWithOptions("event_replay", "full", "agent-a", "", "manual", map[string]any{"agent_id": "agent-a"}, "retry-key-1", func(ctx context.Context, _ string) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	<-started
+	second := api.startAPIScanWithOptions("event_replay", "full", "agent-a", "", "manual", map[string]any{"agent_id": "agent-a"}, "retry-key-1", func(context.Context, string) error {
+		t.Fatal("idempotent retry started a second worker")
+		return nil
+	})
+	if first.JobID == "" || second.JobID != first.JobID {
+		t.Fatalf("idempotent jobs = first=%+v second=%+v", first, second)
+	}
+	j := audit.ScanJobFilter{Kind: "event_replay", Limit: 10}
+	jobs, err := store.ListScanJobsFiltered(j)
+	if err != nil {
+		t.Fatalf("ListScanJobsFiltered: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].IdempotencyKey != "retry-key-1" {
+		t.Fatalf("durable jobs = %+v, want one idempotent job", jobs)
+	}
+	if _, ok, err := store.FindScanJobByIdempotencyKey("retry-key-1"); err != nil || !ok {
+		t.Fatalf("FindScanJobByIdempotencyKey: ok=%v err=%v", ok, err)
+	}
+	api.handleJobCancel(httptest.NewRecorder(), first.JobID)
 }

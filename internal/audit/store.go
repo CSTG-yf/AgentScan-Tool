@@ -2525,9 +2525,9 @@ WHERE id = ?`,
 			return seedRiskExplainModel(ex)
 		},
 	},
-		{
-			description: "durable scan jobs: explicit agent and resource scan lifecycle",
-			apply: func(ex dbExecer) error {
+	{
+		description: "durable scan jobs: explicit agent and resource scan lifecycle",
+		apply: func(ex dbExecer) error {
 			if _, err := ex.Exec(`
 			CREATE TABLE IF NOT EXISTS scan_jobs (
 				job_id TEXT PRIMARY KEY,
@@ -2575,6 +2575,19 @@ WHERE id = ?`,
 				"runtime_decisions", "runtime_response_actions", "runtime_attack_chains",
 				"runtime_attack_chain_events", "scan_jobs",
 			} {
+				// Some upgrade paths intentionally keep only a subset of the
+				// audit schema (for example an egress-only store). SQLite
+				// rejects CREATE TRIGGER ... ON a table that is absent, so
+				// install invalidation hooks only for tables present in this
+				// database. Future migrations that create one of these tables
+				// can add its hooks explicitly.
+				present, err := tableExists(ex, table)
+				if err != nil {
+					return err
+				}
+				if !present {
+					continue
+				}
 				for _, operation := range []string{"insert", "update", "delete"} {
 					trigger := fmt.Sprintf(`
 					CREATE TRIGGER IF NOT EXISTS change_log_%s_%s
@@ -2623,6 +2636,69 @@ WHERE id = ?`,
 			if !has {
 				if _, err := ex.Exec(`ALTER TABLE runtime_detections ADD COLUMN rule_version TEXT NOT NULL DEFAULT ''`); err != nil {
 					return fmt.Errorf("alter runtime_detections.rule_version: %w", err)
+				}
+			}
+			return nil
+		},
+	},
+	{
+		description: "runtime monitoring: durable job scope, idempotency, and execution provenance",
+		apply: func(ex dbExecer) error {
+			// Additive columns keep upgrades safe for stores created by older
+			// builds. Every field is optional at the SQL level and is filled by
+			// the new writers; old rows remain valid and readable.
+			type columnSpec struct {
+				table  string
+				column string
+				stmt   string
+			}
+			columns := []columnSpec{
+				{"scan_jobs", "trigger", `ALTER TABLE scan_jobs ADD COLUMN trigger TEXT NOT NULL DEFAULT 'manual'`},
+				{"scan_jobs", "scope_json", `ALTER TABLE scan_jobs ADD COLUMN scope_json TEXT`},
+				{"scan_jobs", "result_json", `ALTER TABLE scan_jobs ADD COLUMN result_json TEXT`},
+				{"scan_jobs", "phase", `ALTER TABLE scan_jobs ADD COLUMN phase TEXT NOT NULL DEFAULT ''`},
+				{"scan_jobs", "current", `ALTER TABLE scan_jobs ADD COLUMN current INTEGER NOT NULL DEFAULT 0`},
+				{"scan_jobs", "total", `ALTER TABLE scan_jobs ADD COLUMN total INTEGER NOT NULL DEFAULT 0`},
+				{"scan_jobs", "cancel_requested", `ALTER TABLE scan_jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0`},
+				{"scan_jobs", "idempotency_key", `ALTER TABLE scan_jobs ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT ''`},
+				{"runtime_detections", "source", `ALTER TABLE runtime_detections ADD COLUMN source TEXT NOT NULL DEFAULT ''`},
+				{"runtime_detections", "evaluation_job_id", `ALTER TABLE runtime_detections ADD COLUMN evaluation_job_id TEXT NOT NULL DEFAULT ''`},
+				{"runtime_decisions", "idempotency_key", `ALTER TABLE runtime_decisions ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT ''`},
+				{"runtime_decisions", "source", `ALTER TABLE runtime_decisions ADD COLUMN source TEXT NOT NULL DEFAULT 'automatic'`},
+				{"runtime_decisions", "policy_version", `ALTER TABLE runtime_decisions ADD COLUMN policy_version TEXT NOT NULL DEFAULT ''`},
+				{"runtime_response_actions", "rollback_supported", `ALTER TABLE runtime_response_actions ADD COLUMN rollback_supported INTEGER NOT NULL DEFAULT 0`},
+				{"runtime_attack_chains", "builder_version", `ALTER TABLE runtime_attack_chains ADD COLUMN builder_version TEXT NOT NULL DEFAULT ''`},
+				{"runtime_attack_chains", "policy_version", `ALTER TABLE runtime_attack_chains ADD COLUMN policy_version TEXT NOT NULL DEFAULT ''`},
+				{"runtime_attack_chains", "evaluation_job_id", `ALTER TABLE runtime_attack_chains ADD COLUMN evaluation_job_id TEXT NOT NULL DEFAULT ''`},
+			}
+			for _, spec := range columns {
+				present, err := tableExists(ex, spec.table)
+				if err != nil {
+					return err
+				}
+				if !present {
+					continue
+				}
+				has, err := hasColumnDB(ex, spec.table, spec.column)
+				if err != nil {
+					return err
+				}
+				if !has {
+					if _, err := ex.Exec(spec.stmt); err != nil {
+						return fmt.Errorf("alter %s.%s: %w", spec.table, spec.column, err)
+					}
+				}
+			}
+			for _, index := range []string{
+				`CREATE UNIQUE INDEX IF NOT EXISTS idx_scan_jobs_idempotency ON scan_jobs(idempotency_key) WHERE idempotency_key <> ''`,
+				`CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_decisions_idempotency ON runtime_decisions(idempotency_key) WHERE idempotency_key <> ''`,
+			} {
+				if _, err := ex.Exec(index); err != nil {
+					// A partial legacy store may not have one of these tables;
+					// the column loop above intentionally skipped it.
+					if !strings.Contains(strings.ToLower(err.Error()), "no such table") {
+						return err
+					}
 				}
 			}
 			return nil
@@ -3233,7 +3309,7 @@ var knownTables = map[string]bool{
 	"static_resources":      true,
 	"behavior_events":       true,
 	"app_settings":          true,
-	"scan_jobs":              true,
+	"scan_jobs":             true,
 	// v7 additions
 	"scan_findings":   true,
 	"activity_events": true,

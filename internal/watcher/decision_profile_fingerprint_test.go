@@ -6,7 +6,6 @@ package watcher
 
 import (
 	"testing"
-	"time"
 
 	"github.com/defenseclaw/defenseclaw/internal/audit"
 )
@@ -63,9 +62,9 @@ func TestScannerFingerprintChangesWhenDecisionProfilesChange(t *testing.T) {
 
 	w := New(cfg, nil, nil, store, nil, nil, nil, nil, nil)
 	evt := InstallEvent{
-		Type:             InstallPrompt,
-		Path:             "C:\\workspace\\prompt.md",
-		PreScanProfileID: pre.ID,
+		Type:              InstallPrompt,
+		Path:              "C:\\workspace\\prompt.md",
+		PreScanProfileID:  pre.ID,
 		PostScanProfileID: post.ID,
 	}
 	initial := w.scannerFingerprint(evt)

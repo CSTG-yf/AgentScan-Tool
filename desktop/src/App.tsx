@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { EyeInvisibleOutlined, EyeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, ReloadOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { Badge, Button, Layout, Menu, message, Modal, Segmented, Space, Tag, Tooltip, Typography } from "antd";
 import {
   applyProcessGuardPolicy,
   getAgents,
+  getChanges,
   getAgentTrace,
   getAttackChains,
   getEnvironment,
@@ -46,8 +47,6 @@ import type { AgentInventory, AgentSnapshot, AgentTraceSnapshot, AttackChainSnap
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title } = Typography;
-const scanTaskKeys: ScanTaskKey[] = ["environment", "agentDiscovery", "staticAssets", "behaviorTrace", "eventDetection", "processGuardAudit", "gatewayAudit", "rangeStatus"];
-
 export default function App() {
   const [active, setActive] = useState<PageKey>("overview");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -221,17 +220,37 @@ export default function App() {
     void bootstrap();
   }, []);
 
+  const changeCursorRef = useRef(0);
+
   useEffect(() => {
-    if (!scanSettings) return;
-
-    const timers = scanTaskKeys
-      .filter((task) => scanSettings[task].enabled)
-      .map((task) => window.setInterval(() => {
-        void refreshTask(task).catch((error) => console.warn(`scheduled ${task} refresh failed`, error));
-      }, scanSettings[task].intervalSec * 1000));
-
-    return () => timers.forEach((timer) => window.clearInterval(timer));
-  }, [scanSettings]);
+    let disposed = false;
+    let inFlight = false;
+    const syncChanges = async () => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+      try {
+        const changes = await getChanges(changeCursorRef.current, ["agents", "static_resources", "behavior_events", "runtime_detections", "runtime_decisions", "runtime_response_actions", "runtime_attack_chains", "scan_jobs"]);
+        if (disposed) return;
+        changeCursorRef.current = Math.max(changeCursorRef.current, changes.next_cursor || 0);
+        const domains = new Set(changes.changed_domains ?? []);
+        if (domains.has("agents") && (active === "agents" || active === "overview")) await refreshTask("agentDiscovery");
+        if (domains.has("static_resources") && (active === "staticAssets" || active === "overview")) setStaticRefreshTick((tick) => tick + 1);
+        const runtimeChanged = ["behavior_events", "runtime_detections", "runtime_decisions", "runtime_response_actions"].some((domain) => domains.has(domain));
+        if (runtimeChanged && (active === "events" || active === "overview")) setEventRefreshTick((tick) => tick + 1);
+        if (domains.has("runtime_attack_chains") && (active === "chain" || active === "overview")) await refreshAttackChains();
+      } catch (error) {
+        console.warn("change cursor sync failed", error);
+      } finally {
+        inFlight = false;
+      }
+    };
+    void syncChanges();
+    const timer = window.setInterval(() => void syncChanges(), 3000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [active]);
 
   useEffect(() => {
     if (active !== "range" && !replayStatus?.running) return;
@@ -248,7 +267,7 @@ export default function App() {
   }, [active, replayStatus?.running]);
 
   const readyCount = environment?.components.filter((item) => item.state === "ready").length ?? 0;
-  const totalCount = environment?.components.length ?? 4;
+  const totalCount = environment?.components.length ?? 3;
   const enabledRules = policy?.rules.filter((rule) => rule.enabled).length ?? 0;
   const guardComponent = environment?.components.find((component) => component.id === "processGuard");
   const guardEvents = useMemo(() => [...(audit?.events ?? [])].reverse(), [audit]);

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FilterOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Descriptions, Drawer, Empty, Input, Segmented, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
+import { Alert, Button, Card, Descriptions, Drawer, Empty, Input, Modal, Segmented, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   getRuntimeDetectionDetail,
   getRuntimeDetectionEvents,
   getRuntimeDetections,
   getRuntimeDecisions,
+  getRuntimeDecisionDetail,
   getRuntimeEventsTimeline,
   getRuntimeSecurityMode,
   getRuntimeSecurityAgents,
@@ -16,6 +17,7 @@ import {
   setRuntimeSecurityMode,
   createRuntimeEventReplay,
   getScanStatus,
+  rollbackRuntimeEnforcement,
 } from "../bridge";
 import { formatClock, formatTimestamp, staticRiskTag } from "../app/display";
 import { staticRiskMeta } from "../data/staticAssets";
@@ -26,6 +28,8 @@ import type {
   RuntimeDetectionListQuery,
   RuntimeDetectionListResponse,
   RuntimeDecisionRow,
+  RuntimeDecisionDetail,
+  RuntimeResponseAction,
   RuntimeEventsTimelineBucket,
   RuntimeSecurityMode,
   RuntimeSecurityAgent,
@@ -217,7 +221,9 @@ export function EventsPage({ loading = false, onRefresh, refreshNonce = 0 }: Eve
   const [runtimeMode, setRuntimeMode] = useState<RuntimeSecurityMode>("observe");
   const [runtimeModeLoading, setRuntimeModeLoading] = useState(false);
   const [decisions, setDecisions] = useState<RuntimeDecisionRow[]>([]);
+  const [decisionDetail, setDecisionDetail] = useState<RuntimeDecisionDetail>();
   const [actionLoading, setActionLoading] = useState(false);
+  const [rollbackLoading, setRollbackLoading] = useState<string>();
   const [replayLoading, setReplayLoading] = useState(false);
 
   const detections = useMemo(
@@ -360,14 +366,18 @@ export function EventsPage({ loading = false, onRefresh, refreshNonce = 0 }: Eve
     setDrawerOpen(true);
     setDetail(undefined);
     setDetailEvents([]);
+    setDecisionDetail(undefined);
     setDetailLoading(true);
     try {
-      const [nextDetail, events] = await Promise.all([
+      const linkedDecision = decisions.find((candidate) => candidate.decision.detectionId === detection.detectionId || candidate.detection?.detectionId === detection.detectionId)?.decision;
+      const [nextDetail, events, nextDecisionDetail] = await Promise.all([
         getRuntimeDetectionDetail(detection.detectionId),
         getRuntimeDetectionEvents(detection.detectionId),
+        linkedDecision?.decisionId ? getRuntimeDecisionDetail(linkedDecision.decisionId) : Promise.resolve(undefined),
       ]);
       setDetail(nextDetail);
       setDetailEvents(events.length ? events : nextDetail.evidence ?? []);
+      setDecisionDetail(nextDecisionDetail);
     } catch (error) {
       message.error(`读取检测证据失败：${String(error)}`);
     } finally {
@@ -413,19 +423,35 @@ export function EventsPage({ loading = false, onRefresh, refreshNonce = 0 }: Eve
   const blockSelectedDetection = async () => {
     if (!selectedDetectionId) return;
     setActionLoading(true);
+    const idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try {
-      const result = await blockRuntimeDetection(selectedDetectionId, undefined, "manual_operator_action");
-      if (result.status === "blocked") {
-        message.success("阻断已执行");
-      } else if (result.status === "dispatched") {
-        message.info("处置已记录并转交对应执行模块，检测保持待确认");
-      } else {
-        message.warning(`阻断未执行：${result.status || "unknown"}`);
-      }
-      await Promise.all([loadOverview(), loadSelectedData()]);
+      const preview = await blockRuntimeDetection(selectedDetectionId, undefined, "manual_operator_action", { preview: true, idempotencyKey });
+      const plan = (preview as { plan?: { enforcement_point?: string; action_type?: string; target?: string } }).plan;
+      Modal.confirm({
+        title: "确认执行运行时阻断？",
+        content: `执行点：${plan?.enforcement_point || "后端策略"}；动作：${plan?.action_type || "BLOCK"}；目标：${plan?.target || "由证据链确定"}。确认后会产生实际处置副作用。`,
+        okText: "确认阻断",
+        okButtonProps: { danger: true },
+        cancelText: "取消",
+        onCancel: () => setActionLoading(false),
+        onOk: async () => {
+          try {
+            const result = await blockRuntimeDetection(selectedDetectionId, undefined, "manual_operator_action", { idempotencyKey });
+            if (result.status === "blocked") message.success("阻断已执行");
+            else if (result.status === "dispatched") message.info("处置已转交执行模块，检测保持待确认");
+            else message.warning(`阻断未执行：${result.status || "unknown"}`);
+            await Promise.all([loadOverview(), loadSelectedData()]);
+            const decisionId = result.decision?.decisionId || selectedDecision?.decisionId;
+            if (decisionId) {
+              setDecisionDetail(await getRuntimeDecisionDetail(decisionId));
+            }
+          } finally {
+            setActionLoading(false);
+          }
+        },
+      });
     } catch (error) {
       message.error(`执行阻断失败：${String(error)}`);
-    } finally {
       setActionLoading(false);
     }
   };
@@ -443,10 +469,32 @@ export function EventsPage({ loading = false, onRefresh, refreshNonce = 0 }: Eve
         message.warning(`运行态决策未执行：${result.status || "unknown"}`);
       }
       await Promise.all([loadOverview(), loadSelectedData()]);
+      setDecisionDetail(await getRuntimeDecisionDetail(selectedDecision.decisionId));
     } catch (error) {
       message.error(`执行运行态决策失败：${String(error)}`);
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const rollbackResponse = async (response: RuntimeResponseAction) => {
+    const enforcementId = response.responseId || response.decisionId || response.target;
+    if (!enforcementId) return;
+    setRollbackLoading(enforcementId);
+    try {
+      const result = await rollbackRuntimeEnforcement(enforcementId);
+      if (result.status === "rolled_back") {
+        message.success("处置已回滚");
+      } else {
+        message.warning(`处置未回滚：${result.status || "unknown"}`);
+      }
+      const decisionId = selectedDecision?.decisionId || response.decisionId;
+      await Promise.all([loadOverview(), loadSelectedData()]);
+      if (decisionId) setDecisionDetail(await getRuntimeDecisionDetail(decisionId));
+    } catch (error) {
+      message.error(`回滚处置失败：${String(error)}`);
+    } finally {
+      setRollbackLoading(undefined);
     }
   };
 
@@ -712,6 +760,7 @@ export function EventsPage({ loading = false, onRefresh, refreshNonce = 0 }: Eve
         onClose={() => {
           setDrawerOpen(false);
           setSelectedDetectionId(undefined);
+          setDecisionDetail(undefined);
         }}
       >
         {selectedDetection ? (
@@ -736,6 +785,36 @@ export function EventsPage({ loading = false, onRefresh, refreshNonce = 0 }: Eve
                   “立即阻断”会创建人工 BLOCK 决策；只有后端返回 executed 时，检测才会标记为已阻断。
                 </Text>
               </div>
+            </Card>
+            <Card size="small" bordered={false} title={`处置执行记录 ${decisionDetail?.responses?.length ?? 0}`}>
+              {decisionDetail?.responses?.length ? (
+                <Space direction="vertical" size={10} style={{ width: "100%" }}>
+                  {decisionDetail.responses.map((response) => {
+                    const normalizedStatus = (response.status || "").toLowerCase();
+                    const canRollback = (response.rollbackSupported || response.executor === "proxy") && normalizedStatus === "executed";
+                    const responseKey = response.responseId || response.decisionId || response.target || normalizedStatus;
+                    return (
+                      <Card key={responseKey} size="small" type="inner">
+                        <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                          <Space wrap>
+                            <Tag color={normalizedStatus === "executed" ? "green" : normalizedStatus === "failed" ? "red" : "gold"}>{response.status || "unknown"}</Tag>
+                            <Tag>{response.executor || "未指定执行器"}</Tag>
+                            {response.actionType ? <Tag>{response.actionType}</Tag> : null}
+                            {response.rollbackSupported || response.executor === "proxy" ? <Tag color="blue">可回滚</Tag> : <Tag>不可回滚</Tag>}
+                          </Space>
+                          <Text type="secondary">目标：{response.target || "-"}</Text>
+                          <Text type="secondary">结果：{response.result || "-"}</Text>
+                          {canRollback ? (
+                            <Button size="small" danger loading={rollbackLoading === responseKey} onClick={() => void rollbackResponse(response)}>
+                              回滚处置
+                            </Button>
+                          ) : null}
+                        </Space>
+                      </Card>
+                    );
+                  })}
+                </Space>
+              ) : <Text type="secondary">尚无后端执行记录；仅在决策落地或手动处置后显示。</Text>}
             </Card>
             <Tabs
             items={[

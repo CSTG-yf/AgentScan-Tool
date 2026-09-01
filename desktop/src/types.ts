@@ -340,6 +340,7 @@ export interface RuntimeDetection {
   confidence?: number;
   ruleId?: string;
   ruleVersion?: string;
+  evaluationJobId?: string;
   status: string;
   title: string;
   description?: string;
@@ -523,6 +524,9 @@ export interface AttackChain {
   /** Phase-3 links to the structured detection and policy decision. */
   detectionId?: string;
   decisionId?: string;
+  builderVersion?: string;
+  policyVersion?: string;
+  evaluationJobId?: string;
 }
 
 export interface AttackChainSnapshot {
@@ -556,6 +560,9 @@ export interface RuntimeDecision {
   enforcementPoint?: string;
   mode?: string;
   wouldBlock?: boolean;
+  idempotencyKey?: string;
+  source?: string;
+  policyVersion?: string;
   createdAt?: string;
 }
 
@@ -590,6 +597,7 @@ export interface RuntimeResponseAction {
   target?: string;
   status: string;
   result?: string;
+  rollbackSupported?: boolean;
   executedAt?: string;
 }
 
@@ -635,6 +643,7 @@ export interface RuntimeEnforcementRecord {
   result?: string;
   added_at?: string;
   expires_at?: string;
+  rollback_supported?: boolean;
 }
 
 export interface RuntimeEnforcementListResponse {
@@ -886,13 +895,23 @@ export interface StaticResourceRelationsResponse {
 }
 
 export interface StaticResourceScanAccepted {
-  scan_id?: string;
+	job_id?: string;
+	scan_id?: string;
   resource_id?: string;
   agent_id?: string;
   status: string;
   progress?: number;
-  type?: string;
-  mode?: string;
+	type?: string;
+	kind?: string;
+	mode?: string;
+	trigger?: string;
+	phase?: string;
+	current?: number;
+	total?: number;
+	cancel_requested?: boolean;
+	idempotency_key?: string;
+	scope?: Record<string, unknown>;
+	result?: Record<string, unknown>;
   started_at?: string;
   finished_at?: string;
   error?: string;

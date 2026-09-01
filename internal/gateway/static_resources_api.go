@@ -5,8 +5,10 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -384,20 +386,22 @@ func (a *APIServer) serveStaticDirectoryContent(w http.ResponseWriter, resourceI
 }
 
 // handleStaticResourceRelations serves GET /api/v1/static-resources/{id}/relations.
-// Relation analysis is intentionally explicit until the graph builder is
-// available; an empty list alone would be indistinguishable from "no
-// relations" and would mislead operators.
+// Relationships are derived from persisted canonical ownership/target keys;
+// the endpoint always reports supported=true even when the result is empty.
 func (a *APIServer) handleStaticResourceRelations(w http.ResponseWriter, r *http.Request, resourceID string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{
-		"resource_id": resourceID,
-		"supported":   false,
-		"items":       []any{},
-		"reason":      "resource relation analysis is not available in this build",
-	})
+	items, err := a.store.ListStaticResourceRelations(resourceID, pageLimit(r, 50, 1, 200))
+	if err != nil {
+		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if items == nil {
+		items = []audit.StaticResourceRelation{}
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"resource_id": resourceID, "supported": true, "items": items})
 }
 
 // handleStaticResourceScan serves POST /api/v1/static-resources/{id}/scan —
@@ -405,6 +409,23 @@ func (a *APIServer) handleStaticResourceRelations(w http.ResponseWriter, r *http
 func (a *APIServer) handleStaticResourceScan(w http.ResponseWriter, r *http.Request, resourceID string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	idempotencyKey := requestIdempotencyKey(r)
+	if r.Body != nil {
+		var body struct {
+			IdempotencyKey string `json:"idempotency_key"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
+			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+		if idempotencyKey == "" {
+			idempotencyKey = strings.TrimSpace(body.IdempotencyKey)
+		}
+	}
+	if status, ok := a.existingScanStatusForKey(idempotencyKey); ok {
+		a.writeJSON(w, http.StatusAccepted, status)
 		return
 	}
 	scanOne, _ := a.staticScanTriggers()
@@ -416,10 +437,16 @@ func (a *APIServer) handleStaticResourceScan(w http.ResponseWriter, r *http.Requ
 		a.writeJSON(w, http.StatusConflict, map[string]string{"error": "another manual scan is already running"})
 		return
 	}
-	status := a.startAPIScan("static-resources", "resource", "", resourceID, func() error {
+	status := a.startAPIScanWithOptions("resource_scan", "resource", "", resourceID, "manual", nil, idempotencyKey, func(ctx context.Context, _ string) error {
 		defer staticScanInFlight.Store(false)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		return scanOne(resourceID)
 	})
+	if status.Status == "failed" {
+		staticScanInFlight.Store(false)
+	}
 	a.writeJSON(w, http.StatusAccepted, status)
 }
 
@@ -431,29 +458,47 @@ func (a *APIServer) handleStaticResourceRescan(w http.ResponseWriter, r *http.Re
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	agentID := ""
+	idempotencyKey := requestIdempotencyKey(r)
+	if r.Body != nil {
+		var body struct {
+			AgentID        string `json:"agent_id"`
+			IdempotencyKey string `json:"idempotency_key"`
+		}
+		dec := json.NewDecoder(r.Body)
+		if err := dec.Decode(&body); err == nil {
+			agentID = strings.TrimSpace(body.AgentID)
+			if idempotencyKey == "" {
+				idempotencyKey = strings.TrimSpace(body.IdempotencyKey)
+			}
+		} else if err != io.EOF {
+			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+	}
+	if status, ok := a.existingScanStatusForKey(idempotencyKey); ok {
+		a.writeJSON(w, http.StatusAccepted, status)
+		return
+	}
 	_, rescan := a.staticScanTriggers()
 	if rescan == nil {
 		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "watcher scan pipeline unavailable"})
 		return
 	}
-	agentID := ""
-	if r.Body != nil {
-		var body struct {
-			AgentID string `json:"agent_id"`
-		}
-		dec := json.NewDecoder(r.Body)
-		if err := dec.Decode(&body); err == nil {
-			agentID = strings.TrimSpace(body.AgentID)
-		}
-	}
 	if !staticScanInFlight.CompareAndSwap(false, true) {
 		a.writeJSON(w, http.StatusConflict, map[string]string{"error": "another manual scan is already running"})
 		return
 	}
-	status := a.startAPIScan("static-resources", "rescan", agentID, "", func() error {
+	status := a.startAPIScanWithOptions("resource_scan", "rescan", agentID, "", "manual", map[string]any{"agent_id": agentID}, idempotencyKey, func(ctx context.Context, _ string) error {
 		defer staticScanInFlight.Store(false)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		return rescan(agentID)
 	})
+	if status.Status == "failed" {
+		staticScanInFlight.Store(false)
+	}
 	a.writeJSON(w, http.StatusAccepted, status)
 }
 

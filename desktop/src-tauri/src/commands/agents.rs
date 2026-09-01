@@ -49,11 +49,12 @@ pub fn get_agents(app: tauri::AppHandle, query: Option<AgentListQuery>) -> Agent
 pub fn trigger_agent_scan(
     app: tauri::AppHandle,
     mode: Option<String>,
+    idempotency_key: Option<String>,
 ) -> Result<serde_json::Value, String> {
     crate::commands::gateway_api::post_json::<serde_json::Value, _>(
         &app,
         "/api/v1/scans/agents",
-        &serde_json::json!({"mode": mode.unwrap_or_else(|| "full".to_owned())}),
+        &serde_json::json!({"mode": mode.unwrap_or_else(|| "full".to_owned()), "idempotency_key": idempotency_key}),
     )
     .map_err(|error| format!("触发 Agent 发现扫描失败：{error}"))
 }

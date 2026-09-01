@@ -19,15 +19,18 @@ import (
 // endpoints remain compatibility aliases, while new UI actions use this
 // explicit task contract so a read never masquerades as a scan.
 type jobCreateRequest struct {
-	Kind       string `json:"kind"`
-	Mode       string `json:"mode,omitempty"`
-	AgentID    string `json:"agent_id,omitempty"`
-	ResourceID string `json:"resource_id,omitempty"`
-	SessionID  string `json:"session_id,omitempty"`
-	TraceID    string `json:"trace_id,omitempty"`
-	StartTime  string `json:"start_time,omitempty"`
-	EndTime    string `json:"end_time,omitempty"`
-	Limit      int    `json:"limit,omitempty"`
+	Kind           string         `json:"kind"`
+	Mode           string         `json:"mode,omitempty"`
+	Trigger        string         `json:"trigger,omitempty"`
+	Scope          map[string]any `json:"scope,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	AgentID        string         `json:"agent_id,omitempty"`
+	ResourceID     string         `json:"resource_id,omitempty"`
+	SessionID      string         `json:"session_id,omitempty"`
+	TraceID        string         `json:"trace_id,omitempty"`
+	StartTime      string         `json:"start_time,omitempty"`
+	EndTime        string         `json:"end_time,omitempty"`
+	Limit          int            `json:"limit,omitempty"`
 }
 
 // handleJobsAPI exposes the durable job surface. The old /scans routes call
@@ -78,23 +81,32 @@ func (a *APIServer) handleJobsList(w http.ResponseWriter, r *http.Request) {
 			offset = parsed
 		}
 	}
-	jobs, err := a.store.ListScanJobs(r.URL.Query().Get("kind"), r.URL.Query().Get("status"), limit, offset)
+	kind := r.URL.Query().Get("kind")
+	status := r.URL.Query().Get("status")
+	filter := audit.ScanJobFilter{Kind: kind, Status: status, Since: parseAPITime(r.URL.Query().Get("start_time")), Until: parseAPITime(r.URL.Query().Get("end_time")), Limit: limit, Offset: offset}
+	jobs, err := a.store.ListScanJobsFiltered(filter)
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	total, err := a.store.CountScanJobs(r.URL.Query().Get("kind"), r.URL.Query().Get("status"))
+	total, err := a.store.CountScanJobsFiltered(filter)
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{
-		"items": jobs,
-		"jobs":  jobs,
-		"count": len(jobs),
-		"total": total,
-		"limit": limit,
+		"items":  jobs,
+		"jobs":   jobs,
+		"count":  len(jobs),
+		"total":  total,
+		"limit":  limit,
 		"offset": offset,
+		"next_offset": func() int {
+			if offset+len(jobs) < total {
+				return offset + len(jobs)
+			}
+			return 0
+		}(),
 	})
 }
 
@@ -131,6 +143,7 @@ func (a *APIServer) handleJobCancel(w http.ResponseWriter, jobID string) {
 	}
 	job.Status = "cancelled"
 	job.Error = "cancelled by operator"
+	job.CancelRequested = true
 	job.FinishedAt = nowRFC3339()
 	if err := a.store.UpdateScanJob(job); err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -141,9 +154,16 @@ func (a *APIServer) handleJobCancel(w http.ResponseWriter, jobID string) {
 		current.Status = job.Status
 		current.Error = job.Error
 		current.FinishedAt = job.FinishedAt
+		current.CancelRequested = true
+		current.Phase = "cancelled"
 		a.scanStatuses[jobID] = current
 	}
 	a.scanStatusMu.Unlock()
+	a.scanCancelMu.Lock()
+	if cancel := a.scanCancels[jobID]; cancel != nil {
+		cancel()
+	}
+	a.scanCancelMu.Unlock()
 	a.writeJSON(w, http.StatusOK, job)
 }
 
@@ -161,25 +181,47 @@ func (a *APIServer) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mode := strings.TrimSpace(req.Mode)
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if headerKey := strings.TrimSpace(r.Header.Get("Idempotency-Key")); headerKey != "" {
+		idempotencyKey = headerKey
+	}
+	if len(idempotencyKey) > 200 {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Idempotency-Key must be at most 200 characters"})
+		return
+	}
+	trigger := strings.TrimSpace(req.Trigger)
+	if trigger == "" {
+		trigger = "manual"
+	}
 	switch kind {
 	case "agent_discovery", "agents":
-		status := a.startAPIScan("agent_discovery", firstNonEmpty(mode, "full"), "", "", func() error {
+		status := a.startAPIScanWithOptions("agent_discovery", firstNonEmpty(mode, "full"), "", "", trigger, req.Scope, idempotencyKey, func(ctx context.Context, _ string) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			_, err := a.buildPageAgentInventory(2000)
 			return err
 		})
 		a.writeJSON(w, http.StatusAccepted, status)
 	case "resource_scan", "static_resources":
-		a.startResourceJob(w, req, mode)
+		a.startResourceJob(w, req, mode, trigger, idempotencyKey)
 	case "event_replay", "detection_replay":
-		a.startEventReplayJob(w, req)
+		a.startEventReplayJob(w, req, trigger, idempotencyKey)
 	case "attack_chain_rebuild", "chain_rebuild":
+		if status, ok := a.existingScanStatusForKey(idempotencyKey); ok {
+			a.writeJSON(w, http.StatusAccepted, status)
+			return
+		}
 		engine := activeDetectionEngine()
 		if engine == nil || engine.Policy() == nil {
 			a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "detection engine unavailable"})
 			return
 		}
-		status := a.startAPIScan("attack_chain_rebuild", mode, "", "", func() error {
-			return engine.Policy().RebuildAttackChains(req.Limit)
+		status := a.startAPIScanWithOptions("attack_chain_rebuild", mode, "", "", trigger, req.Scope, idempotencyKey, func(ctx context.Context, jobID string) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return engine.Policy().RebuildAttackChainsForJob(req.Limit, jobID)
 		})
 		a.writeJSON(w, http.StatusAccepted, status)
 	default:
@@ -187,7 +229,36 @@ func (a *APIServer) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *APIServer) startResourceJob(w http.ResponseWriter, req jobCreateRequest, mode string) {
+// existingScanStatusForKey resolves a previously accepted durable scan before
+// touching any in-memory concurrency guard. Compatibility endpoints use this
+// helper so a retried request cannot be rejected as "already running" or
+// accidentally start a second worker.
+func (a *APIServer) existingScanStatusForKey(key string) (apiScanStatus, bool) {
+	key = strings.TrimSpace(key)
+	if a == nil || a.store == nil || key == "" {
+		return apiScanStatus{}, false
+	}
+	job, found, err := a.store.FindScanJobByIdempotencyKey(key)
+	if err != nil || !found {
+		return apiScanStatus{}, false
+	}
+	status := apiScanStatusFromAuditJob(job)
+	_ = a.storeAPIScan(status)
+	return status, true
+}
+
+func requestIdempotencyKey(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	return strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+}
+
+func (a *APIServer) startResourceJob(w http.ResponseWriter, req jobCreateRequest, mode, trigger, idempotencyKey string) {
+	if status, ok := a.existingScanStatusForKey(idempotencyKey); ok {
+		a.writeJSON(w, http.StatusAccepted, status)
+		return
+	}
 	scanOne, rescan := a.staticScanTriggers()
 	if req.ResourceID != "" && scanOne == nil {
 		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "watcher scan pipeline unavailable"})
@@ -201,23 +272,33 @@ func (a *APIServer) startResourceJob(w http.ResponseWriter, req jobCreateRequest
 		a.writeJSON(w, http.StatusConflict, map[string]string{"error": "another manual scan is already running"})
 		return
 	}
-	status := a.startAPIScan("resource_scan", mode, req.AgentID, req.ResourceID, func() error {
+	status := a.startAPIScanWithOptions("resource_scan", mode, req.AgentID, req.ResourceID, trigger, req.Scope, idempotencyKey, func(ctx context.Context, _ string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		defer staticScanInFlight.Store(false)
 		if req.ResourceID != "" {
 			return scanOne(req.ResourceID)
 		}
 		return rescan(req.AgentID)
 	})
+	if status.Status == "failed" {
+		staticScanInFlight.Store(false)
+	}
 	a.writeJSON(w, http.StatusAccepted, status)
 }
 
-func (a *APIServer) startEventReplayJob(w http.ResponseWriter, req jobCreateRequest) {
+func (a *APIServer) startEventReplayJob(w http.ResponseWriter, req jobCreateRequest, trigger, idempotencyKey string) {
+	if status, ok := a.existingScanStatusForKey(idempotencyKey); ok {
+		a.writeJSON(w, http.StatusAccepted, status)
+		return
+	}
 	engine := activeDetectionEngine()
 	if engine == nil {
 		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "detection engine unavailable"})
 		return
 	}
-	status := a.startAPIScan("event_replay", req.Mode, req.AgentID, "", func() error {
+	status := a.startAPIScanWithOptions("event_replay", req.Mode, req.AgentID, "", trigger, req.Scope, idempotencyKey, func(ctx context.Context, jobID string) error {
 		limit := req.Limit
 		if limit <= 0 || limit > 50000 {
 			limit = 50000
@@ -230,8 +311,13 @@ func (a *APIServer) startEventReplayJob(w http.ResponseWriter, req jobCreateRequ
 		if err != nil {
 			return err
 		}
-		for _, event := range events {
-			engine.EvaluateEvent(event.ID)
+		a.updateAPIScanProgress(jobID, 0, len(events), "loaded", map[string]any{"events": len(events)})
+		for i, event := range events {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			engine.EvaluateEventForJob(event.ID, jobID)
+			a.updateAPIScanProgress(jobID, i+1, len(events), "evaluating", map[string]any{"events": len(events)})
 		}
 		return nil
 	})
@@ -262,17 +348,26 @@ func (a *APIServer) RunBackgroundJobs(ctx context.Context) {
 				settings = defaultPageScanScheduleSettings()
 			}
 			settings = settings.normalize()
+			settings = settings.normalize()
 			if !settings.AgentDiscovery.Enabled {
 				continue
 			}
 			interval := time.Duration(settings.AgentDiscovery.IntervalSec) * time.Second
+			if lastDiscovery.IsZero() {
+				if jobs, err := a.store.ListScanJobsFiltered(audit.ScanJobFilter{Kind: "agent_discovery", Limit: 1}); err == nil && len(jobs) > 0 {
+					lastDiscovery = parseTimeOrNow(jobs[0].CreatedAt)
+				}
+			}
 			if !lastDiscovery.IsZero() && now.Sub(lastDiscovery) < interval {
 				continue
 			}
 			if a.hasRunningScanKind("agent_discovery") {
 				continue
 			}
-			a.startAPIScan("agent_discovery", "scheduled", "", "", func() error {
+			a.startAPIScanWithOptions("agent_discovery", "scheduled", "", "", "schedule", map[string]any{"interval_sec": settings.AgentDiscovery.IntervalSec}, "agent-discovery:"+now.UTC().Truncate(interval).Format(time.RFC3339), func(ctx context.Context, _ string) error {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				_, err := a.buildPageAgentInventory(2000)
 				return err
 			})
@@ -283,7 +378,6 @@ func (a *APIServer) RunBackgroundJobs(ctx context.Context) {
 
 func (a *APIServer) hasRunningScanKind(kind string) bool {
 	a.scanStatusMu.RLock()
-	defer a.scanStatusMu.RUnlock()
 	for _, status := range a.scanStatuses {
 		matchesKind := status.Type == kind
 		if kind == "agent_discovery" && status.Type == "agents" {
@@ -293,8 +387,27 @@ func (a *APIServer) hasRunningScanKind(kind string) bool {
 			matchesKind = true
 		}
 		if matchesKind && (status.Status == "running" || status.Status == "queued") {
+			a.scanStatusMu.RUnlock()
 			return true
 		}
 	}
+	a.scanStatusMu.RUnlock()
+	if a.store != nil {
+		jobs, err := a.store.ListScanJobsFiltered(audit.ScanJobFilter{Kind: kind, Limit: 20})
+		if err == nil {
+			for _, job := range jobs {
+				if job.Status == "running" || job.Status == "queued" {
+					return true
+				}
+			}
+		}
+	}
 	return false
+}
+
+func parseTimeOrNow(value string) time.Time {
+	if parsed := parseAPITime(value); !parsed.IsZero() {
+		return parsed
+	}
+	return time.Now().UTC()
 }

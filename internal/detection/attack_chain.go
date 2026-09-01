@@ -11,6 +11,11 @@ import (
 	"github.com/defenseclaw/defenseclaw/internal/audit"
 )
 
+// AttackChainBuilderVersion identifies the deterministic backend builder
+// that produced runtime_attack_chains rows. Bumping it makes rebuilds and
+// audit comparisons explicit instead of silently mixing algorithms.
+const AttackChainBuilderVersion = "attack-chain-v1"
+
 // Phase 3 turns the attack chain from a page-level display
 // reconstruction into a backend security object. When the correlation
 // engine produces a chain-shaped detection, the policy engine
@@ -75,6 +80,13 @@ func (p *PolicyEngine) recordAttackChain(decision audit.RuntimeDecision, evidenc
 		return
 	}
 	d := p.detectionForDecision(decision)
+	p.recordAttackChainForDetection(decision, d, evidence)
+}
+
+func (p *PolicyEngine) recordAttackChainForDetection(decision audit.RuntimeDecision, d audit.RuntimeDetection, evidence []audit.DetectionEvidence) {
+	if p == nil || p.store == nil {
+		return
+	}
 	if d.DetectionID == "" || !chainWorthyDetection(d) {
 		return
 	}
@@ -121,18 +133,25 @@ func (p *PolicyEngine) recordAttackChain(decision audit.RuntimeDecision, evidenc
 	if allBlocked {
 		status = audit.AttackChainStatusContained
 	}
+	policyVersion := strings.TrimSpace(decision.PolicyVersion)
+	if policyVersion == "" {
+		policyVersion = decision.PolicyID
+	}
 	_, _ = p.store.UpsertRuntimeAttackChain(audit.RuntimeAttackChain{
-		AgentID:     decision.AgentID,
-		AgentName:   decision.AgentName,
-		SessionID:   decision.SessionID,
-		TraceID:     decision.TraceID,
-		AttackType:  d.DetectionType,
-		Severity:    d.Severity,
-		Status:      status,
-		StartTime:   start,
-		EndTime:     end,
-		DetectionID: d.DetectionID,
-		DecisionID:  decision.DecisionID,
+		AgentID:         decision.AgentID,
+		AgentName:       decision.AgentName,
+		SessionID:       decision.SessionID,
+		TraceID:         decision.TraceID,
+		AttackType:      d.DetectionType,
+		Severity:        d.Severity,
+		Status:          status,
+		StartTime:       start,
+		EndTime:         end,
+		DetectionID:     d.DetectionID,
+		DecisionID:      decision.DecisionID,
+		BuilderVersion:  AttackChainBuilderVersion,
+		PolicyVersion:   policyVersion,
+		EvaluationJobID: d.EvaluationJobID,
 	}, links)
 }
 
@@ -151,6 +170,13 @@ func (p *PolicyEngine) detectionForDecision(decision audit.RuntimeDecision) audi
 // store keys chains by detection_id and de-duplicates event links. This is
 // used by the explicit attack_chain_rebuild job after rule/profile upgrades.
 func (p *PolicyEngine) RebuildAttackChains(limit int) error {
+	return p.RebuildAttackChainsForJob(limit, "")
+}
+
+// RebuildAttackChainsForJob is the replay-aware variant. The job id is
+// persisted on rebuilt chains so operators can trace which historical run
+// produced the projection.
+func (p *PolicyEngine) RebuildAttackChainsForJob(limit int, evaluationJobID string) error {
 	if p == nil || p.store == nil {
 		return nil
 	}
@@ -175,7 +201,10 @@ func (p *PolicyEngine) RebuildAttackChains(limit int) error {
 		if detailErr != nil {
 			return detailErr
 		}
-		p.recordAttackChain(decision, evidence)
+		if evaluationJobID != "" {
+			d.EvaluationJobID = evaluationJobID
+		}
+		p.recordAttackChainForDetection(decision, d, evidence)
 	}
 	return nil
 }

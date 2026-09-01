@@ -114,8 +114,10 @@ var rawIPHostRegex = regexp.MustCompile(`^(https?://)?(\d{1,3}\.){3}\d{1,3}(:\d+
 func eventText(ev audit.BehaviorEvent) string {
 	return strings.Join([]string{
 		ev.Target,
+		ev.Path,
 		ev.Operation,
 		ev.ToolName,
+		ev.Action,
 		ev.Detail,
 	}, " ")
 }

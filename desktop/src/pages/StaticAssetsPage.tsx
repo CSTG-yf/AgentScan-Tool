@@ -499,7 +499,8 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
     if (!selectedAgentId) return;
     setRescanning(true);
     try {
-      const accepted = await triggerStaticResourceRescan(selectedAgentId);
+      const idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `resource-rescan-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const accepted = await triggerStaticResourceRescan(selectedAgentId, idempotencyKey);
       await waitForScanCompletion(accepted.scan_id);
       message.success("静态资源重新扫描完成");
       const resourceId = detailResourceId;
@@ -521,7 +522,8 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
     if (!detailResourceId) return;
     setScanning(true);
     try {
-      const accepted = await triggerStaticResourceScan(detailResourceId);
+      const idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `resource-scan-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const accepted = await triggerStaticResourceScan(detailResourceId, idempotencyKey);
       await waitForScanCompletion(accepted.scan_id);
       message.success("资源扫描完成");
       const resourceId = detailResourceId;

@@ -249,7 +249,8 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
     if (!onRefresh) return;
     setRefreshing(true);
     try {
-      const accepted = await triggerAgentScan("full");
+      const idempotencyKey = globalThis.crypto?.randomUUID?.() ?? `agent-discovery-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const accepted = await triggerAgentScan("full", idempotencyKey);
       await waitForAgentScan(accepted.scan_id);
       await onRefresh();
       message.success("Agent 扫描完成");

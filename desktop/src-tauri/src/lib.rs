@@ -42,6 +42,7 @@ pub fn run() {
             commands::runtime_decisions::get_runtime_enforcements,
             commands::runtime_decisions::get_runtime_enforcement,
             commands::runtime_decisions::delete_runtime_enforcement,
+            commands::runtime_decisions::rollback_runtime_enforcement,
             commands::policy::get_guard_policy,
             commands::policy::save_guard_policy,
             commands::settings::get_scan_schedule_settings,

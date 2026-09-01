@@ -50,7 +50,11 @@ const (
 	ResponseStatusExecuted   = "executed"    // enforcement really ran
 	ResponseStatusWouldBlock = "would_block" // observe mode: decision says block, nothing enforced
 	ResponseStatusDispatched = "dispatched"  // handed to an existing enforcement module
+	ResponseStatusPlanned    = "planned"     // operator preview; no side effect
+	ResponseStatusExecuting  = "executing"   // executor has started and awaits confirmation
 	ResponseStatusFailed     = "failed"
+	ResponseStatusExpired    = "expired"
+	ResponseStatusRolledBack = "rolled_back"
 )
 
 // RuntimeDecision is the unified verdict derived from one runtime
@@ -71,6 +75,9 @@ type RuntimeDecision struct {
 	EnforcementPoint string    `json:"enforcement_point,omitempty"`
 	Mode             string    `json:"mode"`
 	WouldBlock       bool      `json:"would_block"`
+	IdempotencyKey   string    `json:"idempotency_key,omitempty"`
+	Source           string    `json:"source,omitempty"`
+	PolicyVersion    string    `json:"policy_version,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 }
 
@@ -89,6 +96,9 @@ type RuntimeDecisionInput struct {
 	EnforcementPoint string
 	Mode             string
 	WouldBlock       bool
+	IdempotencyKey   string
+	Source           string
+	PolicyVersion    string
 	CreatedAt        time.Time
 }
 
@@ -113,12 +123,30 @@ func (s *Store) RecordRuntimeDecision(in RuntimeDecisionInput) (RuntimeDecision,
 	if in.Mode == "" {
 		in.Mode = RuntimeSecurityModeObserve
 	}
+	if strings.TrimSpace(in.Source) == "" {
+		in.Source = "automatic"
+	}
+	if strings.TrimSpace(in.PolicyVersion) == "" {
+		in.PolicyVersion = in.PolicyID
+	}
+	in.IdempotencyKey = strings.TrimSpace(in.IdempotencyKey)
 	if in.CreatedAt.IsZero() {
 		in.CreatedAt = time.Now().UTC()
 	}
 	cutoff := in.CreatedAt.Add(-decisionDedupWindow).UTC().Format(time.RFC3339Nano)
 
 	var existingID string
+	if in.IdempotencyKey != "" {
+		err := s.db.QueryRowContext(context.Background(), `
+SELECT decision_id FROM runtime_decisions
+WHERE idempotency_key = ? AND "delete" = 0 LIMIT 1`, in.IdempotencyKey).Scan(&existingID)
+		if err == nil {
+			return RuntimeDecision{DecisionID: existingID, Decision: in.Decision, IdempotencyKey: in.IdempotencyKey}, false, nil
+		}
+		if err != sql.ErrNoRows {
+			return RuntimeDecision{}, false, err
+		}
+	}
 	err := s.db.QueryRowContext(context.Background(), `
 SELECT decision_id FROM runtime_decisions
 WHERE detection_id = ? AND decision = ? AND created_at >= ? AND "delete" = 0
@@ -143,11 +171,12 @@ ORDER BY created_at DESC LIMIT 1`,
 INSERT INTO runtime_decisions (
   decision_id, detection_id, agent_id, session_id, trace_id,
   decision, risk_score, confidence, policy_id, reason,
-  enforcement_point, mode, would_block, agent_name, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  enforcement_point, mode, would_block, agent_name, idempotency_key, source, policy_version, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		decisionID, in.DetectionID, in.AgentID, nullStr(in.SessionID), nullStr(in.TraceID),
 		in.Decision, in.RiskScore, in.Confidence, in.PolicyID, nullStr(in.Reason),
-		in.EnforcementPoint, in.Mode, wouldBlock, nullStr(in.AgentName), nowStr,
+		in.EnforcementPoint, in.Mode, wouldBlock, nullStr(in.AgentName), in.IdempotencyKey, in.Source, in.PolicyVersion, nowStr,
 	); err != nil {
 		return RuntimeDecision{}, false, err
 	}
@@ -158,6 +187,7 @@ INSERT INTO runtime_decisions (
 		Decision: in.Decision, RiskScore: in.RiskScore, Confidence: in.Confidence,
 		PolicyID: in.PolicyID, Reason: in.Reason,
 		EnforcementPoint: in.EnforcementPoint, Mode: in.Mode,
+		IdempotencyKey: in.IdempotencyKey, Source: in.Source, PolicyVersion: in.PolicyVersion,
 		WouldBlock: wouldBlock != 0, CreatedAt: in.CreatedAt,
 	}, true, nil
 }
@@ -218,7 +248,8 @@ func (s *Store) ListRuntimeDecisions(f RuntimeDecisionFilter) ([]RuntimeDecision
 SELECT v.decision_id, v.detection_id, v.agent_id, COALESCE(v.agent_name, ''),
        COALESCE(v.session_id, ''), COALESCE(v.trace_id, ''), v.decision,
        v.risk_score, v.confidence, COALESCE(v.policy_id, ''), COALESCE(v.reason, ''),
-       COALESCE(v.enforcement_point, ''), v.mode, v.would_block, v.created_at,
+       COALESCE(v.enforcement_point, ''), v.mode, v.would_block,
+       COALESCE(v.idempotency_key, ''), COALESCE(v.source, ''), COALESCE(v.policy_version, ''), v.created_at,
        d.detection_type, COALESCE(d.category, ''), COALESCE(d.severity, ''),
        COALESCE(d.rule_id, ''), COALESCE(d.rule_version, ''),
        COALESCE(d.title, ''), COALESCE(d.status, ''), COALESCE(d.confidence, 0),
@@ -252,7 +283,7 @@ LIMIT ?`, args...)
 			&v.DecisionID, &v.DetectionID, &v.AgentID, &v.AgentName,
 			&v.SessionID, &v.TraceID, &v.Decision,
 			&riskScore, &confidence, &v.PolicyID, &v.Reason,
-			&v.EnforcementPoint, &v.Mode, &wouldBlock, &createdAt,
+			&v.EnforcementPoint, &v.Mode, &wouldBlock, &v.IdempotencyKey, &v.Source, &v.PolicyVersion, &createdAt,
 			&d.DetectionType, &d.Category, &d.Severity,
 			&d.RuleID, &d.RuleVersion,
 			&d.Title, &d.Status, &dConfidence, &eventCount, &firstSeen, &lastSeen,
@@ -292,13 +323,14 @@ func (s *Store) GetRuntimeDecisionDetail(decisionID string) (RuntimeDecision, []
 SELECT decision_id, detection_id, agent_id, COALESCE(agent_name, ''),
        COALESCE(session_id, ''), COALESCE(trace_id, ''), decision,
        risk_score, confidence, COALESCE(policy_id, ''), COALESCE(reason, ''),
-       COALESCE(enforcement_point, ''), mode, would_block, created_at
+       COALESCE(enforcement_point, ''), mode, would_block,
+       COALESCE(idempotency_key, ''), COALESCE(source, ''), COALESCE(policy_version, ''), created_at
 FROM runtime_decisions WHERE decision_id = ? AND "delete" = 0`, decisionID,
 	).Scan(
 		&v.DecisionID, &v.DetectionID, &v.AgentID, &v.AgentName,
 		&v.SessionID, &v.TraceID, &v.Decision,
 		&riskScore, &confidence, &v.PolicyID, &v.Reason,
-		&v.EnforcementPoint, &v.Mode, &wouldBlock, &createdAt,
+		&v.EnforcementPoint, &v.Mode, &wouldBlock, &v.IdempotencyKey, &v.Source, &v.PolicyVersion, &createdAt,
 	)
 	if err == sql.ErrNoRows {
 		return RuntimeDecision{}, nil, nil
@@ -318,25 +350,27 @@ FROM runtime_decisions WHERE decision_id = ? AND "delete" = 0`, decisionID,
 // ResponseAction records what was ACTUALLY executed (or would have
 // been executed in observe mode) for one decision.
 type ResponseAction struct {
-	ResponseID string    `json:"response_id"`
-	DecisionID string    `json:"decision_id"`
-	ActionType string    `json:"action_type"`
-	Executor   string    `json:"executor,omitempty"`
-	Target     string    `json:"target,omitempty"`
-	Status     string    `json:"status"`
-	Result     string    `json:"result,omitempty"`
-	ExecutedAt time.Time `json:"executed_at"`
+	ResponseID        string    `json:"response_id"`
+	DecisionID        string    `json:"decision_id"`
+	ActionType        string    `json:"action_type"`
+	Executor          string    `json:"executor,omitempty"`
+	Target            string    `json:"target,omitempty"`
+	Status            string    `json:"status"`
+	Result            string    `json:"result,omitempty"`
+	RollbackSupported bool      `json:"rollback_supported"`
+	ExecutedAt        time.Time `json:"executed_at"`
 }
 
 // ResponseActionInput is the dispatcher's write shape.
 type ResponseActionInput struct {
-	DecisionID string
-	ActionType string
-	Executor   string
-	Target     string
-	Status     string
-	Result     string
-	ExecutedAt time.Time
+	DecisionID        string
+	ActionType        string
+	Executor          string
+	Target            string
+	Status            string
+	Result            string
+	RollbackSupported bool
+	ExecutedAt        time.Time
 }
 
 // RecordResponseAction appends one response action.
@@ -353,10 +387,10 @@ func (s *Store) RecordResponseAction(in ResponseActionInput) (ResponseAction, er
 	responseID := "R" + uuid.NewString()[:8]
 	if _, err := s.execDB(context.Background(), "runtime_response_insert", `
 INSERT INTO runtime_response_actions (
-  response_id, decision_id, action_type, executor, target, status, result, executed_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  response_id, decision_id, action_type, executor, target, status, result, rollback_supported, executed_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		responseID, in.DecisionID, in.ActionType, in.Executor,
-		nullStr(in.Target), in.Status, nullStr(in.Result),
+		nullStr(in.Target), in.Status, nullStr(in.Result), boolToInt(in.RollbackSupported),
 		in.ExecutedAt.UTC().Format(time.RFC3339Nano),
 	); err != nil {
 		return ResponseAction{}, err
@@ -364,7 +398,7 @@ INSERT INTO runtime_response_actions (
 	return ResponseAction{
 		ResponseID: responseID, DecisionID: in.DecisionID,
 		ActionType: in.ActionType, Executor: in.Executor, Target: in.Target,
-		Status: in.Status, Result: in.Result, ExecutedAt: in.ExecutedAt,
+		Status: in.Status, Result: in.Result, RollbackSupported: in.RollbackSupported, ExecutedAt: in.ExecutedAt,
 	}, nil
 }
 
@@ -376,7 +410,7 @@ func (s *Store) ListResponseActions(decisionID string) ([]ResponseAction, error)
 	}
 	rows, err := s.queryDB(context.Background(), "runtime_response_list", `
 SELECT response_id, decision_id, action_type, COALESCE(executor, ''),
-       COALESCE(target, ''), status, COALESCE(result, ''), executed_at
+       COALESCE(target, ''), status, COALESCE(result, ''), rollback_supported, executed_at
 FROM runtime_response_actions
 WHERE decision_id = ? AND "delete" = 0
 ORDER BY executed_at ASC`, decisionID)
@@ -388,19 +422,87 @@ ORDER BY executed_at ASC`, decisionID)
 	var out []ResponseAction
 	for rows.Next() {
 		var (
-			a          ResponseAction
-			executedAt string
+			a                 ResponseAction
+			executedAt        string
+			rollbackSupported int
 		)
 		if err := rows.Scan(
 			&a.ResponseID, &a.DecisionID, &a.ActionType, &a.Executor,
-			&a.Target, &a.Status, &a.Result, &executedAt,
+			&a.Target, &a.Status, &a.Result, &rollbackSupported, &executedAt,
 		); err != nil {
 			return nil, err
 		}
+		a.RollbackSupported = rollbackSupported != 0
 		a.ExecutedAt = parseTimeOrDefault(executedAt, time.Time{})
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// ListResponseActionsAll returns persisted response actions newest first.
+// The enforcement inventory must include non-network actions instead of
+// reconstructing state from the in-memory proxy blocklist.
+func (s *Store) ListResponseActionsAll(limit, offset int) ([]ResponseAction, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := s.queryDB(context.Background(), "runtime_response_list_all", `
+SELECT response_id, decision_id, action_type, COALESCE(executor, ''),
+       COALESCE(target, ''), status, COALESCE(result, ''), rollback_supported, executed_at
+FROM runtime_response_actions
+WHERE "delete" = 0
+ORDER BY executed_at DESC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ResponseAction
+	for rows.Next() {
+		var a ResponseAction
+		var executedAt string
+		var rollbackSupported int
+		if err := rows.Scan(&a.ResponseID, &a.DecisionID, &a.ActionType, &a.Executor, &a.Target, &a.Status, &a.Result, &rollbackSupported, &executedAt); err != nil {
+			return nil, err
+		}
+		a.RollbackSupported = rollbackSupported != 0
+		a.ExecutedAt = parseTimeOrDefault(executedAt, time.Time{})
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// CountResponseActions returns all non-deleted response actions.
+func (s *Store) CountResponseActions() (int, error) {
+	if s == nil || s.db == nil {
+		return 0, nil
+	}
+	var total int
+	if err := s.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM runtime_response_actions WHERE "delete" = 0`).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+// UpdateResponseActionStatus records a terminal transition (for example
+// active -> rolled_back) without deleting the audit row.
+func (s *Store) UpdateResponseActionStatus(responseID, status, result string) error {
+	if s == nil || s.db == nil || strings.TrimSpace(responseID) == "" {
+		return nil
+	}
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status == "" {
+		return nil
+	}
+	_, err := s.execDB(context.Background(), "runtime_response_status", `
+UPDATE runtime_response_actions SET status = ?, result = ?
+WHERE response_id = ? AND "delete" = 0`, status, nullStringOrNil(result), strings.TrimSpace(responseID))
+	return err
 }
 
 // RuntimeAttackChain is the backend security object for a correlated
@@ -408,18 +510,21 @@ ORDER BY executed_at ASC`, decisionID)
 // responded to it. This table is the authoritative record; page handlers
 // must not reconstruct security meaning from display strings.
 type RuntimeAttackChain struct {
-	AttackChainID string    `json:"attack_chain_id"`
-	AgentID       string    `json:"agent_id"`
-	AgentName     string    `json:"agent_name,omitempty"`
-	SessionID     string    `json:"session_id,omitempty"`
-	TraceID       string    `json:"trace_id,omitempty"`
-	AttackType    string    `json:"attack_type"`
-	Severity      string    `json:"severity"`
-	Status        string    `json:"status"` // active | contained
-	StartTime     time.Time `json:"start_time"`
-	EndTime       time.Time `json:"end_time"`
-	DetectionID   string    `json:"detection_id,omitempty"`
-	DecisionID    string    `json:"decision_id,omitempty"`
+	AttackChainID   string    `json:"attack_chain_id"`
+	AgentID         string    `json:"agent_id"`
+	AgentName       string    `json:"agent_name,omitempty"`
+	SessionID       string    `json:"session_id,omitempty"`
+	TraceID         string    `json:"trace_id,omitempty"`
+	AttackType      string    `json:"attack_type"`
+	Severity        string    `json:"severity"`
+	Status          string    `json:"status"` // active | contained
+	StartTime       time.Time `json:"start_time"`
+	EndTime         time.Time `json:"end_time"`
+	DetectionID     string    `json:"detection_id,omitempty"`
+	DecisionID      string    `json:"decision_id,omitempty"`
+	BuilderVersion  string    `json:"builder_version,omitempty"`
+	PolicyVersion   string    `json:"policy_version,omitempty"`
+	EvaluationJobID string    `json:"evaluation_job_id,omitempty"`
 }
 
 // AttackChainEvent links one behavior event into a chain with its
@@ -459,11 +564,18 @@ WHERE detection_id = ? AND "delete" = 0 ORDER BY start_time DESC LIMIT 1`, in.De
 		if _, err := s.execDB(context.Background(), "runtime_attack_chain_update", `
 UPDATE runtime_attack_chains
 SET end_time = ?, severity = ?, status = ?, decision_id = ?,
-    trace_id = COALESCE(NULLIF(?, ''), trace_id)
+    trace_id = COALESCE(NULLIF(?, ''), trace_id),
+    builder_version = CASE WHEN ? != '' THEN ? ELSE builder_version END,
+    policy_version = CASE WHEN ? != '' THEN ? ELSE policy_version END,
+    evaluation_job_id = CASE WHEN ? != '' THEN ? ELSE evaluation_job_id END
 WHERE attack_chain_id = ? AND "delete" = 0`,
 			in.EndTime.UTC().Format(time.RFC3339Nano),
 			strings.ToUpper(in.Severity), in.Status, in.DecisionID,
-			in.TraceID, existingID,
+			in.TraceID,
+			in.BuilderVersion, in.BuilderVersion,
+			in.PolicyVersion, in.PolicyVersion,
+			in.EvaluationJobID, in.EvaluationJobID,
+			existingID,
 		); err != nil {
 			return RuntimeAttackChain{}, err
 		}
@@ -480,13 +592,15 @@ WHERE attack_chain_id = ? AND "delete" = 0`,
 	if _, err := s.execDB(context.Background(), "runtime_attack_chain_insert", `
 INSERT INTO runtime_attack_chains (
   attack_chain_id, agent_id, session_id, trace_id, attack_type,
-  severity, status, start_time, end_time, detection_id, decision_id, agent_name
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  severity, status, start_time, end_time, detection_id, decision_id, agent_name,
+  builder_version, policy_version, evaluation_job_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.AttackChainID, in.AgentID, nullStr(in.SessionID), nullStr(in.TraceID),
 		in.AttackType, strings.ToUpper(in.Severity), in.Status,
 		in.StartTime.UTC().Format(time.RFC3339Nano),
 		in.EndTime.UTC().Format(time.RFC3339Nano),
 		in.DetectionID, in.DecisionID, nullStr(in.AgentName),
+		in.BuilderVersion, in.PolicyVersion, in.EvaluationJobID,
 	); err != nil {
 		return RuntimeAttackChain{}, err
 	}
@@ -584,7 +698,8 @@ func (s *Store) ListRuntimeAttackChains(f AttackChainFilter) ([]RuntimeAttackCha
 SELECT attack_chain_id, agent_id, COALESCE(agent_name, ''),
        COALESCE(session_id, ''), COALESCE(trace_id, ''),
        attack_type, severity, status, start_time, end_time,
-       COALESCE(detection_id, ''), COALESCE(decision_id, '')
+       COALESCE(detection_id, ''), COALESCE(decision_id, ''),
+       COALESCE(builder_version, ''), COALESCE(policy_version, ''), COALESCE(evaluation_job_id, '')
 FROM runtime_attack_chains
 `+where+`
 ORDER BY start_time DESC
@@ -605,6 +720,7 @@ LIMIT ? OFFSET ?`, args...)
 			&c.AttackChainID, &c.AgentID, &c.AgentName,
 			&c.SessionID, &c.TraceID, &c.AttackType, &c.Severity,
 			&c.Status, &startTime, &endTime, &c.DetectionID, &c.DecisionID,
+			&c.BuilderVersion, &c.PolicyVersion, &c.EvaluationJobID,
 		); err != nil {
 			return nil, err
 		}
@@ -642,12 +758,14 @@ func (s *Store) GetRuntimeAttackChainDetail(chainID string) (RuntimeAttackChain,
 SELECT attack_chain_id, agent_id, COALESCE(agent_name, ''),
        COALESCE(session_id, ''), COALESCE(trace_id, ''),
        attack_type, severity, status, start_time, end_time,
-       COALESCE(detection_id, ''), COALESCE(decision_id, '')
+       COALESCE(detection_id, ''), COALESCE(decision_id, ''),
+       COALESCE(builder_version, ''), COALESCE(policy_version, ''), COALESCE(evaluation_job_id, '')
 FROM runtime_attack_chains WHERE attack_chain_id = ? AND "delete" = 0`, chainID,
 	).Scan(
 		&c.AttackChainID, &c.AgentID, &c.AgentName,
 		&c.SessionID, &c.TraceID, &c.AttackType, &c.Severity,
 		&c.Status, &startTime, &endTime, &c.DetectionID, &c.DecisionID,
+		&c.BuilderVersion, &c.PolicyVersion, &c.EvaluationJobID,
 	)
 	if err == sql.ErrNoRows {
 		return RuntimeAttackChain{}, nil, nil

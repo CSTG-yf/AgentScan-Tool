@@ -3,7 +3,9 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -18,17 +20,27 @@ import (
 )
 
 type apiScanStatus struct {
-	ScanID     string `json:"scan_id"`
-	Type       string `json:"type"`
-	Mode       string `json:"mode,omitempty"`
-	AgentID    string `json:"agent_id,omitempty"`
-	ResourceID string `json:"resource_id,omitempty"`
-	RuleVersion string `json:"rule_version,omitempty"`
-	Status     string `json:"status"`
-	Progress   int    `json:"progress"`
-	StartedAt  string `json:"started_at"`
-	FinishedAt string `json:"finished_at,omitempty"`
-	Error      string `json:"error,omitempty"`
+	JobID           string         `json:"job_id"`
+	ScanID          string         `json:"scan_id"`
+	Kind            string         `json:"kind"`
+	Type            string         `json:"type"`
+	Mode            string         `json:"mode,omitempty"`
+	AgentID         string         `json:"agent_id,omitempty"`
+	ResourceID      string         `json:"resource_id,omitempty"`
+	Trigger         string         `json:"trigger,omitempty"`
+	Scope           map[string]any `json:"scope,omitempty"`
+	Result          map[string]any `json:"result,omitempty"`
+	Phase           string         `json:"phase,omitempty"`
+	Current         int            `json:"current,omitempty"`
+	Total           int            `json:"total,omitempty"`
+	CancelRequested bool           `json:"cancel_requested,omitempty"`
+	IdempotencyKey  string         `json:"idempotency_key,omitempty"`
+	RuleVersion     string         `json:"rule_version,omitempty"`
+	Status          string         `json:"status"`
+	Progress        int            `json:"progress"`
+	StartedAt       string         `json:"started_at"`
+	FinishedAt      string         `json:"finished_at,omitempty"`
+	Error           string         `json:"error,omitempty"`
 }
 
 type agentsListResponse struct {
@@ -194,6 +206,23 @@ func (a *APIServer) handleAgentStaticResourceSummary(w http.ResponseWriter, r *h
 }
 
 func (a *APIServer) handleAgentStaticResourceScan(w http.ResponseWriter, r *http.Request, agentID string) {
+	idempotencyKey := requestIdempotencyKey(r)
+	if r.Body != nil {
+		var body struct {
+			IdempotencyKey string `json:"idempotency_key"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
+			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+		if idempotencyKey == "" {
+			idempotencyKey = strings.TrimSpace(body.IdempotencyKey)
+		}
+	}
+	if status, ok := a.existingScanStatusForKey(idempotencyKey); ok {
+		a.writeJSON(w, http.StatusAccepted, status)
+		return
+	}
 	_, rescan := a.staticScanTriggers()
 	if rescan == nil {
 		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "watcher scan pipeline unavailable"})
@@ -203,10 +232,16 @@ func (a *APIServer) handleAgentStaticResourceScan(w http.ResponseWriter, r *http
 		a.writeJSON(w, http.StatusConflict, map[string]string{"error": "another manual scan is already running"})
 		return
 	}
-	status := a.startAPIScan("static-resources", "agent", agentID, "", func() error {
+	status := a.startAPIScanWithOptions("resource_scan", "agent", agentID, "", "manual", map[string]any{"agent_id": agentID}, idempotencyKey, func(ctx context.Context, _ string) error {
 		defer staticScanInFlight.Store(false)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		return rescan(agentID)
 	})
+	if status.Status == "failed" {
+		staticScanInFlight.Store(false)
+	}
 	a.writeJSON(w, http.StatusAccepted, status)
 }
 
@@ -216,16 +251,31 @@ func (a *APIServer) handleAgentScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Mode string `json:"mode"`
+		Mode           string `json:"mode"`
+		IdempotencyKey string `json:"idempotency_key"`
 	}
 	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
+			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			return
+		}
 	}
 	mode := strings.TrimSpace(body.Mode)
 	if mode == "" {
 		mode = "full"
 	}
-	status := a.startAPIScan("agents", mode, "", "", func() error {
+	idempotencyKey := requestIdempotencyKey(r)
+	if idempotencyKey == "" {
+		idempotencyKey = strings.TrimSpace(body.IdempotencyKey)
+	}
+	if status, ok := a.existingScanStatusForKey(idempotencyKey); ok {
+		a.writeJSON(w, http.StatusAccepted, status)
+		return
+	}
+	status := a.startAPIScanWithOptions("agent_discovery", mode, "", "", "manual", nil, idempotencyKey, func(ctx context.Context, _ string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		_, err := a.buildPageAgentInventory(2000)
 		return err
 	})
@@ -257,44 +307,109 @@ func (a *APIServer) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *APIServer) startAPIScan(kind, mode, agentID, resourceID string, run func() error) apiScanStatus {
-	status := apiScanStatus{
-		ScanID:     "scan_" + strings.ReplaceAll(kind, "-", "_") + "_" + uuid.NewString()[:8],
-		Type:       kind,
-		Mode:       mode,
-		AgentID:    agentID,
-		ResourceID: resourceID,
-		Status:     "running",
-		Progress:   0,
-		StartedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+	return a.startAPIScanWithOptions(kind, mode, agentID, resourceID, "manual", nil, "", func(context.Context, string) error {
+		return run()
+	})
+}
+
+func (a *APIServer) startAPIScanWithOptions(kind, mode, agentID, resourceID, trigger string, scope map[string]any, idempotencyKey string, run func(context.Context, string) error) apiScanStatus {
+	if a.store != nil && strings.TrimSpace(idempotencyKey) != "" {
+		if existing, found, err := a.store.FindScanJobByIdempotencyKey(idempotencyKey); err == nil && found {
+			status := apiScanStatusFromAuditJob(existing)
+			a.storeAPIScan(status)
+			return status
+		}
 	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	status := apiScanStatus{
+		JobID: "scan_" + strings.ReplaceAll(kind, "-", "_") + "_" + uuid.NewString()[:8],
+		Kind:  kind, Trigger: firstNonEmpty(trigger, "manual"), Scope: scope,
+		Mode: mode, AgentID: agentID, ResourceID: resourceID,
+		Status: "queued", Progress: 0, StartedAt: now, IdempotencyKey: strings.TrimSpace(idempotencyKey),
+	}
+	status.ScanID = status.JobID
+	status.Type = status.Kind
 	if kind == "event_replay" || kind == "attack_chain_rebuild" {
 		status.RuleVersion = detection.RuleVersion
 	}
-	a.storeAPIScan(status)
-	go func() {
-		next := status
-		if err := run(); err != nil {
-			next.Status = "failed"
-			next.Error = err.Error()
-			next.Progress = 0
-		} else {
-			next.Status = "completed"
-			next.Progress = 100
+	if err := a.storeAPIScan(status); err != nil {
+		if strings.TrimSpace(idempotencyKey) != "" && a.store != nil {
+			if existing, found, lookupErr := a.store.FindScanJobByIdempotencyKey(idempotencyKey); lookupErr == nil && found {
+				existingStatus := apiScanStatusFromAuditJob(existing)
+				a.storeAPIScan(existingStatus)
+				return existingStatus
+			}
 		}
-		next.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		// Cancellation is durable and wins over a late completion from the
-		// worker. Do not resurrect a cancelled job in either projection.
+		status.Status = "failed"
+		status.Error = "persist scan job: " + err.Error()
+		status.FinishedAt = nowRFC3339()
+		_ = a.storeAPIScan(status)
+		return status
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.scanCancelMu.Lock()
+	if a.scanCancels == nil {
+		a.scanCancels = map[string]context.CancelFunc{}
+	}
+	a.scanCancels[status.JobID] = cancel
+	a.scanCancelMu.Unlock()
+	go func() {
+		defer func() {
+			a.scanCancelMu.Lock()
+			delete(a.scanCancels, status.JobID)
+			a.scanCancelMu.Unlock()
+			cancel()
+		}()
+		next := status
+		next.Status = "running"
+		next.Phase = "running"
+		_ = a.storeAPIScan(next)
+		err := run(ctx, status.JobID)
+		if ctx.Err() != nil {
+			err = context.Canceled
+		}
 		if a.store != nil {
-			if current, ok, err := a.store.GetScanJob(status.ScanID); err == nil && ok && current.Status == "cancelled" {
+			if current, ok, loadErr := a.store.GetScanJob(status.JobID); loadErr == nil && ok && (current.Status == "cancelled" || current.CancelRequested) {
 				return
 			}
 		}
-		a.storeAPIScan(next)
+		if err != nil {
+			next.Status = "failed"
+			next.Error = err.Error()
+			if errors.Is(err, context.Canceled) {
+				next.Status = "cancelled"
+			}
+		} else {
+			next.Status = "completed"
+			next.Progress = 100
+			next.Current = next.Total
+			next.Phase = "completed"
+		}
+		next.FinishedAt = nowRFC3339()
+		_ = a.storeAPIScan(next)
 	}()
 	return status
 }
 
-func (a *APIServer) storeAPIScan(status apiScanStatus) {
+func apiScanStatusFromAuditJob(job audit.ScanJob) apiScanStatus {
+	jobID := firstNonEmpty(job.JobID, job.ScanID)
+	kind := firstNonEmpty(job.Kind, job.Type)
+	return apiScanStatus{JobID: jobID, ScanID: jobID, Kind: kind, Type: kind, Mode: job.Mode, AgentID: job.AgentID, ResourceID: job.ResourceID, Trigger: job.Trigger, Scope: job.Scope, Result: job.Result, Phase: job.Phase, Current: job.Current, Total: job.Total, CancelRequested: job.CancelRequested, IdempotencyKey: job.IdempotencyKey, RuleVersion: job.RuleVersion, Status: job.Status, Progress: job.Progress, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt, Error: job.Error}
+}
+
+func (a *APIServer) storeAPIScan(status apiScanStatus) error {
+	if status.JobID == "" {
+		status.JobID = status.ScanID
+	}
+	if status.ScanID == "" {
+		status.ScanID = status.JobID
+	}
+	if status.Kind == "" {
+		status.Kind = status.Type
+	}
+	if status.Type == "" {
+		status.Type = status.Kind
+	}
 	a.scanStatusMu.Lock()
 	if a.scanStatuses == nil {
 		a.scanStatuses = map[string]apiScanStatus{}
@@ -303,22 +418,51 @@ func (a *APIServer) storeAPIScan(status apiScanStatus) {
 	a.scanStatusMu.Unlock()
 
 	if a.store == nil {
-		return
+		return nil
 	}
 	job := audit.ScanJob{
-		JobID: status.ScanID, Kind: status.Type, Mode: status.Mode,
+		JobID: status.JobID, Kind: status.Kind, Mode: status.Mode,
 		AgentID: status.AgentID, ResourceID: status.ResourceID,
+		Trigger: status.Trigger, Scope: status.Scope, Result: status.Result, Phase: status.Phase,
+		Current: status.Current, Total: status.Total, CancelRequested: status.CancelRequested, IdempotencyKey: status.IdempotencyKey,
 		RuleVersion: status.RuleVersion,
-		Status: status.Status, Progress: status.Progress,
+		Status:      status.Status, Progress: status.Progress,
 		StartedAt: status.StartedAt, FinishedAt: status.FinishedAt,
 		Error: status.Error,
 	}
 	if existing, ok, err := a.store.GetScanJob(status.ScanID); err == nil && ok {
 		job.CreatedAt = existing.CreatedAt
-		_ = a.store.UpdateScanJob(job)
-		return
+		return a.store.UpdateScanJob(job)
 	}
-	_ = a.store.CreateScanJob(job)
+	return a.store.CreateScanJob(job)
+}
+
+func (a *APIServer) updateAPIScanProgress(jobID string, current, total int, phase string, result map[string]any) {
+	status, ok := a.lookupAPIScan(jobID)
+	if !ok {
+		if a.store == nil {
+			return
+		}
+		job, found, err := a.store.GetScanJob(jobID)
+		if err != nil || !found {
+			return
+		}
+		status = apiScanStatusFromAuditJob(job)
+	}
+	if current < 0 {
+		current = 0
+	}
+	if total < 0 {
+		total = 0
+	}
+	if total > 0 && current > total {
+		current = total
+	}
+	status.Current, status.Total, status.Phase, status.Result = current, total, phase, result
+	if total > 0 {
+		status.Progress = current * 100 / total
+	}
+	_ = a.storeAPIScan(status)
 }
 
 func (a *APIServer) lookupAPIScan(scanID string) (apiScanStatus, bool) {
@@ -745,13 +889,21 @@ func (a *APIServer) handleRuntimeEventDetail(w http.ResponseWriter, r *http.Requ
 }
 
 type runtimeEnforcementRow struct {
-	ID         string `json:"id"`
-	Kind       string `json:"kind"`
-	Host       string `json:"host,omitempty"`
-	DecisionID string `json:"decision_id,omitempty"`
-	Status     string `json:"status"`
-	AddedAt    string `json:"added_at,omitempty"`
-	ExpiresAt  string `json:"expires_at,omitempty"`
+	ID                string `json:"id"`
+	Kind              string `json:"kind"`
+	Target            string `json:"target,omitempty"`
+	Host              string `json:"host,omitempty"`
+	DecisionID        string `json:"decision_id,omitempty"`
+	ResponseID        string `json:"response_id,omitempty"`
+	ActionType        string `json:"action_type,omitempty"`
+	Executor          string `json:"executor,omitempty"`
+	Status            string `json:"status"`
+	Reason            string `json:"reason,omitempty"`
+	Source            string `json:"source,omitempty"`
+	Result            string `json:"result,omitempty"`
+	RollbackSupported bool   `json:"rollback_supported"`
+	AddedAt           string `json:"added_at,omitempty"`
+	ExpiresAt         string `json:"expires_at,omitempty"`
 }
 
 func (a *APIServer) handleRuntimeEnforcements(w http.ResponseWriter, r *http.Request) {
@@ -761,18 +913,40 @@ func (a *APIServer) handleRuntimeEnforcements(w http.ResponseWriter, r *http.Req
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		rows := runtimeNetworkEnforcements()
+		rows, err := a.runtimeEnforcementRows()
+		if err != nil {
+			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 		a.writeJSON(w, http.StatusOK, map[string]any{"items": rows, "total": len(rows)})
 		return
 	}
-	enforcementID, err := url.PathUnescape(rest)
-	if err != nil || strings.ContainsAny(enforcementID, `/\`) {
+	parts := strings.Split(rest, "/")
+	enforcementID, err := url.PathUnescape(parts[0])
+	if err != nil || enforcementID == "" || strings.ContainsAny(enforcementID, `/\`) {
+		http.NotFound(w, r)
+		return
+	}
+	if len(parts) == 2 && parts[1] == "rollback" {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		a.rollbackRuntimeEnforcement(w, r, enforcementID)
+		return
+	}
+	if len(parts) != 1 {
 		http.NotFound(w, r)
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
-		for _, row := range runtimeNetworkEnforcements() {
+		rows, err := a.runtimeEnforcementRows()
+		if err != nil {
+			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		for _, row := range rows {
 			if row.ID == enforcementID || row.Host == enforcementID || row.DecisionID == enforcementID {
 				a.writeJSON(w, http.StatusOK, row)
 				return
@@ -781,16 +955,40 @@ func (a *APIServer) handleRuntimeEnforcements(w http.ResponseWriter, r *http.Req
 		a.writeJSON(w, http.StatusNotFound, map[string]string{"error": "enforcement not found"})
 	case http.MethodDelete:
 		blocklist := activeRuntimeBlocklist()
-		if blocklist == nil {
-			a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime blocklist unavailable"})
-			return
-		}
-		removed := 0
+		networkRemoved := 0
+		actionRemoved := 0
+		matchedResponses := map[string]bool{}
 		for _, row := range runtimeNetworkEnforcements() {
 			if row.ID == enforcementID || row.Host == enforcementID || row.DecisionID == enforcementID {
-				blocklist.Remove(row.Host)
-				removed++
+				if blocklist != nil {
+					blocklist.Remove(row.Host)
+				}
+				if row.ResponseID != "" {
+					matchedResponses[row.ResponseID] = true
+				}
+				networkRemoved++
 			}
+		}
+		if a.store != nil {
+			actions, _ := a.store.ListResponseActionsAll(500, 0)
+			for _, action := range actions {
+				if action.ResponseID == "" || action.Status == audit.ResponseStatusRolledBack {
+					continue
+				}
+				matches := matchedResponses[action.ResponseID] || action.ResponseID == enforcementID || action.DecisionID == enforcementID
+				if !matches && action.Executor == "proxy" {
+					matches = responseTargetMatches(action.Target, enforcementID)
+				}
+				if matches && (action.RollbackSupported || action.Executor == "proxy") {
+					_ = a.store.UpdateResponseActionStatus(action.ResponseID, audit.ResponseStatusRolledBack, "removed by operator")
+					actionRemoved++
+					matchedResponses[action.ResponseID] = true
+				}
+			}
+		}
+		removed := networkRemoved
+		if actionRemoved > 0 {
+			removed = actionRemoved
 		}
 		if removed == 0 {
 			a.writeJSON(w, http.StatusNotFound, map[string]string{"error": "enforcement not found"})
@@ -800,6 +998,100 @@ func (a *APIServer) handleRuntimeEnforcements(w http.ResponseWriter, r *http.Req
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (a *APIServer) rollbackRuntimeEnforcement(w http.ResponseWriter, _ *http.Request, enforcementID string) {
+	blocklist := activeRuntimeBlocklist()
+	removed := 0
+	if blocklist != nil {
+		for _, row := range runtimeNetworkEnforcements() {
+			if row.ID == enforcementID || row.Host == enforcementID || row.DecisionID == enforcementID {
+				blocklist.Remove(row.Host)
+				if row.DecisionID != "" {
+					removed++
+				}
+			}
+		}
+	}
+	if a.store != nil {
+		actions, _ := a.store.ListResponseActionsAll(500, 0)
+		for _, action := range actions {
+			if action.ResponseID == enforcementID || action.DecisionID == enforcementID || (action.Executor == "proxy" && responseTargetMatches(action.Target, enforcementID)) {
+				if !action.RollbackSupported && action.Executor != "proxy" {
+					continue
+				}
+				_ = a.store.UpdateResponseActionStatus(action.ResponseID, audit.ResponseStatusRolledBack, "rolled back by operator")
+				removed++
+			}
+		}
+	}
+	if removed == 0 {
+		a.writeJSON(w, http.StatusConflict, map[string]any{"status": "rollback_unsupported", "rollback_supported": false})
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"status": audit.ResponseStatusRolledBack, "removed": removed, "rollback_supported": true})
+}
+
+func responseTargetMatches(target, enforcementID string) bool {
+	target = strings.TrimSpace(target)
+	enforcementID = strings.TrimSpace(enforcementID)
+	if target == "" || enforcementID == "" {
+		return false
+	}
+	for _, value := range strings.Split(target, ",") {
+		if strings.EqualFold(strings.TrimSpace(value), enforcementID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *APIServer) runtimeEnforcementRows() ([]runtimeEnforcementRow, error) {
+	rows := runtimeNetworkEnforcements()
+	if a.store == nil {
+		return rows, nil
+	}
+	actions, err := a.store.ListResponseActionsAll(500, 0)
+	if err != nil {
+		return nil, err
+	}
+	for _, action := range actions {
+		if action.Status == audit.ResponseStatusRolledBack || action.Status == audit.ResponseStatusWouldBlock || action.Status == audit.ResponseStatusFailed {
+			continue
+		}
+		if action.Executor == "proxy" && action.Status == audit.ResponseStatusExecuted {
+			// The live blocklist row is the canonical active projection for a
+			// network action; do not render the same action twice.
+			duplicate := false
+			for _, network := range rows {
+				if network.DecisionID == action.DecisionID && responseTargetMatches(action.Target, network.Host) {
+					duplicate = true
+					break
+				}
+			}
+			if duplicate {
+				for i := range rows {
+					if rows[i].DecisionID == action.DecisionID && rows[i].Host != "" {
+						rows[i].ResponseID = action.ResponseID
+						rows[i].ActionType = action.ActionType
+						rows[i].Executor = action.Executor
+						rows[i].Result = action.Result
+						rows[i].RollbackSupported = action.RollbackSupported
+					}
+				}
+				continue
+			}
+		}
+		rows = append(rows, runtimeEnforcementRow{
+			ID: action.ResponseID, Kind: "runtime_response", Target: action.Target,
+			DecisionID: action.DecisionID, ResponseID: action.ResponseID,
+			ActionType: action.ActionType, Executor: action.Executor,
+			Status: action.Status, Result: action.Result,
+			RollbackSupported: action.RollbackSupported,
+			AddedAt:           action.ExecutedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	return rows, nil
 }
 
 func runtimeNetworkEnforcements() []runtimeEnforcementRow {
@@ -813,6 +1105,7 @@ func runtimeNetworkEnforcements() []runtimeEnforcementRow {
 		rows = append(rows, runtimeEnforcementRow{
 			ID:         entry.Host,
 			Kind:       "network_block",
+			Target:     entry.Host,
 			Host:       entry.Host,
 			DecisionID: entry.DecisionID,
 			Status:     "active",
@@ -829,8 +1122,11 @@ func (a *APIServer) handleRuntimeDetectionBlockAction(w http.ResponseWriter, r *
 		return
 	}
 	var body struct {
-		ActionType string `json:"action_type"`
-		Reason     string `json:"reason"`
+		ActionType     string `json:"action_type"`
+		Reason         string `json:"reason"`
+		Preview        bool   `json:"preview"`
+		DryRun         bool   `json:"dry_run"`
+		IdempotencyKey string `json:"idempotency_key"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -853,6 +1149,35 @@ func (a *APIServer) handleRuntimeDetectionBlockAction(w http.ResponseWriter, r *
 	if reason == "" {
 		reason = "manual_operator_action"
 	}
+	idempotencyKey := strings.TrimSpace(body.IdempotencyKey)
+	if headerKey := strings.TrimSpace(r.Header.Get("Idempotency-Key")); headerKey != "" {
+		idempotencyKey = headerKey
+	}
+	if len(idempotencyKey) > 200 {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Idempotency-Key must be at most 200 characters"})
+		return
+	}
+	if body.Preview || body.DryRun {
+		target := strings.Join(runtimeEvidenceHosts(evidence), ", ")
+		if target == "" {
+			var values []string
+			for _, row := range evidence {
+				if row.Event.ActorPID > 0 {
+					values = append(values, strconv.FormatUint(uint64(row.Event.ActorPID), 10))
+				}
+				if row.Event.AgentPID > 0 {
+					values = append(values, strconv.FormatUint(uint64(row.Event.AgentPID), 10))
+				}
+			}
+			target = strings.Join(values, ", ")
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{
+			"status":   audit.ResponseStatusPlanned,
+			"plan":     map[string]any{"enforcement_point": point, "action_type": actionType, "target": target, "reason": reason, "side_effects": []string{"写入决策审计记录", "在确认后调用对应执行器"}},
+			"decision": map[string]any{"detection_id": d.DetectionID, "decision": audit.RuntimeDecisionBlock, "enforcement_point": point, "idempotency_key": idempotencyKey},
+		})
+		return
+	}
 	decision, _, err := a.store.RecordRuntimeDecision(audit.RuntimeDecisionInput{
 		DetectionID:      d.DetectionID,
 		AgentID:          d.AgentID,
@@ -867,6 +1192,9 @@ func (a *APIServer) handleRuntimeDetectionBlockAction(w http.ResponseWriter, r *
 		EnforcementPoint: point,
 		Mode:             audit.RuntimeSecurityModeAction,
 		WouldBlock:       false,
+		IdempotencyKey:   idempotencyKey,
+		Source:           "manual",
+		PolicyVersion:    "manual-operator-v1",
 		CreatedAt:        time.Now().UTC(),
 	})
 	if err != nil {
@@ -876,6 +1204,13 @@ func (a *APIServer) handleRuntimeDetectionBlockAction(w http.ResponseWriter, r *
 	if decision.DecisionID != "" {
 		if full, _, err := a.store.GetRuntimeDecisionDetail(decision.DecisionID); err == nil && full.DecisionID != "" {
 			decision = full
+		}
+	}
+	if idempotencyKey != "" {
+		if _, responses, detailErr := a.store.GetRuntimeDecisionDetail(decision.DecisionID); detailErr == nil && len(responses) > 0 {
+			status := runtimeResponseStatus(responses)
+			a.writeJSON(w, http.StatusOK, map[string]any{"status": runtimeEnforcementHTTPStatus(status), "decision": decision, "responses": responses, "idempotent_replay": true})
+			return
 		}
 	}
 	responses, err := a.executeRuntimeDecisionResponse(decision, actionType, evidence, true)
@@ -912,6 +1247,31 @@ func (a *APIServer) handleRuntimeDecisionEnforce(w http.ResponseWriter, r *http.
 		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "only BLOCK decisions can be enforced"})
 		return
 	}
+	var body struct {
+		IdempotencyKey string `json:"idempotency_key"`
+		Preview        bool   `json:"preview"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	idempotencyKey := strings.TrimSpace(body.IdempotencyKey)
+	if headerKey := strings.TrimSpace(r.Header.Get("Idempotency-Key")); headerKey != "" {
+		idempotencyKey = headerKey
+	}
+	if body.Preview {
+		_, evidence, _ := a.store.GetRuntimeDetectionDetail(decision.DetectionID)
+		a.writeJSON(w, http.StatusOK, map[string]any{"status": audit.ResponseStatusPlanned, "plan": map[string]any{"enforcement_point": decision.EnforcementPoint, "action_type": actionTypeForEnforcementPoint(decision.EnforcementPoint), "target": strings.Join(runtimeEvidenceHosts(evidence), ", ")}, "decision": decision})
+		return
+	}
+	if idempotencyKey != "" {
+		if _, responses, detailErr := a.store.GetRuntimeDecisionDetail(decisionID); detailErr == nil && len(responses) > 0 {
+			status := runtimeResponseStatus(responses)
+			if status == audit.ResponseStatusExecuted || status == audit.ResponseStatusRolledBack {
+				a.writeJSON(w, http.StatusOK, map[string]any{"status": runtimeEnforcementHTTPStatus(status), "decision": decision, "responses": responses, "idempotent_replay": true})
+				return
+			}
+		}
+	}
 	_, evidence, _ := a.store.GetRuntimeDetectionDetail(decision.DetectionID)
 	actionType := actionTypeForEnforcementPoint(decision.EnforcementPoint)
 	responses, err := a.executeRuntimeDecisionResponse(decision, actionType, evidence, true)
@@ -924,9 +1284,10 @@ func (a *APIServer) handleRuntimeDecisionEnforce(w http.ResponseWriter, r *http.
 		_ = a.store.UpdateRuntimeDetectionStatus(decision.DetectionID, audit.RuntimeDetectionStatusMitigated)
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{
-		"status":    runtimeEnforcementHTTPStatus(responseStatus),
-		"decision":  decision,
-		"responses": responses,
+		"status":          runtimeEnforcementHTTPStatus(responseStatus),
+		"decision":        decision,
+		"responses":       responses,
+		"idempotency_key": idempotencyKey,
 	})
 }
 
@@ -943,6 +1304,11 @@ func runtimeResponseStatus(responses []audit.ResponseAction) string {
 		}
 	}
 	for _, response := range responses {
+		if response.Status == audit.ResponseStatusExecuting {
+			return audit.ResponseStatusExecuting
+		}
+	}
+	for _, response := range responses {
 		if response.Status == audit.ResponseStatusDispatched {
 			return audit.ResponseStatusDispatched
 		}
@@ -950,6 +1316,21 @@ func runtimeResponseStatus(responses []audit.ResponseAction) string {
 	for _, response := range responses {
 		if response.Status == audit.ResponseStatusWouldBlock {
 			return audit.ResponseStatusWouldBlock
+		}
+	}
+	for _, response := range responses {
+		if response.Status == audit.ResponseStatusPlanned {
+			return audit.ResponseStatusPlanned
+		}
+	}
+	for _, response := range responses {
+		if response.Status == audit.ResponseStatusRolledBack {
+			return audit.ResponseStatusRolledBack
+		}
+	}
+	for _, response := range responses {
+		if response.Status == audit.ResponseStatusExpired {
+			return audit.ResponseStatusExpired
 		}
 	}
 	return audit.ResponseStatusFailed
@@ -961,8 +1342,16 @@ func runtimeEnforcementHTTPStatus(responseStatus string) string {
 		return "blocked"
 	case audit.ResponseStatusDispatched:
 		return "dispatched"
+	case audit.ResponseStatusExecuting:
+		return "executing"
 	case audit.ResponseStatusWouldBlock:
 		return "would_block"
+	case audit.ResponseStatusPlanned:
+		return "planned"
+	case audit.ResponseStatusExpired:
+		return "expired"
+	case audit.ResponseStatusRolledBack:
+		return "rolled_back"
 	default:
 		return "failed"
 	}
@@ -1010,13 +1399,14 @@ func (a *APIServer) executeRuntimeDecisionResponse(decision audit.RuntimeDecisio
 		result = "runtime policy engine unavailable"
 	}
 	action, err := a.store.RecordResponseAction(audit.ResponseActionInput{
-		DecisionID: decision.DecisionID,
-		ActionType: actionType,
-		Executor:   executor,
-		Target:     target,
-		Status:     status,
-		Result:     result,
-		ExecutedAt: time.Now().UTC(),
+		DecisionID:        decision.DecisionID,
+		ActionType:        actionType,
+		Executor:          executor,
+		Target:            target,
+		Status:            status,
+		Result:            result,
+		RollbackSupported: decision.EnforcementPoint == audit.EnforcementPointProxy,
+		ExecutedAt:        time.Now().UTC(),
 	})
 	if err != nil {
 		return nil, err
@@ -1048,7 +1438,8 @@ func manualActionPlan(rawActionType, detectionType string) (string, string, erro
 		// Desktop clients used the generic BLOCK action before the
 		// enforcement-point vocabulary was exposed. Resolve it using the
 		// same policy plan as automatic decisions.
-		return detection.EnforcementPlan(detectionType)
+		point, planned := detection.EnforcementPlan(detectionType)
+		return point, planned, nil
 	default:
 		return "", "", fmt.Errorf("unsupported action_type %q", rawActionType)
 	}

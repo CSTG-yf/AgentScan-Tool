@@ -1,6 +1,6 @@
 # 安全监测、异常阻断与攻击链接口改造方案
 
-> 状态：已实现基线（后端接入完成，待 Go 工具链与 Windows 端到端验证）  
+> 状态：已实现基线（后端接入与 Go 定向验证完成，待 Windows 管理员环境端到端验收）
 > 适用版本：当前工作树（基于 `main` 合并 `qjq` 的提交 `a768421d`）  
 > 范围：Agent 发现、静态资源检测、运行时事件检测、异常阻断、攻击链、桌面端自动/手动数据同步
 
@@ -207,9 +207,10 @@ Desktop POST job/action    ──>  Job Orchestrator / Executor Router
 | `GET/PUT /api/v1/runtime-security/mode` | `observe/action` | 已实现 | 当前 Events 页面独立控制运行时模式 |
 | `POST /api/v1/runtime-detections/{id}/actions/block` | 人工阻断 Detection | 已实现 | 当前只有执行器返回 `executed` 才标记 `mitigated` |
 | `POST /api/v1/runtime-decisions/{id}/enforce` | 执行已有 BLOCK 决策 | 已实现 | 当前复用执行器路由并返回准确状态 |
-| `GET /api/v1/enforcements` | 当前网络阻断项 | 已实现 | 只展示内存/设置中的网络 host blocklist |
-| `GET /api/v1/enforcements/{id}` | 阻断详情 | 已实现 | 仅网络阻断 |
-| `DELETE /api/v1/enforcements/{id}` | 解除网络阻断 | 已实现 | 仅网络阻断 |
+| `GET /api/v1/enforcements` | 当前处置项 | 已实现 | 读取活动执行器和持久化响应动作 |
+| `GET /api/v1/enforcements/{id}` | 处置详情 | 已实现 | 返回目标、执行器、结果和回滚能力 |
+| `POST /api/v1/enforcements/{id}/rollback` | 回滚处置 | 已实现 | 仅对可回滚执行器生效，保留审计记录 |
+| `DELETE /api/v1/enforcements/{id}` | 兼容解除入口 | 已实现 | 与 rollback 对网络规则兼容；不可逆动作不会伪造回滚 |
 
 前端桥接已经定义但没有任何页面调用：
 
@@ -269,6 +270,22 @@ Desktop POST job/action    ──>  Job Orchestrator / Executor Router
 - `GET /api/v1/changes` 已提供 cursor/delta invalidation；App 尚未将所有页面切换为该游标。
 
 代码依据：`desktop/src/App.tsx:140`、`:159`、`:163`、`:226`。
+
+### 5.7 前端静态/写死内容清单
+
+下面内容目前仍由前端代码提供，需和“后端权威数据”区分；它们不是数据库检测结果。桌面应用运行在 Tauri 模式时，事实数据应全部来自 Gateway，浏览器预览分支只用于让页面可渲染。
+
+| 位置 | 当前静态内容 | 风险/影响 | 处理建议 |
+|---|---|---|---|
+| `desktop/src/data/staticAssets.ts` | 资源类型、风险等级、状态的标签、颜色、排序和说明 | 属于展示字典，新增后端枚举时前端可能显示降级文本 | 保留为 UI 字典；后端返回未知值时显示原值，并在版本升级时同步字典 |
+| `desktop/src/data/events.ts`、`desktop/src/app/display.tsx` | 事件分类和状态标签 | 不影响检测判断，但标签与后端状态枚举漂移会误导操作员 | 以 API 状态为准，统一由共享 DTO/枚举生成 |
+| `desktop/src/data/range.ts`、`RangePage.tsx` | AgentRange 场景名称、触发命令、风险说明和默认回放场景 | 这是靶场演示语料，不应当被当作真实攻击事件或生产统计 | 保留为靶场目录；真实结果只读运行时事件/Detection/Chain 表 |
+| `desktop/src/bridge.ts` | 浏览器预览下的空列表、默认设置、`browserEnvironment`、`desktop preview` 攻击链提示，以及治理风险模型/规则 mock | 浏览器模式不会访问本机或 SQLite，若误用于生产会显示 0 或示例数据 | 仅允许非 Tauri 预览；桌面模式调用 Gateway，必要时在界面显式标注“预览” |
+| `desktop/src/bridge.ts` 治理函数 | 非 Tauri 下的风险映射、类别和规则前缀 mock | 只能用于离线表单预览，不能作为真实策略来源 | 桌面端统一调用 `/agent-governance`；后端返回空数据时显示“未配置”而不是 mock |
+| `desktop/src/bridge.ts`、`SettingsPage.tsx` | 扫描/刷新间隔默认值、空数据初始值 | 仅在后端不可用或首次渲染时生效；不代表后台调度已经运行 | 后端保存的 schedule/job 为唯一运行配置，默认值只做初始化 |
+| 各页面 JSX | 菜单文案、颜色、按钮文案、分页默认大小、时间轮询间隔 | 展示常量，不是安全事实；修改文案不会改变策略 | 可保留；危险动作和执行状态必须来自 API，不得用文案推断 |
+
+因此本次改造的“去静态化”边界是：Agent、资源、事件、Detection、Decision、Response、Attack Chain、Job 的数量/状态/详情全部由数据库接口提供；展示字典、靶场目录和浏览器预览占位仍可静态存在，但必须明确标注用途，不能参与生产检测或阻断决策。
 
 ## 6. 问题优先级与改造建议
 
@@ -415,7 +432,7 @@ Job 必须持久化、有限保留、支持重启恢复或明确标记 `interrup
 | `GET` | `/api/v1/static-resources` | 数据库分页查询 |
 | `POST` | `/api/v1/jobs`，`kind=resource_scan` | 支持 resource/agent/all scope |
 | `GET` | `/api/v1/static-resources/{id}/scans` | 扫描历史 |
-| `GET` | `/api/v1/static-resources/{id}/relations` | 返回真实关系或 `supported:false` |
+| `GET` | `/api/v1/static-resources/{id}/relations` | 返回由资源、Agent 和目标路径推导的关系；当前 `supported:true` |
 
 应修复并保留 `/api/v1/static-resources/rescan` 兼容入口，但新 UI 统一使用 Job 接口。
 
@@ -637,7 +654,7 @@ Guardrail / Agent Hook / Proxy / Windows 兼容事件 / OS Sensor
   -> Runtime Detection Engine（原子规则 + 会话窗口关联规则）
   -> runtime_detections（含 rule_version 与 evidence）
   -> Runtime Policy Engine（ALLOW/AUDIT/ALERT/CONFIRM/BLOCK）
-  -> runtime_response_actions（would_block / failed / executed）
+  -> runtime_response_actions（planned / would_block / dispatched / executing / executed / failed / expired / rolled_back）
   -> runtime_attack_chains（后端持久化链）
 ```
 
@@ -675,7 +692,7 @@ Guardrail / Agent Hook / Proxy / Windows 兼容事件 / OS Sensor
 - `desktop`：`pnpm check` 通过；`pnpm build` 通过。当前机器 Node 为 `20.18.0`，项目和 Vite 建议 `>=20.19.0`，因此构建会给出版本警告；产物仍成功生成。
 - `desktop/src-tauri`：`cargo fmt --check` 通过；`cargo test --locked` 通过，17 个测试全部通过。
 - `git diff --check` 通过。
-- Go 工具链在当前机器不可用，且下载/安装未成功，因此本轮没有虚报 `go test` 或 `gofmt` 结果；提交前需在 CI 或装有 Go 的环境执行 `gofmt -w`、`go test ./...`。
+- 当前机器已使用项目内可复现的 Go 工具链完成 `gofmt` 和审计/检测/网关定向测试，覆盖批量事件、任务幂等、执行/回滚、兼容行为事件和静态资源接口；前端与 Tauri 测试也已通过。已尝试完整 `go test ./...`，但当前 Windows 环境有一批与本次改造无关的既有失败（连接器临时目录路径/权限、Unix 文件权限断言、缺少 openshell-sandbox、Windows ACL/DACL 以及子进程占用 SQLite 清理等）；因此完整仓库验收仍需在 CI/Linux 或具备完整本机依赖与管理员权限的环境复核，不能把定向测试等同于全仓库验收。
 
 ### 13.5 尚未关闭的风险与下一阶段目标
 
@@ -683,7 +700,7 @@ Guardrail / Agent Hook / Proxy / Windows 兼容事件 / OS Sensor
 
 1. 在真实 Windows 管理员环境安装并启动 Process Guard，验证服务离线、UAC 拒绝、进程树终止和重复点击幂等；这是 P0 发布门槛。
 2. 为 Guardrail、Agent Hook、MCP、File 增加真实 Executor 和统一 `/api/v1/enforcements` 持久化读模型；在此之前这些点必须保持 `failed`/`would_block` 的诚实状态。
-3. 静态资源 `relations` 目前明确返回 `supported:false`，需要图构建器后再开放，不能把空数组解释成“没有关系”。
+3. 静态资源 `relations` 已能从权威资源、Agent 和目标路径推导基础关系并返回 `supported:true`；目前仍是有限图语义，不能把空数组解释成“没有关系”，后续需补充跨资源引用和图构建版本。
 4. App 层仍保留定时刷新作为兼容回退；`/api/v1/changes` 已提供但尚未让所有页面完全切换到 cursor/SSE。下一阶段应先按 domain 增量刷新，再移除全局轮询。
 5. 需要把检测 source 过滤、攻击链列表详情的 N+1 查询、builder/policy 版本和任务取消的协作式中止进一步工程化；当前实现已经避免错误数据，但性能和可追溯性仍不是最终态。
 
