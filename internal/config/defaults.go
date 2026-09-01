@@ -162,6 +162,7 @@ func DefaultConfig() *Config {
 			DebounceMs:          500,
 			AutoBlock:           true,
 			AllowListBypassScan: true,
+			RealtimeEnabled:     true,
 			RescanEnabled:       true,
 			RescanIntervalMin:   60,
 			RescanContentGated:  true,

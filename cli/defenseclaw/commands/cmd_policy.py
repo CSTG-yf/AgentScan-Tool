@@ -77,12 +77,12 @@ def _list_policy_files(app: AppContext) -> list[str]:
 
 
 def _load_policy(path: str) -> dict:
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
 
 def _save_policy(path: str, data: dict) -> None:
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
 
@@ -459,10 +459,24 @@ def _activate_policy(app: AppContext, name: str) -> str:
 
     watch_raw = data.get("watch", {})
     app.cfg.skill_actions = new_actions
+    if "realtime_enabled" in watch_raw:
+        app.cfg.watch.realtime_enabled = bool(watch_raw["realtime_enabled"])
     if "rescan_enabled" in watch_raw:
         app.cfg.watch.rescan_enabled = bool(watch_raw["rescan_enabled"])
     if "rescan_interval_min" in watch_raw:
         app.cfg.watch.rescan_interval_min = int(watch_raw["rescan_interval_min"])
+    if "rescan_skill_interval_min" in watch_raw:
+        app.cfg.watch.rescan_skill_interval_min = int(watch_raw["rescan_skill_interval_min"])
+    if "rescan_plugin_interval_min" in watch_raw:
+        app.cfg.watch.rescan_plugin_interval_min = int(watch_raw["rescan_plugin_interval_min"])
+    if "rescan_mcp_interval_min" in watch_raw:
+        app.cfg.watch.rescan_mcp_interval_min = int(watch_raw["rescan_mcp_interval_min"])
+    if "rescan_prompt_interval_min" in watch_raw:
+        app.cfg.watch.rescan_prompt_interval_min = int(watch_raw["rescan_prompt_interval_min"])
+    if "rescan_credential_interval_min" in watch_raw:
+        app.cfg.watch.rescan_credential_interval_min = int(watch_raw["rescan_credential_interval_min"])
+    if "rescan_environment_interval_min" in watch_raw:
+        app.cfg.watch.rescan_environment_interval_min = int(watch_raw["rescan_environment_interval_min"])
 
     # Apply Cisco AI Defense settings into config.yaml. The gateway reads
     # the AID lane from Config.CiscoAIDefense, not from data.json, so we

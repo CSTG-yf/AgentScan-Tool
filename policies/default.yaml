@@ -165,8 +165,15 @@ firewall:
 # filesystem watching of policy files — use `POST /policy/reload` or
 # `defenseclaw policy reload` to pick up Rego policy changes.
 watch:
+  realtime_enabled: true
   rescan_enabled: true
   rescan_interval_min: 60
+  rescan_skill_interval_min: 30
+  rescan_plugin_interval_min: 60
+  rescan_mcp_interval_min: 15
+  rescan_prompt_interval_min: 30
+  rescan_credential_interval_min: 10
+  rescan_environment_interval_min: 60
 
 # Outbound webhook notifications. Valid event categories:
 #   block     - skill/plugin/MCP blocked or quarantined

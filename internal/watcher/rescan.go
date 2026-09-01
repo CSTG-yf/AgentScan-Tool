@@ -28,6 +28,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 
 	"github.com/defenseclaw/defenseclaw/internal/audit"
 	"github.com/defenseclaw/defenseclaw/internal/config"
+	"github.com/defenseclaw/defenseclaw/internal/enforce"
 	"github.com/defenseclaw/defenseclaw/internal/gatewaylog"
 	"github.com/defenseclaw/defenseclaw/internal/scanner"
 	"github.com/defenseclaw/defenseclaw/internal/version"
@@ -70,20 +72,111 @@ type DriftDelta struct {
 	RuleID string `json:"rule_id,omitempty"`
 }
 
-// rescanLoop runs periodic re-scans of all installed skills, plugins, and MCPs,
-// compares against baseline snapshots, and emits drift alerts.
+// rescanLoop runs periodic re-scans of all static resource targets, compares
+// against baseline snapshots, and emits drift alerts.
 func (w *InstallWatcher) rescanLoop(ctx context.Context) {
-	interval := time.Duration(w.cfg.Watch.RescanIntervalMin) * time.Minute
+	schedules := w.rescanSchedules()
+	if len(schedules) == 0 {
+		return
+	}
+
+	for _, schedule := range schedules {
+		schedule := schedule
+		go w.rescanLoopForTypes(ctx, schedule.Types, schedule.Interval)
+	}
+
+	<-ctx.Done()
+}
+
+type rescanSchedule struct {
+	Types    []InstallType
+	Interval time.Duration
+}
+
+func (w *InstallWatcher) rescanSchedules() []rescanSchedule {
+	byInterval := make(map[time.Duration][]InstallType)
+	for _, targetType := range allStaticResourceTypes() {
+		interval := w.rescanIntervalFor(targetType)
+		byInterval[interval] = append(byInterval[interval], targetType)
+	}
+
+	intervals := make([]time.Duration, 0, len(byInterval))
+	for interval := range byInterval {
+		intervals = append(intervals, interval)
+	}
+	sort.Slice(intervals, func(i, j int) bool { return intervals[i] < intervals[j] })
+
+	out := make([]rescanSchedule, 0, len(intervals))
+	for _, interval := range intervals {
+		out = append(out, rescanSchedule{Types: byInterval[interval], Interval: interval})
+	}
+	return out
+}
+
+func (w *InstallWatcher) rescanIntervalFor(targetType InstallType) time.Duration {
+	minutes := 60
+	if w != nil && w.cfg != nil && w.cfg.Watch.RescanIntervalMin > 0 {
+		minutes = w.cfg.Watch.RescanIntervalMin
+	}
+	if w != nil && w.cfg != nil {
+		switch targetType {
+		case InstallSkill:
+			if w.cfg.Watch.RescanSkillIntervalMin > 0 {
+				minutes = w.cfg.Watch.RescanSkillIntervalMin
+			}
+		case InstallPlugin:
+			if w.cfg.Watch.RescanPluginIntervalMin > 0 {
+				minutes = w.cfg.Watch.RescanPluginIntervalMin
+			}
+		case InstallMCP:
+			if w.cfg.Watch.RescanMCPIntervalMin > 0 {
+				minutes = w.cfg.Watch.RescanMCPIntervalMin
+			}
+		case InstallConfig:
+			if w.cfg.Watch.RescanPromptIntervalMin > 0 {
+				minutes = w.cfg.Watch.RescanPromptIntervalMin
+			}
+		case InstallPrompt:
+			if w.cfg.Watch.RescanPromptIntervalMin > 0 {
+				minutes = w.cfg.Watch.RescanPromptIntervalMin
+			}
+		case InstallCredential:
+			if w.cfg.Watch.RescanCredentialIntervalMin > 0 {
+				minutes = w.cfg.Watch.RescanCredentialIntervalMin
+			}
+		case InstallEnvironment:
+			if w.cfg.Watch.RescanEnvironmentIntervalMin > 0 {
+				minutes = w.cfg.Watch.RescanEnvironmentIntervalMin
+			}
+		}
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+func allStaticResourceTypes() []InstallType {
+	return []InstallType{
+		InstallConfig,
+		InstallSkill,
+		InstallPlugin,
+		InstallMCP,
+		InstallPrompt,
+		InstallCredential,
+		InstallEnvironment,
+	}
+}
+
+func (w *InstallWatcher) rescanLoopForTypes(ctx context.Context, targetTypes []InstallType, interval time.Duration) {
 	if interval <= 0 {
 		interval = 60 * time.Minute
 	}
+	label := installTypesLabel(targetTypes)
 
-	fmt.Fprintf(os.Stderr, "[rescan] periodic re-scan enabled (interval=%s)\n", interval)
-	_ = w.logger.LogAction(string(audit.ActionRescanStart), "", fmt.Sprintf("interval=%s", interval))
+	fmt.Fprintf(os.Stderr, "[rescan] periodic re-scan enabled (types=%s interval=%s)\n", label, interval)
+	_ = w.logger.LogAction(string(audit.ActionRescanStart), "", fmt.Sprintf("types=%s interval=%s", label, interval))
 
 	// Bootstrap a baseline immediately so already-installed targets are not
 	// blind for the first full interval after startup.
-	w.runRescanCycle(ctx)
+	w.runRescanCycleForTypes(ctx, targetTypes...)
 
 	timer := time.NewTimer(interval)
 	defer timer.Stop()
@@ -93,10 +186,21 @@ func (w *InstallWatcher) rescanLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			w.runRescanCycle(ctx)
+			w.runRescanCycleForTypes(ctx, targetTypes...)
 			timer.Reset(interval)
 		}
 	}
+}
+
+func installTypesLabel(targetTypes []InstallType) string {
+	if len(targetTypes) == 0 {
+		return "all"
+	}
+	parts := make([]string, 0, len(targetTypes))
+	for _, targetType := range targetTypes {
+		parts = append(parts, string(targetType))
+	}
+	return strings.Join(parts, ",")
 }
 
 // rescanOutcome reports whether a single target was actually scanned during a
@@ -108,6 +212,22 @@ const (
 	rescanScanned
 )
 
+type rescanScanStatus int
+
+const (
+	rescanScanFailed rescanScanStatus = iota
+	rescanScanCompleted
+	rescanScanSkippedByPreScan
+)
+
+const rescanPreScanSnapshotIDPrefix = "rescan-pre-scan:"
+
+type rescanScanResult struct {
+	result *scanner.ScanResult
+	scanID string
+	status rescanScanStatus
+}
+
 // runRescanCycle enumerates all installed targets and re-scans each one.
 //
 // The scanner is expensive (subprocess + optional LLM/network calls), so a
@@ -115,16 +235,27 @@ const (
 // since the last baseline. Unchanged targets are skipped entirely, which keeps
 // the periodic loop cheap and stops scan_results from growing on every cycle.
 func (w *InstallWatcher) runRescanCycle(ctx context.Context) {
+	w.runRescanCycleForTypes(ctx)
+}
+
+func (w *InstallWatcher) runRescanCycleForTypes(ctx context.Context, targetTypes ...InstallType) {
+	w.rescanMu.Lock()
+	defer w.rescanMu.Unlock()
+
 	targets := w.enumerateTargets()
+	if len(targetTypes) > 0 {
+		targets = filterTargetsByType(targets, targetTypes)
+	}
 	if len(targets) == 0 {
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "[rescan] starting periodic re-scan of %d targets\n", len(targets))
+	fmt.Fprintf(os.Stderr, "[rescan] starting periodic re-scan of %d targets (types=%s)\n", len(targets), installTypesLabel(targetTypes))
 
-	// Scanner fingerprints depend on the target *type*, not the individual
-	// target, so compute them at most once per kind per cycle.
-	fpCache := make(map[InstallType]string)
+	// Scanner fingerprints depend on the target *type* and its scan profile
+	// (rule-driven events), not the individual target, so compute them at
+	// most once per kind+profile per cycle.
+	fpCache := make(map[string]string)
 
 	var scanned, skipped int
 	for _, evt := range targets {
@@ -148,12 +279,111 @@ func (w *InstallWatcher) runRescanCycle(ctx context.Context) {
 	fmt.Fprintf(os.Stderr, "[rescan] cycle complete: targets=%d scanned=%d skipped=%d\n",
 		len(targets), scanned, skipped)
 	_ = w.logger.LogAction(string(audit.ActionRescan), "",
-		fmt.Sprintf("targets=%d scanned=%d skipped=%d", len(targets), scanned, skipped))
+		fmt.Sprintf("types=%s targets=%d scanned=%d skipped=%d", installTypesLabel(targetTypes), len(targets), scanned, skipped))
 }
 
-// enumerateTargets lists all direct child directories under watched roots plus
-// configured MCP servers from openclaw.json.
+func filterTargetsByType(targets []InstallEvent, targetTypes []InstallType) []InstallEvent {
+	if len(targetTypes) == 0 || len(targets) == 0 {
+		return targets
+	}
+	allowed := make(map[InstallType]bool, len(targetTypes))
+	for _, targetType := range targetTypes {
+		allowed[targetType] = true
+	}
+	out := make([]InstallEvent, 0, len(targets))
+	for _, target := range targets {
+		if allowed[target.Type] {
+			out = append(out, target)
+		}
+	}
+	return out
+}
+
+// enumerateTargets starts from the discovered agents and enumerates every
+// resource their agent_resource_rules rows point at (rule-driven
+// enumeration). Config-registered MCP servers and the auxiliary static
+// targets (config/prompt/credential/environment files) are not
+// filesystem-enumerable and are always appended.
+//
+// Fallback semantics (deliberate): the legacy fixed-directory enumeration
+// applies ONLY when no discovered agent has any enabled resource rule —
+// "rules don't exist". When rules exist but enumerate nothing, that empty
+// result is authoritative: an agent whose ${CONFIG_ROOT}/skills directory
+// simply isn't present on this machine yields 0 skills, and the legacy
+// global directories must NOT kick in and hunt elsewhere.
 func (w *InstallWatcher) enumerateTargets() []InstallEvent {
+	var targets []InstallEvent
+
+	ruleTargets, anyRules := w.enumerateRuleDrivenTargets()
+	if anyRules {
+		targets = append(targets, ruleTargets...)
+	} else {
+		targets = append(targets, w.enumerateLegacyTargets()...)
+	}
+
+	// MCP servers registered in the connector config are discovered from
+	// the config surface, not the filesystem — rules cannot enumerate them.
+	servers, err := w.cfg.ReadMCPServers()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[rescan] enumerate mcp servers: %v\n", err)
+	} else {
+		for _, server := range servers {
+			if strings.TrimSpace(server.Name) == "" {
+				continue
+			}
+			targets = append(targets, InstallEvent{
+				Type:      InstallMCP,
+				Name:      server.Name,
+				Path:      server.Name,
+				Timestamp: time.Now().UTC(),
+			})
+		}
+	}
+
+	targets = append(targets, w.enumerateAuxiliaryStaticTargets()...)
+
+	return dedupInstallTargets(targets)
+}
+
+// enumerateRuleDrivenTargets walks the discovered agents and expands each
+// one's agent_resource_rules into concrete InstallEvents (with
+// agent/resource/rule/profile lineage attached). The second return value
+// reports whether ANY enumerated agent had enabled rules — the fallback
+// switch: rules that exist but enumerate nothing still count as
+// "rule-driven mode is on" (their empty result is final, not a trigger for
+// the legacy paths).
+func (w *InstallWatcher) enumerateRuleDrivenTargets() ([]InstallEvent, bool) {
+	if w == nil || w.store == nil {
+		return nil, false
+	}
+	agents, err := w.store.ListActiveAgents()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[rescan] list active agents: %v\n", err)
+		return nil, false
+	}
+	var targets []InstallEvent
+	anyRules := false
+	for _, agent := range agents {
+		if agent.AgentTypeID <= 0 {
+			continue
+		}
+		rules, err := w.store.ListResourceRulesByAgentType(agent.AgentTypeID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[rescan] list resource rules for agent %s: %v\n", agent.ID, err)
+			continue
+		}
+		if len(rules) == 0 {
+			continue
+		}
+		anyRules = true
+		targets = append(targets, w.enumerateResourcesForAgent(agent)...)
+	}
+	return targets, anyRules
+}
+
+// enumerateLegacyTargets is the pre-rule fallback: fixed skill/plugin
+// directories plus the AgentRange-specific skills/mcp enumeration.
+func (w *InstallWatcher) enumerateLegacyTargets() []InstallEvent {
 	var targets []InstallEvent
 
 	for _, dir := range w.skillDirs {
@@ -194,24 +424,38 @@ func (w *InstallWatcher) enumerateTargets() []InstallEvent {
 		}
 	}
 
-	servers, err := w.cfg.ReadMCPServers()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[rescan] enumerate mcp servers: %v\n", err)
+	targets = append(targets, w.enumerateAgentRangeStaticTargets()...)
+	return targets
+}
+
+// dedupInstallTargets removes duplicate targets. The key includes AgentID so
+// two agents referencing the same directory (a shared MCP dir, the same
+// skills root) stay separate — each agent keeps its own resource row, scan
+// profile, and risk verdict.
+func dedupInstallTargets(targets []InstallEvent) []InstallEvent {
+	if len(targets) < 2 {
 		return targets
 	}
-	for _, server := range servers {
-		if strings.TrimSpace(server.Name) == "" {
+	out := make([]InstallEvent, 0, len(targets))
+	seen := make(map[string]bool, len(targets))
+	for _, target := range targets {
+		keyPath := strings.TrimSpace(target.Path)
+		if keyPath == "" {
+			keyPath = strings.TrimSpace(target.Name)
+		}
+		if !strings.Contains(keyPath, "://") {
+			if cleaned := cleanAbsPath(keyPath); cleaned != "" {
+				keyPath = cleaned
+			}
+		}
+		key := target.AgentID + "\x00" + string(target.Type) + "\x00" + keyPath
+		if seen[key] {
 			continue
 		}
-		targets = append(targets, InstallEvent{
-			Type:      InstallMCP,
-			Name:      server.Name,
-			Path:      server.Name,
-			Timestamp: time.Now().UTC(),
-		})
+		seen[key] = true
+		out = append(out, target)
 	}
-
-	return targets
+	return out
 }
 
 // rescanTarget snapshots a single target, decides whether a fresh scan is
@@ -219,7 +463,7 @@ func (w *InstallWatcher) enumerateTargets() []InstallEvent {
 // the scanner, diffs findings, emits drift alerts, and refreshes the baseline.
 // Targets whose content and scanner fingerprint are unchanged are skipped
 // without invoking the scanner or writing a scan_results row.
-func (w *InstallWatcher) rescanTarget(ctx context.Context, evt InstallEvent, fpCache map[InstallType]string) rescanOutcome {
+func (w *InstallWatcher) rescanTarget(ctx context.Context, evt InstallEvent, fpCache map[string]string) rescanOutcome {
 	currentSnap, err := w.snapshotForEvent(evt)
 	if errors.Is(err, os.ErrNotExist) {
 		return rescanSkipped
@@ -236,9 +480,9 @@ func (w *InstallWatcher) rescanTarget(ctx context.Context, evt InstallEvent, fpC
 		if errors.Is(err, sql.ErrNoRows) {
 			// First time we've seen this target: scan once to establish a
 			// baseline that future cycles can diff against.
-			result, scanID := w.scanAndEmit(ctx, evt)
-			w.persistSnapshot(evt, currentSnap, scanID, fingerprint)
-			if result == nil {
+			scan := w.scanAndEmit(ctx, evt)
+			w.persistSnapshot(evt, currentSnap, scan.scanID, fingerprint)
+			if scan.status != rescanScanCompleted {
 				return rescanSkipped
 			}
 			return rescanScanned
@@ -268,8 +512,15 @@ func (w *InstallWatcher) rescanTarget(ctx context.Context, evt InstallEvent, fpC
 
 	// Drift, fingerprint change, or recovery: run the scanner exactly once
 	// and diff its findings against the previous baseline scan.
-	result, scanID := w.scanAndEmit(ctx, evt)
-	deltas = append(deltas, w.findingDrift(baseline, result)...)
+	scanResult := w.scanAndEmit(ctx, evt)
+	if scanResult.status == rescanScanSkippedByPreScan {
+		if len(deltas) > 0 {
+			w.emitDriftAlerts(evt, deltas)
+		}
+		w.persistSnapshot(evt, currentSnap, scanResult.scanID, fingerprint)
+		return rescanSkipped
+	}
+	deltas = append(deltas, w.findingDrift(baseline, scanResult.result)...)
 
 	if len(deltas) > 0 {
 		w.emitDriftAlerts(evt, deltas)
@@ -285,14 +536,17 @@ func (w *InstallWatcher) rescanTarget(ctx context.Context, evt InstallEvent, fpC
 	// retries and upgrades the baseline. When there is no prior scan id
 	// (first-time/recovery baseline) there is no trust state to lose, so
 	// we fall through and persist.
-	if scanID == "" && baseline.ScanID != "" {
+	if scanResult.scanID == "" && baseline.ScanID != "" {
 		fmt.Fprintf(os.Stderr,
 			"[rescan] refusing to overwrite baseline for %s without scanner evidence (F-3188)\n",
 			evt.Path)
 		return rescanScanned
 	}
-	w.persistSnapshot(evt, currentSnap, scanID, fingerprint)
-	return rescanScanned
+	w.persistSnapshot(evt, currentSnap, scanResult.scanID, fingerprint)
+	if scanResult.status == rescanScanCompleted {
+		return rescanScanned
+	}
+	return rescanSkipped
 }
 
 // shouldRescan decides whether a target with an existing baseline needs a fresh
@@ -320,14 +574,44 @@ func shouldRescan(baseline *audit.SnapshotRow, snap *TargetSnapshot, fingerprint
 	return false, "unchanged"
 }
 
-// scanAndEmit runs the scanner for evt once and fans the result through the
-// unified emission pipeline (one scan_results row + per-finding rows + events).
-// Returns the result and the generated scan ID, or (nil, "") when no scanner is
-// configured or the scan fails.
-func (w *InstallWatcher) scanAndEmit(ctx context.Context, evt InstallEvent) (*scanner.ScanResult, string) {
+// scanAndEmit applies rescan pre-scan policy, runs the configured scanner when
+// policy allows scanning, persists the scan result, then applies post-scan
+// policy against the persisted risk summary.
+func (w *InstallWatcher) scanAndEmit(ctx context.Context, evt InstallEvent) rescanScanResult {
+	targetType := string(evt.Type)
+	pe := enforce.NewPolicyEngine(w.store)
+	if dbPre, matched, err := w.evaluateResourcePreScanDecision(evt); err != nil {
+		fmt.Fprintf(os.Stderr, "[rescan] evaluate pre-scan profile %d: %v\n", evt.PreScanProfileID, err)
+	} else if matched {
+		switch dbPre.Decision {
+		case "block", "reject", "rejected":
+			_ = w.logger.LogAction(string(audit.ActionInstallRejected), evt.Path,
+				fmt.Sprintf("type=%s phase=rescan-pre-scan reason=%s", targetType, dbPre.Reason))
+			w.applyResourcePreScanAction(ctx, pe, dbPre, evt, targetType)
+			return rescanScanResult{
+				scanID: rescanPreScanSnapshotID(dbPre.Decision),
+				status: rescanScanSkippedByPreScan,
+			}
+		case "allow", "skip":
+			_ = w.logger.LogAction(string(audit.ActionInstallAllowed), evt.Path,
+				fmt.Sprintf("type=%s phase=rescan-pre-scan reason=%s", targetType, dbPre.Reason))
+			w.applyResourcePreScanAction(ctx, pe, dbPre, evt, targetType)
+			return rescanScanResult{
+				scanID: rescanPreScanSnapshotID(dbPre.Decision),
+				status: rescanScanSkippedByPreScan,
+			}
+		case "alert", "review":
+			_ = w.logger.LogAction(string(audit.ActionInstallWarning), evt.Path,
+				fmt.Sprintf("type=%s phase=rescan-pre-scan reason=%s", targetType, dbPre.Reason))
+		case "scan":
+			_ = w.logger.LogAction("resource-rescan-pre-scan-scan", evt.Path,
+				fmt.Sprintf("type=%s reason=%s", targetType, dbPre.Reason))
+		}
+	}
+
 	s := w.newScanner(evt)
 	if s == nil {
-		return nil, ""
+		return rescanScanResult{status: rescanScanFailed}
 	}
 
 	scanCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -336,12 +620,52 @@ func (w *InstallWatcher) scanAndEmit(ctx context.Context, evt InstallEvent) (*sc
 	result, err := s.Scan(scanCtx, w.scanTargetFor(evt))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[rescan] scan %s: %v\n", evt.Path, err)
-		return nil, ""
+		return rescanScanResult{status: rescanScanFailed}
 	}
 	if result == nil {
-		return nil, ""
+		return rescanScanResult{status: rescanScanFailed}
 	}
-	return result, w.emitRescanResult(scanCtx, result)
+	scanID := w.emitRescanResult(scanCtx, result, evt)
+	w.applyRescanPostScanDecision(scanCtx, pe, evt, result, s.Name())
+	return rescanScanResult{
+		result: result,
+		scanID: scanID,
+		status: rescanScanCompleted,
+	}
+}
+
+func rescanPreScanSnapshotID(decision string) string {
+	decision = strings.ToLower(strings.TrimSpace(decision))
+	if decision == "" {
+		decision = "matched"
+	}
+	return rescanPreScanSnapshotIDPrefix + decision
+}
+
+func isRescanPreScanSnapshotID(scanID string) bool {
+	return strings.HasPrefix(strings.TrimSpace(scanID), rescanPreScanSnapshotIDPrefix)
+}
+
+func (w *InstallWatcher) applyRescanPostScanDecision(ctx context.Context, pe *enforce.PolicyEngine, evt InstallEvent, result *scanner.ScanResult, scannerName string) {
+	riskSummary := w.resourceRiskSummary(result)
+	dbPost, matched, err := w.evaluateResourcePostScanDecision(evt, result, scannerName, riskSummary)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[rescan] evaluate post-scan profile %d: %v\n", evt.PostScanProfileID, err)
+		return
+	}
+	if !matched {
+		return
+	}
+	targetType := string(evt.Type)
+	if w.otel != nil {
+		w.otel.EmitPolicyDecision("resource-post-scan", dbPost.Verdict, evt.Name, targetType, dbPost.Reason, map[string]string{
+			"scanner":      scannerName,
+			"max_severity": riskSummary.MaxSeverity,
+			"risk_level":   riskSummary.RiskLevel,
+			"surface":      "rescan",
+		})
+	}
+	w.applyResourcePostScanAction(ctx, pe, dbPost, evt, targetType, result, scannerName)
 }
 
 // persistSnapshot upserts the baseline snapshot (content/dep/config/endpoint
@@ -361,7 +685,7 @@ func (w *InstallWatcher) persistSnapshot(evt InstallEvent, snap *TargetSnapshot,
 // stored scan, returning finding-level and severity-escalation deltas. It does
 // NOT run the scanner — the caller passes the already-computed current result.
 func (w *InstallWatcher) findingDrift(baseline *audit.SnapshotRow, current *scanner.ScanResult) []DriftDelta {
-	if baseline == nil || baseline.ScanID == "" || current == nil {
+	if baseline == nil || baseline.ScanID == "" || current == nil || isRescanPreScanSnapshotID(baseline.ScanID) {
 		return nil
 	}
 
@@ -391,32 +715,67 @@ func (w *InstallWatcher) findingDrift(baseline *audit.SnapshotRow, current *scan
 	return deltas
 }
 
-// cachedFingerprint returns the scanner fingerprint for evt's type, computing
-// it (and caching) on first use within a cycle. The fingerprint depends only on
-// the scanner kind + config + binary version, not the individual target.
-func (w *InstallWatcher) cachedFingerprint(evt InstallEvent, cache map[InstallType]string) string {
+// cachedFingerprint returns the scanner fingerprint for evt's type + scan
+// profile + decision profiles, computing it (and caching) on first use within
+// a cycle. The fingerprint depends on the scanner kind + profile capabilities
+// + config + binary version + pre/post-scan policy, not the individual target.
+func (w *InstallWatcher) cachedFingerprint(evt InstallEvent, cache map[string]string) string {
+	key := strings.Join([]string{
+		string(evt.Type),
+		strconv.FormatInt(evt.ScanProfileID, 10),
+		strconv.FormatInt(evt.PreScanProfileID, 10),
+		strconv.FormatInt(evt.PostScanProfileID, 10),
+	}, "\x00")
 	if cache != nil {
-		if fp, ok := cache[evt.Type]; ok {
+		if fp, ok := cache[key]; ok {
 			return fp
 		}
 	}
 	fp := w.scannerFingerprint(evt)
 	if cache != nil {
-		cache[evt.Type] = fp
+		cache[key] = fp
 	}
 	return fp
 }
 
 // scannerFingerprint builds a stable hash over the inputs that determine a
 // scanner's output for a given target kind: the scanner binary (path + probed
-// version), the scan-affecting config flags, and the DefenseClaw provenance
-// (binary version + config/policy content hash + generation). When any of these
-// change, byte-identical targets are re-scanned so updated rules take effect.
+// version), the scan-affecting config flags, the DefenseClaw provenance
+// (binary version + config/policy content hash + generation), and — for
+// rule-driven events — the scan profile (profile row + capability keys +
+// capability config + binding versions). When any of these change,
+// byte-identical targets are re-scanned: an admin adding Malware to a Skill
+// profile invalidates every baseline under that profile even though the
+// resource bytes are unchanged.
 //
 // Secrets (API keys) are deliberately excluded — only non-sensitive routing
 // fields (model, provider, base URL) feed the fingerprint.
 func (w *InstallWatcher) scannerFingerprint(evt InstallEvent) string {
 	parts := []string{"kind=" + string(evt.Type)}
+
+	// Rule-driven events: fold the profile's detection plan in. Profile
+	// edits (capability added/removed, config_json changed) then change the
+	// fingerprint and force a re-scan of unchanged content.
+	if evt.ScanProfileID > 0 && w.store != nil {
+		if profileFP, err := w.store.ScanProfileFingerprint(evt.ScanProfileID); err == nil && profileFP != "" {
+			parts = append(parts, "profile="+profileFP)
+		}
+	}
+	// Pre/post decision profiles are also scanner behavior: an allow/skip rule
+	// can bypass scanning and a post-scan rule can block or quarantine a
+	// result. Include their rule content so editing governance policy
+	// invalidates unchanged resource baselines instead of reusing a stale
+	// decision marker.
+	if evt.PreScanProfileID > 0 && w.store != nil {
+		if profileFP, err := w.store.PreScanProfileFingerprint(evt.PreScanProfileID); err == nil && profileFP != "" {
+			parts = append(parts, "pre_profile="+profileFP)
+		}
+	}
+	if evt.PostScanProfileID > 0 && w.store != nil {
+		if profileFP, err := w.store.PostScanProfileFingerprint(evt.PostScanProfileID); err == nil && profileFP != "" {
+			parts = append(parts, "post_profile="+profileFP)
+		}
+	}
 
 	switch evt.Type {
 	case InstallSkill:
@@ -461,6 +820,12 @@ func (w *InstallWatcher) scannerFingerprint(evt InstallEvent) string {
 			"llm_model="+llm.Model,
 			"llm_provider="+llm.Provider,
 			"llm_base_url="+llm.BaseURL,
+		)
+	case InstallConfig, InstallPrompt, InstallCredential, InstallEnvironment:
+		parts = append(parts,
+			"scanner=static-resource-scanner",
+			"scanner_version=1.0.0",
+			"codeguard_rules="+w.cfg.Scanners.CodeGuard,
 		)
 	}
 
@@ -802,7 +1167,12 @@ func summarizeDrift(deltas []DriftDelta) string {
 func (w *InstallWatcher) snapshotForEvent(evt InstallEvent) (*TargetSnapshot, error) {
 	switch evt.Type {
 	case InstallMCP:
+		if localTargetExists(evt.Path) {
+			return SnapshotTarget(evt.Path)
+		}
 		return w.snapshotMCPServer(evt.Name)
+	case InstallEnvironment:
+		return snapshotProcessEnvironment()
 	default:
 		if _, err := os.Stat(evt.Path); err != nil {
 			return nil, err
@@ -853,7 +1223,13 @@ func (w *InstallWatcher) lookupMCPServer(name string) (*config.MCPServerEntry, e
 }
 
 func (w *InstallWatcher) scanTargetFor(evt InstallEvent) string {
+	if evt.Type == InstallEnvironment {
+		return processEnvironmentTarget
+	}
 	if evt.Type != InstallMCP {
+		return evt.Path
+	}
+	if localTargetExists(evt.Path) {
 		return evt.Path
 	}
 	entry, err := w.lookupMCPServer(evt.Name)
@@ -876,11 +1252,17 @@ func (w *InstallWatcher) scanTargetFor(evt InstallEvent) string {
 // aggregate row and dropped every per-rule detection on the floor
 // — making periodic rescans invisible to SIEM finding queries.
 //
+// evt carries the rule-driven lineage (AgentID / ResourceID /
+// ResourceRuleID / ScanProfileID): it flows into the emitted
+// AgentIdentity so scan_results rows link back to the agent,
+// static_resources row, rule, and profile that produced them, and
+// drives the post-scan static_resources risk update.
+//
 // Returns the generated scan ID so persistSnapshot can record it as
 // the snapshot's baseline reference. On emission failure (writer or
 // persistence error) returns the empty string and lets the
 // snapshot store fall back to "" so callers don't see new failure modes.
-func (w *InstallWatcher) emitRescanResult(ctx context.Context, result *scanner.ScanResult) string {
+func (w *InstallWatcher) emitRescanResult(ctx context.Context, result *scanner.ScanResult, evt InstallEvent) string {
 	if result == nil {
 		return ""
 	}
@@ -895,13 +1277,19 @@ func (w *InstallWatcher) emitRescanResult(ctx context.Context, result *scanner.S
 	gw := w.gatewayLogWriter()
 
 	agent := scanner.AgentIdentity{
-		RunID: rescanRunID(),
+		RunID:            rescanRunID(),
+		AgentID:          evt.AgentID,
+		StaticResourceID: evt.ResourceID,
+		ResourceRuleID:   evt.ResourceRuleID,
+		ScanProfileID:    evt.ScanProfileID,
+		Connector:        w.eventConnector(evt),
 	}
 	scanID, err := scanner.EmitScanResult(ctx, gw, pers, tel, result, agent)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[rescan] emit scan result for %s: %v\n", result.Target, err)
 		return ""
 	}
+	w.updateResourceRisk(evt, result, scanID)
 	return scanID
 }
 

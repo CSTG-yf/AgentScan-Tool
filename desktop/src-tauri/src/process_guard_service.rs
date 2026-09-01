@@ -32,6 +32,14 @@ fn file_audit_manifest_path() -> PathBuf {
         .join("file-audit-paths.json")
 }
 
+pub(crate) fn gateway_client_manifest_path() -> PathBuf {
+    let (policy, _) = default_paths();
+    policy
+        .parent()
+        .unwrap_or_else(|| Path::new(r"C:\ProgramData\DefenseClaw"))
+        .join("gateway-client.json")
+}
+
 pub fn apply_policy(source: &Path) -> Result<(), String> {
     let policy = crate::process_guard::load_and_validate_policy(source)?;
     configure_file_auditing(&policy)?;
@@ -44,7 +52,61 @@ pub fn apply_policy(source: &Path) -> Result<(), String> {
     let raw = serde_json::to_vec_pretty(&policy)
         .map_err(|error| format!("serialize process guard policy: {error}"))?;
     std::fs::write(&destination, raw)
-        .map_err(|error| format!("write system policy {}: {error}", destination.display()))
+        .map_err(|error| format!("write system policy {}: {error}", destination.display()))?;
+    let _ = write_gateway_client_manifest(source);
+    Ok(())
+}
+
+fn write_gateway_client_manifest(policy_source: &Path) -> Result<(), String> {
+    let Some(config_dir) = policy_source.parent() else {
+        return Ok(());
+    };
+    let home = config_dir.join("defenseclaw-home");
+    let token = read_gateway_token(&home)
+        .unwrap_or_else(|| "defenseclaw-desktop-agentrange-token".to_owned());
+    let port = read_gateway_port(&home).unwrap_or(18_970);
+    let manifest = serde_json::json!({
+        "host": "127.0.0.1",
+        "port": port,
+        "token": token,
+    });
+    let path = gateway_client_manifest_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "create gateway manifest directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+    let raw = serde_json::to_vec_pretty(&manifest)
+        .map_err(|error| format!("serialize gateway client manifest: {error}"))?;
+    std::fs::write(&path, raw)
+        .map_err(|error| format!("write gateway client manifest {}: {error}", path.display()))
+}
+
+fn read_gateway_token(home: &Path) -> Option<String> {
+    let env_text = std::fs::read_to_string(home.join(".env")).ok()?;
+    env_text.lines().find_map(|line| {
+        let line = line.trim().strip_prefix("export ").unwrap_or(line.trim());
+        let (key, value) = line.split_once('=')?;
+        if key.trim() != "DEFENSECLAW_GATEWAY_TOKEN" {
+            return None;
+        }
+        let value = value.trim().trim_matches('"').trim_matches('\'');
+        (!value.is_empty()).then(|| value.to_owned())
+    })
+}
+
+fn read_gateway_port(home: &Path) -> Option<u16> {
+    let config_text = std::fs::read_to_string(home.join("config.yaml")).ok()?;
+    config_text.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        if key.trim() != "api_port" {
+            return None;
+        }
+        value.trim().parse::<u16>().ok()
+    })
 }
 
 #[cfg(windows)]

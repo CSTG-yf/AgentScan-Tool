@@ -161,3 +161,48 @@ func csTruncateSecret(s string) string {
 	}
 	return s[:8] + "..." + s[len(s)-4:]
 }
+
+// csPemPrivateKeyBlock matches a complete PEM private key block so the
+// base64 body is removed as well — the header-only rules in csSecretRules
+// would otherwise leave the key material in place.
+var csPemPrivateKeyBlock = regexp.MustCompile(`-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`)
+
+// csContentRedactionRules supplements the provider rules with generic
+// key/value credential assignments that show up in agent configs and
+// .env-style files (api_key=…, token: …). Key names may carry prefixes
+// (github_api_key, anthropic-auth-token), so the patterns anchor on the
+// key-name suffix rather than a strict word boundary.
+var csContentRedactionRules = []csSecretRule{
+	{id: "CS-SEC-API-KEY", provider: "generic", pattern: regexp.MustCompile(`(?i)[\w-]*(?:api[_-]?key|apikey|secret[_-]?key|client[_-]?secret|passphrase)[\w-]*['"]?\s*[=:]\s*['"]?[A-Za-z0-9\-_.+/=]{12,}`), severity: SeverityHigh, remediation: "Move the credential to environment variables or a secrets manager"},
+	{id: "CS-SEC-TOKEN-VALUE", provider: "generic", pattern: regexp.MustCompile(`(?i)[\w-]*token[\w-]*['"]?\s*[=:]\s*['"]?[A-Za-z0-9\-_.+/=]{16,}`), severity: SeverityHigh, remediation: "Move the token to environment variables or a secrets manager"},
+	{id: "CS-SEC-SECRET-VALUE", provider: "generic", pattern: regexp.MustCompile(`(?i)[\w-]*secret[\w-]*['"]?\s*[=:]\s*['"]?[A-Za-z0-9\-_.+/=]{8,}`), severity: SeverityHigh, remediation: "Move the secret to environment variables or a secrets manager"},
+	{id: "CS-SEC-PASSWORD-SHORT", provider: "generic", pattern: regexp.MustCompile(`(?i)[\w-]*(?:password|passwd|pwd)[\w-]*['"]?\s*[=:]\s*['"]?[A-Za-z0-9\-_.+/=!?@#$%^&*]{4,}`), severity: SeverityHigh, remediation: "Move the password to environment variables or a secrets manager"},
+}
+
+// RedactSecretsInContent rewrites every secret-shaped fragment matched by
+// the ClawShield secret rules into an opaque [REDACTED:<rule-id>]
+// placeholder while preserving the surrounding file structure (keys, line
+// breaks, comments). It backs the static-resource content API: secrets must
+// never reach the frontend in cleartext, but operators still need to
+// preview the rest of the file. The second return value is the number of
+// fragments that were redacted.
+func RedactSecretsInContent(content string) (string, int) {
+	out := content
+	count := 0
+	redact := func(ruleID string) func(string) string {
+		return func(string) string {
+			count++
+			return "[REDACTED:" + ruleID + "]"
+		}
+	}
+	// Full PEM blocks first: the header-only rules below would otherwise
+	// leave the base64 key body behind.
+	out = csPemPrivateKeyBlock.ReplaceAllStringFunc(out, redact("PRIVATE-KEY"))
+	for _, rule := range csSecretRules {
+		out = rule.pattern.ReplaceAllStringFunc(out, redact(rule.id))
+	}
+	for _, rule := range csContentRedactionRules {
+		out = rule.pattern.ReplaceAllStringFunc(out, redact(rule.id))
+	}
+	return out, count
+}

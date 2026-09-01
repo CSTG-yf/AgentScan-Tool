@@ -135,6 +135,25 @@ func TestJudgeBodyStore_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestJudgeBodyStore_HasSoftDeleteColumn(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "judge_bodies.db")
+	store, err := NewJudgeBodyStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewJudgeBodyStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	for _, table := range []string{"judge_responses", "schema_version"} {
+		ok, err := hasColumnDB(store.db, table, "delete")
+		if err != nil {
+			t.Fatalf("hasColumnDB(%s, delete): %v", table, err)
+		}
+		if !ok {
+			t.Fatalf("expected %s.delete to exist after migration", table)
+		}
+	}
+}
+
 // TestJudgeBodyStore_AppliesPragmasAndPoolCap asserts that the
 // dedicated judge bodies DB inherits the same hardening as audit.db
 // (WAL, busy_timeout=5000, synchronous=NORMAL, foreign_keys=ON,

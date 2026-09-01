@@ -968,9 +968,10 @@ pub fn set_range_root(app: tauri::AppHandle, root: String) -> Result<RangeStatus
     let canonical_root = compose
         .parent()
         .ok_or_else(|| "compose path has no parent".to_owned())?;
+    let mode = configured_mode(&app);
     let settings = DesktopSettings {
         agentrange_root: canonical_root.to_string_lossy().into_owned(),
-        range_mode: configured_mode(&app),
+        range_mode: mode,
     };
     let path = settings_path(&app)?;
     let parent = path
@@ -982,6 +983,12 @@ pub fn set_range_root(app: tauri::AppHandle, root: String) -> Result<RangeStatus
         serde_json::to_vec_pretty(&settings).map_err(|error| error.to_string())?,
     )
     .map_err(|error| format!("write desktop settings: {error}"))?;
+    if mode.requires_adapter() {
+        let lifecycle = run_gateway_action_for_mode(&app, "restart", mode.as_str())?;
+        if !lifecycle.success {
+            return Err(lifecycle.message);
+        }
+    }
     Ok(get_range_status(app))
 }
 

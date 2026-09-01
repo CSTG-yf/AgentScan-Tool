@@ -36,3 +36,22 @@ func SeverityRank(s string) int {
 		return 0
 	}
 }
+
+// RiskLevelRank maps a resource risk level to an integer for comparison.
+// critical=5, high=4, medium=3, low=2, clean=1, unknown=0.
+func RiskLevelRank(s string) int {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "critical":
+		return 5
+	case "high":
+		return 4
+	case "medium":
+		return 3
+	case "low":
+		return 2
+	case "clean":
+		return 1
+	default:
+		return 0
+	}
+}

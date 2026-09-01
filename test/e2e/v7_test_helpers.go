@@ -652,7 +652,14 @@ func compareGolden(t *testing.T, name string, got []byte) {
 	if err != nil {
 		t.Fatalf("read golden %s: %v", p, err)
 	}
-	if strings.TrimSpace(string(want)) != strings.TrimSpace(string(got)) {
+	if strings.TrimSpace(normalizeNewlines(string(want))) != strings.TrimSpace(normalizeNewlines(string(got))) {
 		t.Fatalf("golden mismatch %s\n--- want ---\n%s\n--- got ---\n%s\n", name, string(want), string(got))
 	}
+}
+
+// normalizeNewlines folds CRLF and lone CR into LF so golden comparisons
+// stay stable on checkouts where core.autocrlf rewrites line endings.
+func normalizeNewlines(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.ReplaceAll(s, "\r", "\n")
 }

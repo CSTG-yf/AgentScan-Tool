@@ -1081,8 +1081,17 @@ type WatchConfig struct {
 	DebounceMs          int  `mapstructure:"debounce_ms"            yaml:"debounce_ms"`
 	AutoBlock           bool `mapstructure:"auto_block"             yaml:"auto_block"`
 	AllowListBypassScan bool `mapstructure:"allow_list_bypass_scan" yaml:"allow_list_bypass_scan"`
+	RealtimeEnabled     bool `mapstructure:"realtime_enabled"       yaml:"realtime_enabled"`
 	RescanEnabled       bool `mapstructure:"rescan_enabled"         yaml:"rescan_enabled"`
 	RescanIntervalMin   int  `mapstructure:"rescan_interval_min"    yaml:"rescan_interval_min"`
+	// Optional per-target periodic rescan intervals. A zero value inherits
+	// RescanIntervalMin, preserving the legacy single-interval behavior.
+	RescanSkillIntervalMin       int `mapstructure:"rescan_skill_interval_min"       yaml:"rescan_skill_interval_min,omitempty"`
+	RescanPluginIntervalMin      int `mapstructure:"rescan_plugin_interval_min"      yaml:"rescan_plugin_interval_min,omitempty"`
+	RescanMCPIntervalMin         int `mapstructure:"rescan_mcp_interval_min"         yaml:"rescan_mcp_interval_min,omitempty"`
+	RescanPromptIntervalMin      int `mapstructure:"rescan_prompt_interval_min"      yaml:"rescan_prompt_interval_min,omitempty"`
+	RescanCredentialIntervalMin  int `mapstructure:"rescan_credential_interval_min"  yaml:"rescan_credential_interval_min,omitempty"`
+	RescanEnvironmentIntervalMin int `mapstructure:"rescan_environment_interval_min" yaml:"rescan_environment_interval_min,omitempty"`
 	// RescanContentGated skips the scanner during a periodic re-scan when a
 	// target's content hash and scanner fingerprint are both unchanged since
 	// the stored baseline. This avoids re-running the (expensive) scanner and
@@ -3156,8 +3165,15 @@ func setDefaults(dataDir string) {
 	viper.SetDefault("watch.debounce_ms", 500)
 	viper.SetDefault("watch.auto_block", true)
 	viper.SetDefault("watch.allow_list_bypass_scan", true)
+	viper.SetDefault("watch.realtime_enabled", true)
 	viper.SetDefault("watch.rescan_enabled", true)
 	viper.SetDefault("watch.rescan_interval_min", 60)
+	viper.SetDefault("watch.rescan_skill_interval_min", 0)
+	viper.SetDefault("watch.rescan_plugin_interval_min", 0)
+	viper.SetDefault("watch.rescan_mcp_interval_min", 0)
+	viper.SetDefault("watch.rescan_prompt_interval_min", 0)
+	viper.SetDefault("watch.rescan_credential_interval_min", 0)
+	viper.SetDefault("watch.rescan_environment_interval_min", 0)
 	viper.SetDefault("watch.rescan_content_gated", true)
 
 	viper.SetDefault("audit_sinks", []AuditSink{})

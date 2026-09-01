@@ -37,13 +37,17 @@ import (
 	"github.com/defenseclaw/defenseclaw/internal/telemetry"
 )
 
-// InstallType distinguishes between skill and MCP install events.
+// InstallType distinguishes between static-resource scan targets.
 type InstallType string
 
 const (
-	InstallSkill  InstallType = "skill"
-	InstallMCP    InstallType = "mcp"
-	InstallPlugin InstallType = "plugin"
+	InstallConfig      InstallType = "config"
+	InstallSkill       InstallType = "skill"
+	InstallMCP         InstallType = "mcp"
+	InstallPlugin      InstallType = "plugin"
+	InstallPrompt      InstallType = "prompt"
+	InstallCredential  InstallType = "credential"
+	InstallEnvironment InstallType = "environment"
 )
 
 // String returns the string representation of the InstallType.
@@ -54,6 +58,18 @@ type InstallEvent struct {
 	Type InstallType
 	Name string
 	Path string
+	// AgentID / ResourceID / ResourceRuleID / ScanProfileID carry the
+	// rule-driven lineage: which agent owns the resource, which
+	// static_resources row it maps to, which agent_resource_rules row
+	// produced it, and which resource_scan_profiles detection plan
+	// applies. Empty/zero for legacy events (skill dirs, MCP config).
+	AgentID           string
+	AgentTypeID       int64
+	ResourceID        string
+	ResourceRuleID    int64
+	ScanProfileID     int64
+	PreScanProfileID  int64
+	PostScanProfileID int64
 	// Connector is the owning connector for this install, used to scope
 	// per-connector enforcement on the admit path (most-specific-wins:
 	// connector-scoped state, then the bare global state). Empty ⇒ resolve the
@@ -90,6 +106,12 @@ type AdmissionResult struct {
 // OnAdmission is called after each install event is processed.
 type OnAdmission func(AdmissionResult)
 
+type pendingWork struct {
+	FirstSeen   time.Time
+	Event       InstallEvent
+	RescanTypes []InstallType
+}
+
 // InstallWatcher monitors OpenClaw skill directories for new installs
 // and runs the admission gate (block → allow → scan) on each detection.
 // MCP servers are managed via “defenseclaw mcp set/unset“ rather than
@@ -113,12 +135,20 @@ type InstallWatcher struct {
 	debounce   time.Duration
 	onAdmit    OnAdmission
 
-	mu      sync.Mutex
-	pending map[string]time.Time // path → first-seen, for debounce
+	mu       sync.Mutex
+	pending  map[string]pendingWork
+	rescanMu sync.Mutex
 
 	policyFileMu     sync.Mutex
 	policyFileHashes map[string]string   // path → sha256 hex of file contents (policy / list YAML watch)
 	policyListSnap   map[string][]string // path → sorted rule keys for list YAML diffs
+
+	// ruleWatchContexts maps realtime fsnotify events back onto the
+	// agent_resource_rules row that put the watched directory under
+	// surveillance: which agent, rule, resource type, and scan profile a
+	// changed path belongs to. Built once per Run() from the discovered
+	// agents + their enabled rules.
+	ruleWatchContexts []resourceWatchContext
 
 	// scannerFactory resolves the scanner for an event. Defaults to
 	// scannerFor; tests inject a fake to observe scan invocations without
@@ -126,13 +156,124 @@ type InstallWatcher struct {
 	scannerFactory func(InstallEvent) scanner.Scanner
 }
 
+// resourceWatchContext ties one watched directory back to the
+// agent_resource_rules row that produced it, so a filesystem event can be
+// classified with full lineage (agent / rule / profile / resource type)
+// instead of guessing from fixed skill/plugin directories.
+type resourceWatchContext struct {
+	AgentID           string
+	AgentTypeID       int64
+	RuleID            int64
+	ProfileID         int64
+	PreScanProfileID  int64
+	PostScanProfileID int64
+	Type              InstallType
+	ResourceType      string
+	// Root is the directory registered with fsnotify.
+	Root string
+	// Mode is the rule's enumeration_mode (children / recursive / exact /
+	// glob) and decides how an event path maps onto a resource target.
+	Mode string
+	// FileName is the exact-mode target file (events for other files in
+	// Root are ignored).
+	FileName string
+	// Pattern is the glob-mode pattern (events are matched against it).
+	Pattern string
+}
+
 // newScanner resolves the scanner for evt via the injectable factory, falling
-// back to the config-driven scannerFor when no factory is installed.
+// back to the capability-driven scannersFor (which itself falls back to the
+// config-driven scannerFor) when no factory is installed. When the event's
+// scan profile maps to multiple capabilities, a compositeScanner running all
+// of them is returned.
 func (w *InstallWatcher) newScanner(evt InstallEvent) scanner.Scanner {
 	if w.scannerFactory != nil {
 		return w.scannerFactory(evt)
 	}
-	return w.scannerFor(evt)
+	return w.scannerCompositeFor(evt)
+}
+
+// scannerCompositeFor turns the capability list for evt's scan profile into
+// one runnable scanner.Scanner: a single scanner when one capability (or the
+// legacy fallback) applies, or a compositeScanner merging findings from all
+// capabilities.
+func (w *InstallWatcher) scannerCompositeFor(evt InstallEvent) scanner.Scanner {
+	scanners := w.scannersFor(evt)
+	if len(scanners) == 0 {
+		return nil
+	}
+	if len(scanners) == 1 {
+		return scanners[0]
+	}
+	return &compositeScanner{kind: evt.Type, subs: scanners}
+}
+
+// scannersFor resolves the security detection capabilities for evt. When the
+// event carries a ScanProfileID, the enabled profile capabilities (DB) decide
+// which scanners run — the database drives "what checks apply to this
+// resource". Events without a profile (or with an empty capability list) fall
+// back to the legacy type-driven scannerFor.
+func (w *InstallWatcher) scannersFor(evt InstallEvent) []scanner.Scanner {
+	if evt.ScanProfileID > 0 && w.store != nil {
+		capabilities, err := w.store.ListScanCapabilities(evt.ScanProfileID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[watch] list capabilities for profile %d: %v\n", evt.ScanProfileID, err)
+		}
+		var scanners []scanner.Scanner
+		for _, capability := range capabilities {
+			if sc := w.resolveSecurityScanner(capability.CapabilityKey, evt); sc != nil {
+				scanners = append(scanners, sc)
+			}
+		}
+		if len(scanners) > 0 {
+			return scanners
+		}
+	}
+	if s := w.scannerFor(evt); s != nil {
+		return []scanner.Scanner{s}
+	}
+	return nil
+}
+
+// resolveSecurityScanner maps a security_scan_capabilities capability_key to
+// the concrete scanner.Scanner implementation. Local-path special cases
+// (AgentRange skills, local MCP targets) keep the in-process static resource
+// scanner instead of shelling out to the Python CLIs.
+func (w *InstallWatcher) resolveSecurityScanner(capability string, evt InstallEvent) scanner.Scanner {
+	switch capability {
+	case "skill_security":
+		if w.isAgentRangePath(evt.Path) {
+			return &staticResourceScanner{kind: evt.Type, cfg: w.cfg}
+		}
+		return scanner.NewSkillScannerFromLLM(
+			w.cfg.Scanners.SkillScanner,
+			w.cfg.ResolveLLM("scanners.skill"),
+			w.cfg.CiscoAIDefense,
+		)
+	case "mcp_security":
+		if localTargetExists(evt.Path) {
+			return &staticResourceScanner{kind: evt.Type, cfg: w.cfg}
+		}
+		return scanner.NewMCPScannerFromLLM(
+			w.cfg.Scanners.MCPScanner,
+			w.cfg.ResolveLLM("scanners.mcp"),
+			w.cfg.CiscoAIDefense,
+		)
+	case "plugin_security":
+		return scanner.NewPluginScanner(w.cfg.Scanners.PluginScanner)
+	case "secret_detection":
+		return scanner.NewClawShieldSecretsScanner()
+	case "pii_detection":
+		return scanner.NewClawShieldPIIScanner()
+	case "prompt_injection":
+		return scanner.NewClawShieldInjectionScanner()
+	case "malware_detection":
+		return scanner.NewClawShieldMalwareScanner()
+	case "vulnerability_detection":
+		return scanner.NewClawShieldVulnScanner()
+	default:
+		return nil
+	}
 }
 
 // New creates an InstallWatcher. The opa parameter may be nil to fall back
@@ -154,7 +295,7 @@ func New(cfg *config.Config, skillDirs, pluginDirs []string, store *audit.Store,
 		otel:             otel,
 		debounce:         debounce,
 		onAdmit:          onAdmit,
-		pending:          make(map[string]time.Time),
+		pending:          make(map[string]pendingWork),
 		policyFileHashes: make(map[string]string),
 		policyListSnap:   make(map[string][]string),
 	}
@@ -172,6 +313,17 @@ func (w *InstallWatcher) SetWebhookDispatcher(d WebhookDispatcher) {
 
 // Run starts watching configured directories. It blocks until ctx is cancelled.
 func (w *InstallWatcher) Run(ctx context.Context) error {
+	if w.cfg.Watch.RescanEnabled {
+		go w.rescanLoop(ctx)
+	}
+
+	if !w.cfg.Watch.RealtimeEnabled {
+		fmt.Fprintf(os.Stderr, "[watch] realtime scanning disabled; periodic rescan enabled=%v\n", w.cfg.Watch.RescanEnabled)
+		<-ctx.Done()
+		_ = w.logger.LogAction(string(audit.ActionWatchStop), "", "context cancelled")
+		return ctx.Err()
+	}
+
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("watcher: create fsnotify watcher: %w", err)
@@ -179,24 +331,90 @@ func (w *InstallWatcher) Run(ctx context.Context) error {
 	defer fsw.Close()
 
 	watched := 0
-	for _, dir := range w.skillDirs {
-		if err := ensureAndWatch(fsw, dir); err != nil {
-			fmt.Fprintf(os.Stderr, "[watch] skill dir %s: %v (skipping)\n", dir, err)
-			continue
+	// Rule-driven mode: when any discovered agent has enabled resource
+	// rules, the rules are the single source of truth for which directories
+	// are watched — the legacy skill/plugin/AgentRange registrations stay
+	// off so deleting or disabling a rule truly stops coverage of its
+	// directory (no hardcoded path keeps scanning behind the database's
+	// back). With no rules anywhere, the legacy fixed directories apply.
+	// This mirrors the enumeration fallback in enumerateTargets exactly.
+	ruleContexts := w.buildResourceWatchContexts()
+	ruleDriven := len(ruleContexts) > 0
+	w.ruleWatchContexts = ruleContexts
+
+	if !ruleDriven {
+		for _, dir := range w.skillDirs {
+			count, err := ensureAndWatchTree(fsw, dir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[watch] skill dir %s: %v (skipping)\n", dir, err)
+				continue
+			}
+			watched += count
+			fmt.Printf("[watch] monitoring skill dir: %s (%d dirs)\n", dir, count)
 		}
-		watched++
-		fmt.Printf("[watch] monitoring skill dir: %s\n", dir)
+		for _, dir := range w.pluginDirs {
+			count, err := ensureAndWatchTree(fsw, dir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[watch] plugin dir %s: %v (skipping)\n", dir, err)
+				continue
+			}
+			watched += count
+			fmt.Printf("[watch] monitoring plugin dir: %s (%d dirs)\n", dir, count)
+		}
+		for _, dir := range w.agentRangeMCPDirs() {
+			count, err := ensureAndWatchTree(fsw, dir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[watch] AgentRange mcp dir %s: %v (skipping)\n", dir, err)
+				continue
+			}
+			watched += count
+			fmt.Printf("[watch] monitoring AgentRange mcp dir: %s (%d dirs)\n", dir, count)
+		}
+	} else {
+		fmt.Printf("[watch] rule-driven mode: %d agent resource rule watch dir(s) active; legacy fixed dirs off\n", len(ruleContexts))
 	}
-	for _, dir := range w.pluginDirs {
+	// Rule-driven watch roots: every enabled agent_resource_rules row across
+	// the discovered agents contributes its expanded root directory, so new
+	// resources landing under a rule path trigger the admission gate even
+	// when the path sits outside the configured skill/plugin dirs. Children
+	// and recursive rules need the existing directory tree registered too;
+	// fsnotify itself does not recurse into subdirectories.
+	treeDirs := make(map[string]bool, len(ruleContexts))
+	for _, dir := range resourceWatchTreeDirs(ruleContexts) {
+		treeDirs[dir] = true
+	}
+	for _, dir := range resourceWatchDirs(ruleContexts) {
+		if treeDirs[dir] {
+			count, err := ensureAndWatchTree(fsw, dir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[watch] agent resource rule tree %s: %v (skipping)\n", dir, err)
+				continue
+			}
+			watched += count
+			continue
+		}
 		if err := ensureAndWatch(fsw, dir); err != nil {
-			fmt.Fprintf(os.Stderr, "[watch] plugin dir %s: %v (skipping)\n", dir, err)
+			fmt.Fprintf(os.Stderr, "[watch] agent resource rule dir %s: %v (skipping)\n", dir, err)
 			continue
 		}
 		watched++
-		fmt.Printf("[watch] monitoring plugin dir: %s\n", dir)
+	}
+	for _, dir := range w.staticRealtimeDirs() {
+		if err := ensureAndWatch(fsw, dir); err != nil {
+			fmt.Fprintf(os.Stderr, "[watch] static resource dir %s: %v (skipping)\n", dir, err)
+			continue
+		}
+		watched++
+		fmt.Printf("[watch] monitoring static resource dir: %s\n", dir)
 	}
 
 	if watched == 0 {
+		if w.cfg.Watch.RescanEnabled {
+			fmt.Fprintf(os.Stderr, "[watch] no realtime directories; periodic rescan remains enabled\n")
+			<-ctx.Done()
+			_ = w.logger.LogAction(string(audit.ActionWatchStop), "", "context cancelled")
+			return ctx.Err()
+		}
 		return fmt.Errorf("watcher: no directories to watch — check claw.mode and claw.home_dir")
 	}
 
@@ -206,10 +424,6 @@ func (w *InstallWatcher) Run(ctx context.Context) error {
 		w.opa.SetOTelProvider(w.otel)
 	}
 	go w.watchPolicyListsAndYAML(ctx)
-
-	if w.cfg.Watch.RescanEnabled {
-		go w.rescanLoop(ctx)
-	}
 
 	ticker := time.NewTicker(w.debounce)
 	defer ticker.Stop()
@@ -224,24 +438,47 @@ func (w *InstallWatcher) Run(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-			if event.Op&(fsnotify.Create|fsnotify.Rename) == 0 {
+			if event.Op&(fsnotify.Create|fsnotify.Rename|fsnotify.Write|fsnotify.Remove) == 0 {
 				continue
 			}
-			if !w.isDirectChildDir(event.Name) {
-				continue
+			if event.Op&fsnotify.Create != 0 {
+				_ = watchTreeIfDir(fsw, event.Name)
 			}
-			if w.otel != nil {
-				evtType := "create"
-				if event.Op&fsnotify.Rename != 0 {
-					evtType = "rename"
+
+			// Rule-produced resources disappearing from disk are flagged
+			// missing immediately (rows kept, never deleted) instead of
+			// waiting for the next enumeration sweep.
+			if event.Op&fsnotify.Remove != 0 {
+				if w.markRemovedRuleResource(event.Name) {
+					continue
 				}
-				w.otel.RecordWatcherEvent(ctx, evtType, w.classifyEvent(event.Name).Type.String(), "")
 			}
-			w.mu.Lock()
-			if _, exists := w.pending[event.Name]; !exists {
-				w.pending[event.Name] = time.Now()
+
+			// Rule-driven classification first: the event path is matched
+			// against the rule watch contexts, so the admission event
+			// carries the agent/rule/profile lineage.
+			if evt, ok := w.ruleEventForPath(event.Name); ok {
+				if w.otel != nil {
+					w.otel.RecordWatcherEvent(ctx, watcherEventOp(event.Op), evt.Type.String(), "")
+				}
+				w.queueAdmission(evt)
+				continue
 			}
-			w.mu.Unlock()
+
+			if evt, ok := w.targetEventForPath(event.Name); ok {
+				if w.otel != nil {
+					w.otel.RecordWatcherEvent(ctx, watcherEventOp(event.Op), evt.Type.String(), "")
+				}
+				w.queueAdmission(evt)
+				continue
+			}
+
+			if rescanTypes := w.staticRescanTypesForPath(event.Name); len(rescanTypes) > 0 {
+				if w.otel != nil {
+					w.otel.RecordWatcherEvent(ctx, watcherEventOp(event.Op), installTypesLabel(rescanTypes), "")
+				}
+				w.queueTypeRescan(rescanTypes)
+			}
 
 		case err, ok := <-fsw.Errors:
 			if !ok {
@@ -258,25 +495,59 @@ func (w *InstallWatcher) Run(ctx context.Context) error {
 	}
 }
 
+func (w *InstallWatcher) queueAdmission(evt InstallEvent) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if existing, exists := w.pending[evt.Path]; exists {
+		existing.Event = evt
+		w.pending[evt.Path] = existing
+		return
+	}
+	w.pending[evt.Path] = pendingWork{FirstSeen: time.Now(), Event: evt}
+}
+
+func (w *InstallWatcher) queueTypeRescan(targetTypes []InstallType) {
+	if len(targetTypes) == 0 {
+		return
+	}
+	key := "rescan:" + installTypesLabel(targetTypes)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if existing, exists := w.pending[key]; exists {
+		existing.RescanTypes = append([]InstallType(nil), targetTypes...)
+		w.pending[key] = existing
+		return
+	}
+	w.pending[key] = pendingWork{
+		FirstSeen:   time.Now(),
+		RescanTypes: append([]InstallType(nil), targetTypes...),
+	}
+}
+
 func (w *InstallWatcher) processPending(ctx context.Context) {
 	w.mu.Lock()
 	now := time.Now()
-	var ready []string
-	for path, firstSeen := range w.pending {
-		if now.Sub(firstSeen) >= w.debounce {
-			ready = append(ready, path)
+	var ready []pendingWork
+	for key, work := range w.pending {
+		if now.Sub(work.FirstSeen) >= w.debounce {
+			ready = append(ready, work)
+			delete(w.pending, key)
 		}
-	}
-	for _, p := range ready {
-		delete(w.pending, p)
 	}
 	w.mu.Unlock()
 
-	for _, path := range ready {
-		if _, err := os.Stat(path); err != nil {
+	for _, work := range ready {
+		if len(work.RescanTypes) > 0 {
+			w.runRescanCycleForTypes(ctx, work.RescanTypes...)
 			continue
 		}
-		evt := w.classifyEvent(path)
+		evt := work.Event
+		if evt.Path == "" {
+			continue
+		}
+		if _, err := os.Stat(evt.Path); err != nil {
+			continue
+		}
 		result := w.runAdmission(ctx, evt)
 		if w.onAdmit != nil {
 			w.onAdmit(result)
@@ -285,23 +556,62 @@ func (w *InstallWatcher) processPending(ctx context.Context) {
 }
 
 func (w *InstallWatcher) classifyEvent(path string) InstallEvent {
-	installType := InstallSkill
-	pathAbs, _ := filepath.Abs(path)
-	for _, dir := range w.pluginDirs {
-		abs, _ := filepath.Abs(dir)
-		if strings.HasPrefix(pathAbs, abs) {
-			installType = InstallPlugin
-			break
-		}
+	if evt, ok := w.targetEventForPath(path); ok {
+		return evt
 	}
-
 	return InstallEvent{
-		Type:      installType,
+		Type:      InstallSkill,
 		Name:      filepath.Base(path),
 		Path:      path,
 		Connector: watcherConnectorName(w.cfg),
 		Timestamp: time.Now().UTC(),
 	}
+}
+
+func (w *InstallWatcher) targetEventForPath(path string) (InstallEvent, bool) {
+	for _, dir := range w.skillDirs {
+		if targetPath, ok := topLevelChildPath(dir, path); ok {
+			return InstallEvent{
+				Type:      InstallSkill,
+				Name:      filepath.Base(targetPath),
+				Path:      targetPath,
+				Connector: watcherConnectorName(w.cfg),
+				Timestamp: time.Now().UTC(),
+			}, true
+		}
+	}
+	for _, dir := range w.pluginDirs {
+		if targetPath, ok := topLevelChildPath(dir, path); ok {
+			return InstallEvent{
+				Type:      InstallPlugin,
+				Name:      filepath.Base(targetPath),
+				Path:      targetPath,
+				Connector: watcherConnectorName(w.cfg),
+				Timestamp: time.Now().UTC(),
+			}, true
+		}
+	}
+	return InstallEvent{}, false
+}
+
+func topLevelChildPath(root, path string) (string, bool) {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
+	}
+	pathAbs, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(rootAbs, pathAbs)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return "", false
+	}
+	first := strings.Split(rel, string(filepath.Separator))[0]
+	if first == "" || first == "." || first == ".." {
+		return "", false
+	}
+	return filepath.Join(rootAbs, first), true
 }
 
 // eventConnector resolves the connector that owns an install event: the
@@ -314,6 +624,29 @@ func (w *InstallWatcher) eventConnector(evt InstallEvent) string {
 		return c
 	}
 	return watcherConnectorName(w.cfg)
+}
+
+func (w *InstallWatcher) logAdmissionScan(ctx context.Context, result *scanner.ScanResult, verdict string, evt InstallEvent) {
+	if w == nil || result == nil {
+		return
+	}
+	if w.logger == nil {
+		w.updateResourceRisk(evt, result, "")
+		return
+	}
+	scanID, err := w.logger.LogScanWithCorrelationID(ctx, result, verdict, audit.ScanCorrelation{
+		AgentID:          evt.AgentID,
+		Connector:        w.eventConnector(evt),
+		StaticResourceID: evt.ResourceID,
+		ResourceRuleID:   evt.ResourceRuleID,
+		ScanProfileID:    evt.ScanProfileID,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[watch] log admission scan %s: %v\n", evt.Path, err)
+		w.updateResourceRisk(evt, result, "")
+		return
+	}
+	w.updateResourceRisk(evt, result, scanID)
 }
 
 // runAdmission applies the full admission gate: block → allow → scan.
@@ -399,8 +732,70 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 		}
 	}
 
+	if blocked, bErr := pe.IsBlocked(targetType, evt.Name); bErr == nil && blocked {
+		reason := fmt.Sprintf("%s %q is on the block list - rejected", targetType, evt.Name)
+		_ = w.logger.LogAction(string(audit.ActionInstallRejected), evt.Path,
+			fmt.Sprintf("type=%s reason=blocked", targetType))
+		if w.otel != nil {
+			w.otel.EmitPolicyDecision("admission", "blocked", evt.Name, targetType, reason, nil)
+		}
+		w.enforceBlock(ctx, evt)
+		w.recordAdmission(ctx, "blocked", targetType)
+		res = AdmissionResult{Event: evt, Verdict: VerdictBlocked, Reason: reason, InstallAction: "block"}
+		return res
+	}
+
+	skipLegacyPreScan := false
+	if dbPre, matched, err := w.evaluateResourcePreScanDecision(evt); err != nil {
+		fmt.Fprintf(os.Stderr, "[watch] evaluate pre-scan profile %d: %v\n", evt.PreScanProfileID, err)
+	} else if matched {
+		switch dbPre.Decision {
+		case "block", "reject", "rejected":
+			_ = w.logger.LogAction(string(audit.ActionInstallRejected), evt.Path,
+				fmt.Sprintf("type=%s reason=%s", targetType, dbPre.Reason))
+			if w.otel != nil {
+				w.otel.EmitPolicyDecision("resource-pre-scan", "blocked", evt.Name, targetType, dbPre.Reason, nil)
+			}
+			w.applyResourcePreScanAction(ctx, pe, dbPre, evt, targetType)
+			w.recordAdmission(ctx, "blocked", targetType)
+			res = AdmissionResult{
+				Event: evt, Verdict: VerdictBlocked, Reason: dbPre.Reason,
+				InstallAction: dbPre.InstallAction,
+				FileAction:    dbPre.FileAction,
+				RuntimeAction: dbPre.RuntimeAction,
+			}
+			return res
+		case "allow", "skip":
+			_ = w.logger.LogAction(string(audit.ActionInstallAllowed), evt.Path,
+				fmt.Sprintf("type=%s reason=%s", targetType, dbPre.Reason))
+			if w.otel != nil {
+				w.otel.EmitPolicyDecision("resource-pre-scan", "allowed", evt.Name, targetType, dbPre.Reason, nil)
+			}
+			w.applyResourcePreScanAction(ctx, pe, dbPre, evt, targetType)
+			w.recordAdmission(ctx, "allowed", targetType)
+			res = AdmissionResult{
+				Event: evt, Verdict: VerdictAllowed, Reason: dbPre.Reason,
+				InstallAction: dbPre.InstallAction,
+				FileAction:    dbPre.FileAction,
+				RuntimeAction: dbPre.RuntimeAction,
+			}
+			return res
+		case "alert", "review":
+			_ = w.logger.LogAction(string(audit.ActionInstallWarning), evt.Path,
+				fmt.Sprintf("type=%s phase=pre-scan reason=%s", targetType, dbPre.Reason))
+			if w.otel != nil {
+				w.otel.EmitPolicyDecision("resource-pre-scan", "warning", evt.Name, targetType, dbPre.Reason, nil)
+			}
+			skipLegacyPreScan = true
+		case "scan":
+			_ = w.logger.LogAction("resource-pre-scan-scan", evt.Path,
+				fmt.Sprintf("type=%s reason=%s", targetType, dbPre.Reason))
+			skipLegacyPreScan = true
+		}
+	}
+
 	// Phase 1: pre-scan OPA evaluation (no scan_result yet).
-	if w.opa != nil {
+	if !skipLegacyPreScan && w.opa != nil {
 		input := policy.AdmissionInput{
 			TargetType: targetType,
 			TargetName: evt.Name,
@@ -461,7 +856,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 			res = AdmissionResult{Event: evt, Verdict: VerdictAllowed, Reason: fallbackOut.Reason}
 			return res
 		}
-	} else {
+	} else if !skipLegacyPreScan {
 		input := policy.AdmissionInput{
 			TargetType: targetType,
 			TargetName: evt.Name,
@@ -531,7 +926,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 		reason := fmt.Sprintf("%s %q is on the block list — rejected", targetType, evt.Name)
 		_ = w.logger.LogAction(string(audit.ActionInstallRejected), evt.Path,
 			fmt.Sprintf("type=%s reason=blocked-post-scan", targetType))
-		_ = w.logger.LogScanWithVerdict(result, "blocked")
+		w.logAdmissionScan(ctx, result, "blocked", evt)
 		w.enforceBlock(ctx, evt)
 		w.recordAdmission(ctx, "blocked", targetType)
 		res = AdmissionResult{
@@ -545,7 +940,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 		reason := fmt.Sprintf("scan found findings but %s %q is allow-listed — skipping enforcement", targetType, evt.Name)
 		_ = w.logger.LogAction(string(audit.ActionInstallAllowed), evt.Path,
 			fmt.Sprintf("type=%s reason=allow-listed-post-scan", targetType))
-		_ = w.logger.LogScanWithVerdict(result, "allowed")
+		w.logAdmissionScan(ctx, result, "allowed", evt)
 		if w.otel != nil {
 			w.otel.EmitPolicyDecision("admission", "allowed", evt.Name, targetType, reason, map[string]string{
 				"scanner": s.Name(),
@@ -556,6 +951,30 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 			Event: evt, Verdict: VerdictAllowed, Reason: reason,
 			MaxSeverity: string(result.MaxSeverity()), FindingCount: len(result.Findings),
 			InstallAction: "allow",
+		}
+		return res
+	}
+
+	riskSummary := w.resourceRiskSummary(result)
+	if dbPost, matched, err := w.evaluateResourcePostScanDecision(evt, result, s.Name(), riskSummary); err != nil {
+		fmt.Fprintf(os.Stderr, "[watch] evaluate post-scan profile %d: %v\n", evt.PostScanProfileID, err)
+	} else if matched {
+		if w.otel != nil {
+			w.otel.EmitPolicyDecision("resource-post-scan", dbPost.Verdict, evt.Name, targetType, dbPost.Reason, map[string]string{
+				"scanner":      s.Name(),
+				"max_severity": riskSummary.MaxSeverity,
+				"risk_level":   riskSummary.RiskLevel,
+			})
+		}
+		w.applyResourcePostScanAction(ctx, pe, dbPost, evt, targetType, result, s.Name())
+		w.logAdmissionScan(ctx, result, dbPost.Verdict, evt)
+		w.recordAdmission(ctx, dbPost.Verdict, targetType)
+		res = AdmissionResult{
+			Event: evt, Verdict: toVerdict(dbPost.Verdict), Reason: dbPost.Reason,
+			MaxSeverity: riskSummary.MaxSeverity, FindingCount: len(result.Findings),
+			InstallAction: dbPost.InstallAction,
+			FileAction:    dbPost.FileAction,
+			RuntimeAction: dbPost.RuntimeAction,
 		}
 		return res
 	}
@@ -593,7 +1012,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 				}
 			}
 			w.applyPostScanEnforcement(ctx, pe, out, evt, targetType, result, s.Name())
-			_ = w.logger.LogScanWithVerdict(result, out.Verdict)
+			w.logAdmissionScan(ctx, result, out.Verdict, evt)
 			w.recordAdmission(ctx, out.Verdict, targetType)
 			res = AdmissionResult{
 				Event: evt, Verdict: toVerdict(out.Verdict), Reason: out.Reason,
@@ -622,7 +1041,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 		ScanResult: scanInput,
 	}, fallbackProfile)
 	w.applyPostScanEnforcement(ctx, pe, out, evt, targetType, result, s.Name())
-	_ = w.logger.LogScanWithVerdict(result, out.Verdict)
+	w.logAdmissionScan(ctx, result, out.Verdict, evt)
 	w.recordAdmission(ctx, out.Verdict, targetType)
 	res = AdmissionResult{
 		Event: evt, Verdict: toVerdict(out.Verdict), Reason: out.Reason,
@@ -754,13 +1173,21 @@ func (w *InstallWatcher) scannerFor(evt InstallEvent) scanner.Scanner {
 	// than caching once at watcher startup) means a config reload is
 	// picked up automatically on the next install.
 	switch evt.Type {
+	case InstallConfig:
+		return &staticResourceScanner{kind: evt.Type, cfg: w.cfg}
 	case InstallSkill:
+		if w.isAgentRangePath(evt.Path) {
+			return &staticResourceScanner{kind: evt.Type, cfg: w.cfg}
+		}
 		return scanner.NewSkillScannerFromLLM(
 			w.cfg.Scanners.SkillScanner,
 			w.cfg.ResolveLLM("scanners.skill"),
 			w.cfg.CiscoAIDefense,
 		)
 	case InstallMCP:
+		if localTargetExists(evt.Path) {
+			return &staticResourceScanner{kind: evt.Type, cfg: w.cfg}
+		}
 		return scanner.NewMCPScannerFromLLM(
 			w.cfg.Scanners.MCPScanner,
 			w.cfg.ResolveLLM("scanners.mcp"),
@@ -769,6 +1196,8 @@ func (w *InstallWatcher) scannerFor(evt InstallEvent) scanner.Scanner {
 
 	case InstallPlugin:
 		return scanner.NewPluginScanner(w.cfg.Scanners.PluginScanner)
+	case InstallPrompt, InstallCredential, InstallEnvironment:
+		return &staticResourceScanner{kind: evt.Type, cfg: w.cfg}
 	default:
 		return nil
 	}
@@ -785,6 +1214,8 @@ func (w *InstallWatcher) takeActionFor(evt InstallEvent) bool {
 		return w.cfg.Gateway.Watcher.Plugin.TakeAction
 	case InstallMCP:
 		return w.cfg.Gateway.Watcher.MCP.TakeAction
+	case InstallConfig, InstallPrompt, InstallCredential, InstallEnvironment:
+		return false
 	default:
 		return w.cfg.Watch.AutoBlock
 	}
@@ -929,4 +1360,56 @@ func ensureAndWatch(fsw *fsnotify.Watcher, dir string) error {
 	}
 
 	return nil
+}
+
+func ensureAndWatchTree(fsw *fsnotify.Watcher, dir string) (int, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return 0, fmt.Errorf("create dir: %w", err)
+	}
+
+	count := 0
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		if path != dir {
+			switch d.Name() {
+			case ".git", "node_modules", "__pycache__", ".venv", "venv":
+				return filepath.SkipDir
+			}
+		}
+		if err := fsw.Add(path); err != nil {
+			return nil
+		}
+		count++
+		return nil
+	})
+	if err != nil {
+		return count, fmt.Errorf("watch tree: %w", err)
+	}
+	return count, nil
+}
+
+func watchTreeIfDir(fsw *fsnotify.Watcher, path string) error {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return err
+	}
+	_, err = ensureAndWatchTree(fsw, path)
+	return err
+}
+
+func watcherEventOp(op fsnotify.Op) string {
+	switch {
+	case op&fsnotify.Create != 0:
+		return "create"
+	case op&fsnotify.Rename != 0:
+		return "rename"
+	case op&fsnotify.Remove != 0:
+		return "remove"
+	case op&fsnotify.Write != 0:
+		return "write"
+	default:
+		return "change"
+	}
 }

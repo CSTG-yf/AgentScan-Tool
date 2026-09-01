@@ -67,8 +67,9 @@ func setupTestEnv(t *testing.T) (cfg *config.Config, store *audit.Store, logger 
 			PolicyDir: filepath.Join(tmpDir, "openshell-policies"),
 		},
 		Watch: config.WatchConfig{
-			DebounceMs: 100,
-			AutoBlock:  true,
+			DebounceMs:      100,
+			AutoBlock:       true,
+			RealtimeEnabled: true,
 		},
 		SkillActions: config.DefaultSkillActions(),
 	}

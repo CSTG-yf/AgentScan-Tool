@@ -82,6 +82,16 @@ type APIServer struct {
 	configSnapshot func() *config.Config
 	configWriteMu  sync.Mutex
 
+	// staticScanOne / staticRescan are the watcher's on-demand scan entry
+	// points, wired in by the sidecar via SetStaticScanTrigger after the
+	// watcher is constructed. They back POST /api/v1/static-resources/{id}/scan
+	// and POST /api/v1/agents/{id}/static-resources/scan.
+	staticScanMu  sync.RWMutex
+	staticScanOne func(resourceID string) error
+	staticRescan  func(agentID string) error
+	scanStatusMu  sync.RWMutex
+	scanStatuses  map[string]apiScanStatus
+
 	// otlpPathTokenMu guards otlpPathTokens — the in-memory map of
 	// per-source OTLP path tokens loaded from
 	// ${data_dir}/hooks/.otlp-<source>.token. Reads happen on every
@@ -757,10 +767,6 @@ func (a *APIServer) Run(ctx context.Context) error {
 	mux.HandleFunc("/plugin/enable", a.handlePluginEnable)
 	mux.HandleFunc("/config/patch", a.handleConfigPatch)
 	mux.HandleFunc("/scan/result", a.handleScanResult)
-	mux.HandleFunc("/enforce/block", a.handleEnforceBlock)
-	mux.HandleFunc("/enforce/allow", a.handleEnforceAllow)
-	mux.HandleFunc("/enforce/blocked", a.handleEnforceBlocked)
-	mux.HandleFunc("/enforce/allowed", a.handleEnforceAllowed)
 	mux.HandleFunc("/alerts", a.handleAlerts)
 	mux.HandleFunc("/audit/event", a.handleAuditEvent)
 	mux.HandleFunc("/policy/evaluate", a.handlePolicyEvaluate)
@@ -807,6 +813,46 @@ func (a *APIServer) Run(ctx context.Context) error {
 	mux.HandleFunc("/v1/traces", a.handleOTLPTraces)
 	mux.HandleFunc("/otlp/", a.handleOTLPPathToken)
 	mux.HandleFunc("/api/v1/agents/discovery", a.handleAgentDiscovery)
+	mux.HandleFunc("/api/v1/agents", a.handleAgentsAPI)
+	mux.HandleFunc("/api/v1/agents/", a.handleAgentsAPI)
+	mux.HandleFunc("/api/v1/agent-governance", a.handleAgentGovernanceAPI)
+	mux.HandleFunc("/api/v1/agent-governance/", a.handleAgentGovernanceAPI)
+	mux.HandleFunc("/api/v1/scans/agents", a.handleAgentScan)
+	mux.HandleFunc("/api/v1/scans/", a.handleScanStatus)
+	// Rule-driven static resource API for the desktop inventory page.
+	mux.HandleFunc("/api/v1/static-resources", a.handleStaticResourcesAPI)
+	mux.HandleFunc("/api/v1/static-resources/", a.handleStaticResourcesAPI)
+	mux.HandleFunc("/api/v1/attack-chains", a.handleAttackChains)
+	mux.HandleFunc("/api/v1/attack-chains/", a.handleAttackChains)
+	mux.HandleFunc("/api/v1/behavior-events", a.handleBehaviorEvents)
+	// Phase-1 unified runtime event timeline: /api/v1/runtime-events
+	// (filter by agent_id / session_id / trace_id / event_type /
+	// source / severity) and /api/v1/runtime-sessions (per-agent
+	// session inventory). Backs the "who did what, in which run,
+	// through which pipeline" query over behavior_events.
+	mux.HandleFunc("/api/v1/runtime-events/timeline", a.handleRuntimeEventsTimeline)
+	mux.HandleFunc("/api/v1/runtime-events", a.handleRuntimeEvents)
+	mux.HandleFunc("/api/v1/runtime-events/", a.handleRuntimeEvents)
+	mux.HandleFunc("/api/v1/runtime-sessions", a.handleRuntimeSessions)
+	mux.HandleFunc("/api/v1/runtime-security/summary", a.handleRuntimeSecuritySummary)
+	mux.HandleFunc("/api/v1/runtime-security/mode", a.handleRuntimeSecurityMode)
+	// Phase-2 runtime detections: structured risk findings derived
+	// from unified runtime events by generic (agent-agnostic) rules.
+	// /{id} subpaths serve detail + evidence chain and status
+	// transitions.
+	mux.HandleFunc("/api/v1/runtime-detections", a.handleRuntimeDetections)
+	mux.HandleFunc("/api/v1/runtime-detections/", a.handleRuntimeDetections)
+	// Phase-3 unified decision & response surface: runtime-decisions
+	// (verdict + executed response actions) and the runtime security
+	// mode switch (observe | action).
+	mux.HandleFunc("/api/v1/runtime-decisions", a.handleRuntimeDecisions)
+	mux.HandleFunc("/api/v1/runtime-decisions/", a.handleRuntimeDecisions)
+	mux.HandleFunc("/api/v1/enforcements", a.handleRuntimeEnforcements)
+	mux.HandleFunc("/api/v1/enforcements/", a.handleRuntimeEnforcements)
+	mux.HandleFunc("/api/v1/process-guard-audit", a.handleProcessGuardAudit)
+	mux.HandleFunc("/api/v1/desktop-scan-schedule", a.handleDesktopScanSchedule)
+	mux.HandleFunc("/api/v1/static-resource-scan-settings", a.handleStaticResourceScanSettings)
+	mux.HandleFunc("/api/v1/gateway-audit", a.handleGatewayAuditInventory)
 	mux.HandleFunc("/api/v1/ai-usage", a.handleAIUsage)
 	mux.HandleFunc("/api/v1/ai-usage/scan", a.handleAIUsageScan)
 	mux.HandleFunc("/api/v1/ai-usage/discovery", a.handleAIUsageDiscovery)
@@ -2373,6 +2419,15 @@ func (a *APIServer) handleGuardrailEvent(w http.ResponseWriter, r *http.Request)
 		// request (now also carrying connector) so all surfaces agree.
 		_ = a.logger.LogActionCtx(auditCtx, string(audit.ActionGuardrailVerdict), req.Model, details)
 	}
+	// Phase-1 unified runtime events: the REST guardrail report path
+	// (guardrail proxy / hook connectors) gets the same
+	// behavior_events normalization as the inline proxy verdict.
+	recordGuardrailRuntimeEvent(auditCtx, req.Direction, req.Model, &ScanVerdict{
+		Action:   req.Action,
+		Severity: req.Severity,
+		Reason:   req.Reason,
+		Findings: req.Findings,
+	})
 	if a.store != nil {
 		evt := audit.Event{
 			Action:    string(audit.ActionGuardrailInspection),
@@ -3784,12 +3839,13 @@ func (a *APIServer) handleNetworkEgressList(w http.ResponseWriter, r *http.Reque
 	}
 
 	f := audit.NetworkEgressFilter{
-		Hostname:    q.Get("hostname"),
-		SessionID:   q.Get("session_id"),
-		AgentID:     q.Get("agent_id"),
-		RootAgentID: q.Get("root_agent_id"),
-		UserID:      q.Get("user_id"),
-		Limit:       limit,
+		Hostname:         q.Get("hostname"),
+		SessionID:        q.Get("session_id"),
+		AgentID:          q.Get("agent_id"),
+		CanonicalAgentID: q.Get("canonical_agent_id"),
+		RootAgentID:      q.Get("root_agent_id"),
+		UserID:           q.Get("user_id"),
+		Limit:            limit,
 	}
 
 	// ?blocked=true|false — optional boolean filter

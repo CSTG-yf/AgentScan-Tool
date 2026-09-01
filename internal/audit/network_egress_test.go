@@ -330,6 +330,27 @@ func TestStore_NetworkEgressPreservesAgentLifecycleCorrelation(t *testing.T) {
 		got.AgentExecutionID != want.AgentExecutionID || got.ToolID != want.ToolID {
 		t.Fatalf("egress lifecycle correlation=%+v want=%+v", got, want)
 	}
+	if got.CanonicalAgentID != "codex" {
+		t.Fatalf("canonical egress agent = %q, want codex", got.CanonicalAgentID)
+	}
+	canonicalRows, err := store.QueryNetworkEgressEvents(NetworkEgressFilter{CanonicalAgentID: "codex"})
+	if err != nil || len(canonicalRows) != 1 {
+		t.Fatalf("canonical egress query rows=%d err=%v", len(canonicalRows), err)
+	}
+	agents, err := store.ListAgents(20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, agent := range agents {
+		if agent.ID == "codex" && agent.DisplayName == "OpenAI Codex" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("canonical agent inventory missing codex: %+v", agents)
+	}
 }
 
 func TestStore_QueryNetworkEgressEvents_OrdersFractionalTimestampsChronologically(t *testing.T) {
@@ -577,7 +598,17 @@ func TestAgent360NetworkEgressMigrationUpgradesAlreadyMigratedDatabase(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	for version := 1; version < len(migrations); version++ {
+	preAgent360Version := 0
+	for i, migration := range migrations {
+		if strings.HasPrefix(migration.description, "agent360:") {
+			preAgent360Version = i
+			break
+		}
+	}
+	if preAgent360Version == 0 {
+		t.Fatal("agent360 migration not found")
+	}
+	for version := 1; version <= preAgent360Version; version++ {
 		if _, err := db.Exec(`INSERT INTO schema_version(version, applied_at) VALUES (?, CURRENT_TIMESTAMP)`, version); err != nil {
 			t.Fatal(err)
 		}
@@ -594,7 +625,7 @@ func TestAgent360NetworkEgressMigrationUpgradesAlreadyMigratedDatabase(t *testin
 	if err := store.Init(); err != nil {
 		t.Fatalf("Init upgrade: %v", err)
 	}
-	for _, column := range []string{"root_agent_id", "parent_agent_id", "root_session_id"} {
+	for _, column := range []string{"canonical_agent_id", "root_agent_id", "parent_agent_id", "root_session_id"} {
 		exists, err := store.hasColumn("network_egress_events", column)
 		if err != nil || !exists {
 			t.Fatalf("column %s after upgrade: exists=%v err=%v", column, exists, err)

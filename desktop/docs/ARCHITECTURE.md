@@ -67,5 +67,6 @@ The repeatable release pipeline must eventually produce:
 - a version manifest and checksums
 
 Clean-machine acceptance requires Windows 10/11 x64 without Go, Python, Node,
-or Rust installed. Docker Desktop remains an explicit prerequisite only for the
-AgentRange feature.
+or Rust installed. A Docker Compose-compatible container runtime remains an
+explicit prerequisite only for the optional AgentRange feature; Docker Desktop
+itself is not required.

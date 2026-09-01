@@ -651,14 +651,26 @@ Phase 3: Post-scan OPA
   └── Apply enforcement: file_action, install_action, runtime_action
 ```
 
-### Periodic Rescan and Drift Detection
+### Realtime and Periodic Static Resource Scanning
+
+When `watch.realtime_enabled` is `true` (default), filesystem events under
+skill/plugin directories are debounced and mapped back to the top-level
+asset for immediate admission scanning. Configuration, policy, prompt, and
+credential file changes trigger an immediate type-scoped rescan for MCP,
+prompt, credential, or environment targets.
 
 When `watch.rescan_enabled` is `true` (default), a rescan loop runs
-immediately on startup and then every `watch.rescan_interval_min` minutes
-(default: 60). Each cycle:
+immediately on startup and then on the per-target intervals under `watch:`.
+`watch.rescan_interval_min` is the fallback interval (default: 60 minutes);
+`watch.rescan_skill_interval_min`, `watch.rescan_plugin_interval_min`,
+`watch.rescan_mcp_interval_min`, `watch.rescan_prompt_interval_min`,
+`watch.rescan_credential_interval_min`, and
+`watch.rescan_environment_interval_min` override it for their target type
+when set to a positive value. Each cycle:
 
-1. Enumerates all installed targets (skill/plugin child directories + MCP
-   servers from `openclaw.json`).
+1. Enumerates all installed targets: skill/plugin child directories, MCP
+   servers from `openclaw.json`, prompt/rule files, credential files, and
+   the current process environment snapshot.
 2. Takes a `TargetSnapshot` per target: content SHA-256 hash, dependency
    file hashes (13 patterns: `requirements.txt`, `package.json`, `go.mod`,
    etc.), config file hashes (10 patterns: `skill.yaml`, `.env`, etc.),

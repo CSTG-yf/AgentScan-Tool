@@ -82,7 +82,7 @@ Prerequisites on Windows 10/11 x64:
 - Visual Studio Build Tools (Desktop development with C++)
 - Microsoft Edge WebView2
 - Go 1.24+ when rebuilding the gateway sidecar
-- Docker Desktop when running AgentRange
+- A Docker Compose-compatible container runtime when running the optional AgentRange lab
 
 ```powershell
 cd desktop

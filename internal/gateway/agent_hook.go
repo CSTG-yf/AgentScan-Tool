@@ -390,6 +390,13 @@ func (a *APIServer) finalizeAgentHook(
 	safeSection("hook_decision", func() {
 		a.emitHookDecisionEvent(ctx, req, resp, env)
 	})
+
+	// Phase-1 unified runtime events: append one behavior_events row
+	// (prompt.submit / tool.pre_call / ...) so the runtime timeline can
+	// answer "who did what, in which session, through which chain".
+	safeSection("runtime_event", func() {
+		a.recordHookRuntimeEvent(ctx, req, resp)
+	})
 }
 
 // emitHookDecisionEvent materializes the final connector-facing decision as a

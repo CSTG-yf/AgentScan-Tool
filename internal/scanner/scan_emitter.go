@@ -130,6 +130,11 @@ type ScanSummaryParams struct {
 	// mid-stream, tool-call-inspect). Empty for classic scanner
 	// invocations.
 	EvaluationID string
+	// StaticResourceID / ResourceRuleID / ScanProfileID carry the
+	// agent_resource_rules lineage for rule-driven resource scans.
+	StaticResourceID string
+	ResourceRuleID   int64
+	ScanProfileID    int64
 }
 
 // ScanFindingMeta stamps correlation + provenance on scan_findings rows.
@@ -151,6 +156,9 @@ type ScanFindingMeta struct {
 	// onto every scan_findings row so SIEM queries can pivot on it
 	// without joining to scan_results.
 	EvaluationID string
+	// StaticResourceID is the pre-resolved static_resources row for
+	// rule-driven resource scans.
+	StaticResourceID string
 }
 
 // EmitScanResult fans out one EventScan + N EventScanFinding events (when w
@@ -226,6 +234,7 @@ func EmitScanResult(
 		Generation:        prov.Generation,
 		BinaryVersion:     prov.BinaryVersion,
 		EvaluationID:      agent.EvaluationID,
+		StaticResourceID:  agent.StaticResourceID,
 	}
 
 	if pers != nil {
@@ -270,6 +279,9 @@ func EmitScanResult(
 			AgentInstanceID:   agent.AgentInstanceID,
 			SidecarInstanceID: agent.SidecarInstanceID,
 			EvaluationID:      agent.EvaluationID,
+			StaticResourceID:  agent.StaticResourceID,
+			ResourceRuleID:    agent.ResourceRuleID,
+			ScanProfileID:     agent.ScanProfileID,
 		}
 		if err := pers.InsertScanSummary(sum); err != nil {
 			return scanID, err

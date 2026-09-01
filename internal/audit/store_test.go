@@ -128,11 +128,31 @@ func TestStoreObservabilityPhase6ColumnsPresent(t *testing.T) {
 	}
 }
 
+// TestStoreTablesHaveSoftDeleteColumn pins the common soft-delete marker across
+// every application-owned table in audit.db.
+func TestStoreTablesHaveSoftDeleteColumn(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+	if err := store.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	for _, table := range softDeleteTables {
+		ok, err := store.hasColumn(table, "delete")
+		if err != nil {
+			t.Fatalf("hasColumn(%s, delete): %v", table, err)
+		}
+		if !ok {
+			t.Fatalf("expected %s.delete to exist after migration", table)
+		}
+	}
+}
+
 // TestStoreLogEventRoundTripsPhase6Fields writes an Event with every
-// Phase 6 field populated and reads it back via ListEvents. All
-// fields must survive the sqlite round-trip unchanged — this is the
-// contract the audit bridge, Splunk HEC, and OTLP log sinks all rely
-// on.
+// Phase 6 field populated and reads it back via ListEvents.
 func TestStoreLogEventRoundTripsPhase6Fields(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "audit.db"))
 	if err != nil {
@@ -178,7 +198,8 @@ func TestStoreLogEventRoundTripsPhase6Fields(t *testing.T) {
 		{"TraceID", got.TraceID, in.TraceID},
 		{"RequestID", got.RequestID, in.RequestID},
 		{"SessionID", got.SessionID, in.SessionID},
-		{"AgentName", got.AgentName, in.AgentName},
+		{"AgentName", got.AgentName, "OpenClaw"},
+		{"CanonicalAgentID", got.CanonicalAgentID, "openclaw"},
 		{"AgentInstanceID", got.AgentInstanceID, in.AgentInstanceID},
 		{"PolicyID", got.PolicyID, in.PolicyID},
 		{"DestinationApp", got.DestinationApp, in.DestinationApp},

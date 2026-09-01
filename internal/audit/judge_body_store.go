@@ -184,7 +184,9 @@ var judgeBodyMigrations = []migration{
 				generation INTEGER,
 				binary_version TEXT,
 				agent_id TEXT,
-				sidecar_instance_id TEXT
+				canonical_agent_id TEXT,
+				sidecar_instance_id TEXT,
+				"delete" INTEGER NOT NULL DEFAULT 0
 			);
 			CREATE INDEX IF NOT EXISTS idx_jb_timestamp  ON judge_responses(timestamp);
 			CREATE INDEX IF NOT EXISTS idx_jb_kind       ON judge_responses(kind);
@@ -192,10 +194,41 @@ var judgeBodyMigrations = []migration{
 			CREATE INDEX IF NOT EXISTS idx_jb_request_id ON judge_responses(request_id);
 			CREATE INDEX IF NOT EXISTS idx_jb_trace_id   ON judge_responses(trace_id);
 			CREATE INDEX IF NOT EXISTS idx_jb_run_id     ON judge_responses(run_id);
+			CREATE INDEX IF NOT EXISTS idx_jb_canonical_agent ON judge_responses(canonical_agent_id);
 			`); err != nil {
 				return err
 			}
 			return nil
+		},
+	},
+	{
+		description: "v2: canonical agent binding for judge responses",
+		apply: func(ex dbExecer) error {
+			exists, err := hasColumnDB(ex, "judge_responses", "canonical_agent_id")
+			if err != nil {
+				return err
+			}
+			if !exists {
+				if _, err := ex.Exec(`ALTER TABLE judge_responses ADD COLUMN canonical_agent_id TEXT`); err != nil {
+					return fmt.Errorf("alter judge_responses.canonical_agent_id: %w", err)
+				}
+			}
+			if _, err := ex.Exec(`CREATE INDEX IF NOT EXISTS idx_jb_canonical_agent ON judge_responses(canonical_agent_id)`); err != nil {
+				return fmt.Errorf("create idx_jb_canonical_agent: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		description: "v3: soft delete marker for judge responses",
+		apply: func(ex dbExecer) error {
+			return ensureSoftDeleteColumn(ex, "judge_responses")
+		},
+	},
+	{
+		description: "v4: soft delete marker for schema table",
+		apply: func(ex dbExecer) error {
+			return ensureSoftDeleteColumn(ex, "schema_version")
 		},
 	},
 }
@@ -203,7 +236,8 @@ var judgeBodyMigrations = []migration{
 func (s *JudgeBodyStore) init() error {
 	if _, err := s.execDB(context.Background(), "judge_body_schema", `CREATE TABLE IF NOT EXISTS schema_version (
 		version INTEGER PRIMARY KEY,
-		applied_at DATETIME NOT NULL
+		applied_at DATETIME NOT NULL,
+		"delete" INTEGER NOT NULL DEFAULT 0
 	)`); err != nil {
 		return fmt.Errorf("judge_body: create schema_version: %w", err)
 	}
@@ -273,6 +307,7 @@ func (s *JudgeBodyStore) InsertJudgeResponseCtx(ctx context.Context, e JudgeResp
 	if e.RunID == "" {
 		e.RunID = currentRunID()
 	}
+	e.CanonicalAgentID = firstNonEmpty(e.CanonicalAgentID, CanonicalAgentIDFromHints(e.AgentID, e.AgentInstanceID))
 	raw := truncateJudgeRaw(e.Raw, MaxJudgeRawBytes)
 	failClosed := 0
 	if e.FailClosedApplied {
@@ -284,9 +319,9 @@ func (s *JudgeBodyStore) InsertJudgeResponseCtx(ctx context.Context, e JudgeResp
 			 parse_error, raw_response, request_id, trace_id, run_id, session_id, input_hash,
 			 confidence, fail_closed_applied, inspected_model, prompt_template_id,
 			 schema_version, content_hash, generation, binary_version,
-			 agent_id, agent_instance_id, sidecar_instance_id,
+			 agent_id, canonical_agent_id, agent_instance_id, sidecar_instance_id,
 			 policy_id, destination_app, tool_name, tool_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.ID,
 		e.Timestamp.Format(time.RFC3339Nano),
 		e.Kind,
@@ -311,6 +346,7 @@ func (s *JudgeBodyStore) InsertJudgeResponseCtx(ctx context.Context, e JudgeResp
 		int64(e.Generation),
 		nullStr(e.BinaryVersion),
 		nullStr(e.AgentID),
+		nullStr(e.CanonicalAgentID),
 		nullStr(e.AgentInstanceID),
 		nullStr(e.SidecarInstanceID),
 		nullStr(e.PolicyID),
@@ -348,7 +384,7 @@ func (s *JudgeBodyStore) ListJudgeResponsesCtx(ctx context.Context, limit int) (
 			COALESCE(fail_closed_applied,0),
 			COALESCE(inspected_model,''), COALESCE(prompt_template_id,''),
 			COALESCE(schema_version,0), COALESCE(content_hash,''), COALESCE(generation,0), COALESCE(binary_version,''),
-			COALESCE(agent_id,''), COALESCE(agent_instance_id,''), COALESCE(sidecar_instance_id,''),
+			COALESCE(agent_id,''), COALESCE(canonical_agent_id,''), COALESCE(agent_instance_id,''), COALESCE(sidecar_instance_id,''),
 			COALESCE(policy_id,''), COALESCE(destination_app,''), COALESCE(tool_name,''), COALESCE(tool_id,'')
 		FROM judge_responses ORDER BY timestamp DESC LIMIT ?`, limit)
 	if err != nil {
@@ -367,7 +403,7 @@ func (s *JudgeBodyStore) ListJudgeResponsesCtx(ctx context.Context, limit int) (
 			&r.RequestID, &r.TraceID, &r.RunID, &r.SessionID, &r.InputHash, &r.Confidence,
 			&failClosed, &r.InspectedModel, &r.PromptTemplateID,
 			&r.SchemaVersion, &r.ContentHash, &gen, &r.BinaryVersion,
-			&r.AgentID, &r.AgentInstanceID, &r.SidecarInstanceID,
+			&r.AgentID, &r.CanonicalAgentID, &r.AgentInstanceID, &r.SidecarInstanceID,
 			&r.PolicyID, &r.DestinationApp, &r.ToolName, &r.ToolID); err != nil {
 			return nil, fmt.Errorf("judge_body: scan: %w", err)
 		}

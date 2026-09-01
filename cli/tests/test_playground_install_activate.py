@@ -103,7 +103,17 @@ WIZARD_EMIT_FIXTURE: dict = {
         "allowed_domains": ["api.openai.com"],
         "allowed_ports": [443, 80],
     },
-    "watch": {"rescan_enabled": True, "rescan_interval_min": 30},
+    "watch": {
+        "realtime_enabled": True,
+        "rescan_enabled": True,
+        "rescan_interval_min": 30,
+        "rescan_skill_interval_min": 15,
+        "rescan_plugin_interval_min": 30,
+        "rescan_mcp_interval_min": 10,
+        "rescan_prompt_interval_min": 15,
+        "rescan_credential_interval_min": 5,
+        "rescan_environment_interval_min": 30,
+    },
     "enforcement": {"max_enforcement_delay_seconds": 2},
     "audit": {"log_all_actions": True, "log_scan_results": True, "retention_days": 90},
     # NEW SURFACES — these fields were silently dropped before C1
@@ -174,8 +184,15 @@ class TestPlaygroundEndToEnd(unittest.TestCase):
             "skill_actions.critical.install was not applied",
         )
         # Watch.
+        self.assertTrue(self.app.cfg.watch.realtime_enabled)
         self.assertTrue(self.app.cfg.watch.rescan_enabled)
         self.assertEqual(self.app.cfg.watch.rescan_interval_min, 30)
+        self.assertEqual(self.app.cfg.watch.rescan_skill_interval_min, 15)
+        self.assertEqual(self.app.cfg.watch.rescan_plugin_interval_min, 30)
+        self.assertEqual(self.app.cfg.watch.rescan_mcp_interval_min, 10)
+        self.assertEqual(self.app.cfg.watch.rescan_prompt_interval_min, 15)
+        self.assertEqual(self.app.cfg.watch.rescan_credential_interval_min, 5)
+        self.assertEqual(self.app.cfg.watch.rescan_environment_interval_min, 30)
 
         # Cisco AI Defense (the field that the C1 parity test exposed
         # as silently dropped — must now round-trip into config.yaml).

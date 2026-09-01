@@ -378,7 +378,27 @@ fn audit_match(
         outcome,
         detail,
     };
-    append_audit(path, &event)
+    let result = append_audit(path, &event);
+    let behavior_detail = format!(
+        "rule_id={} mode={} action={} detail={}",
+        matched.rule_id, policy.mode, matched.action, detail
+    );
+    let _ = crate::trace_store::append(
+        &crate::trace_store::default_database_path(),
+        &crate::trace_store::NewTraceEvent {
+            event_type: "processGuardRuleMatch",
+            source: "windows-process-guard",
+            agent_pid: matched.agent.pid,
+            agent_executable: &matched.agent.name,
+            actor_pid: matched.child.pid,
+            actor_executable: &matched.child.name,
+            path: None,
+            action: Some(&matched.action),
+            outcome,
+            detail: &behavior_detail,
+        },
+    );
+    result
 }
 
 /// Run the process guard in the foreground. Windows Service lifecycle support

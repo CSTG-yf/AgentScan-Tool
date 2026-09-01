@@ -292,6 +292,7 @@ func diffConfigs(oldCfg, newCfg *config.Config) ConfigDiff {
 	var restart []string
 	hotReloadable := map[string]struct{}{
 		"guardrail":        {},
+		"watch":            {},
 		"otel":             {},
 		"audit_sinks":      {},
 		"webhooks":         {},
