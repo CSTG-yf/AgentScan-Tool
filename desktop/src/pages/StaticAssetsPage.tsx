@@ -14,6 +14,7 @@ import {
   exportStaticResourceTextReport,
   revealStaticResourcePath,
   getStaticResourceSummary,
+  getScanStatus,
   triggerStaticResourceRescan,
   triggerStaticResourceScan,
   updateStaticResourceStatus,
@@ -31,6 +32,17 @@ import type {
 const { Text, Title } = Typography;
 
 const PAGE_SIZE = 20;
+
+async function waitForScanCompletion(scanId?: string): Promise<void> {
+  if (!scanId) return;
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const status = await getScanStatus(scanId);
+    if (status.status === "completed") return;
+    if (status.status === "failed") throw new Error(status.error || "扫描任务失败");
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
+  }
+  throw new Error("扫描任务等待超时，请稍后查看扫描历史");
+}
 
 /** API resource_type (lowercase) → display type used by the type meta table. */
 const API_TYPE_TO_DISPLAY: Record<string, string> = {
@@ -211,13 +223,14 @@ function buildStaticResourcesReport(sections: Array<{ agent: StaticResourceAgent
 interface StaticAssetsPageProps {
   loading?: boolean;
   onRefresh?: () => Promise<void> | void;
+  refreshNonce?: number;
 }
 
 type TypeFilter = string | "all";
 type RiskFilter = string | "all";
 type StatusFilter = string | "all";
 
-export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
+export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAssetsPageProps) {
   // ── Agent list (left panel) ────────────────────────────────────────────
   const [agents, setAgents] = useState<StaticResourceAgentSummary[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(false);
@@ -377,6 +390,12 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
     setListReloadNonce((nonce) => nonce + 1);
   }, [selectedAgentId]);
 
+  useEffect(() => {
+    if (refreshNonce <= 0) return;
+    void loadAgents(false);
+    void refreshListAndSummary();
+  }, [loadAgents, refreshListAndSummary, refreshNonce]);
+
   // ── Drawer lazy loaders ────────────────────────────────────────────────
   const loadDetail = useCallback(async (resourceId: string) => {
     setDetailLoading(true);
@@ -480,20 +499,17 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
     if (!selectedAgentId) return;
     setRescanning(true);
     try {
-      await triggerStaticResourceRescan(selectedAgentId);
-      message.success("已提交重新扫描任务，稍后刷新查看结果");
+      const accepted = await triggerStaticResourceRescan(selectedAgentId);
+      await waitForScanCompletion(accepted.scan_id);
+      message.success("静态资源重新扫描完成");
       const resourceId = detailResourceId;
-      [2500, 6000, 10000].forEach((delay) => {
-        setTimeout(() => {
-          void loadAgents(false);
-          void refreshListAndSummary();
-          if (resourceId) {
-            void loadDetail(resourceId);
-            void loadFindings(resourceId);
-            void loadScans(resourceId);
-          }
-        }, delay);
-      });
+      await loadAgents(false);
+      await refreshListAndSummary();
+      if (resourceId) {
+        await loadDetail(resourceId);
+        await loadFindings(resourceId);
+        await loadScans(resourceId);
+      }
     } catch (error) {
       message.error(`提交重新扫描失败：${String(error)}`);
     } finally {
@@ -505,18 +521,14 @@ export function StaticAssetsPage({ loading = false }: StaticAssetsPageProps) {
     if (!detailResourceId) return;
     setScanning(true);
     try {
-      await triggerStaticResourceScan(detailResourceId);
-      message.success("已提交扫描任务，稍后自动刷新");
-      // Give the backend a moment, then refresh what we are looking at.
+      const accepted = await triggerStaticResourceScan(detailResourceId);
+      await waitForScanCompletion(accepted.scan_id);
+      message.success("资源扫描完成");
       const resourceId = detailResourceId;
-      [1500, 3500, 7000].forEach((delay) => {
-        setTimeout(() => {
-          void loadDetail(resourceId);
-          void loadFindings(resourceId);
-          void loadScans(resourceId);
-          void refreshListAndSummary();
-        }, delay);
-      });
+      await loadDetail(resourceId);
+      await loadFindings(resourceId);
+      await loadScans(resourceId);
+      await refreshListAndSummary();
     } catch (error) {
       message.error(`提交扫描失败：${String(error)}`);
     } finally {

@@ -339,6 +339,7 @@ export interface RuntimeDetection {
   severity: string;
   confidence?: number;
   ruleId?: string;
+  ruleVersion?: string;
   status: string;
   title: string;
   description?: string;
@@ -528,6 +529,9 @@ export interface AttackChainSnapshot {
   capturedAt: string;
   source: string;
   chains: AttackChain[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
   warning?: string;
 }
 
@@ -875,13 +879,30 @@ export interface StaticResourceRelationItem {
 }
 
 export interface StaticResourceRelationsResponse {
+  resource_id?: string;
+  supported?: boolean;
+  reason?: string;
   items: StaticResourceRelationItem[];
 }
 
 export interface StaticResourceScanAccepted {
+  scan_id?: string;
   resource_id?: string;
   agent_id?: string;
   status: string;
+  progress?: number;
+  type?: string;
+  mode?: string;
+  started_at?: string;
+  finished_at?: string;
+  error?: string;
+}
+
+export interface ChangeCursor {
+  next_cursor: number;
+  changed_domains: string[];
+  latest_at?: string;
+  source?: string;
 }
 
 // ---------------------------------------------------------------------------

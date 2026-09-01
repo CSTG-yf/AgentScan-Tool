@@ -5,6 +5,7 @@ import type {
   AgentSnapshot,
   AgentTraceSnapshot,
   AttackChainSnapshot,
+  ChangeCursor,
   EnvironmentSnapshot,
   GatewayAuditSnapshot,
   GovernanceAdmissionEvaluateInput,
@@ -219,6 +220,43 @@ export async function triggerStaticResourceScan(resourceId: string): Promise<Sta
 
 export async function triggerStaticResourceRescan(agentId?: string): Promise<StaticResourceScanAccepted> {
   return invoke<StaticResourceScanAccepted>("trigger_static_resource_rescan", { agentId: agentId ?? null });
+}
+
+export async function getScanStatus(scanId: string): Promise<StaticResourceScanAccepted> {
+  if (!inTauri()) return { scan_id: scanId, status: "preview", progress: 0 };
+  return invoke<StaticResourceScanAccepted>("get_scan_status", { scanId });
+}
+
+export interface RuntimeEventReplayScope {
+  agentId?: string;
+  sessionId?: string;
+  traceId?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+export async function createRuntimeEventReplay(scope: RuntimeEventReplayScope = {}): Promise<StaticResourceScanAccepted> {
+  if (!inTauri()) return { status: "preview", progress: 0 };
+  return invoke<StaticResourceScanAccepted>("create_event_replay_job", {
+    agentId: scope.agentId,
+    sessionId: scope.sessionId,
+    traceId: scope.traceId,
+    startTime: scope.startTime,
+    endTime: scope.endTime,
+  });
+}
+
+export async function createAttackChainRebuildJob(limit = 5000): Promise<StaticResourceScanAccepted> {
+  if (!inTauri()) return { status: "preview", progress: 0 };
+  return invoke<StaticResourceScanAccepted>("create_attack_chain_rebuild_job", { limit });
+}
+
+export async function getChanges(cursor = 0, domains?: string[]): Promise<ChangeCursor> {
+  if (!inTauri()) return { next_cursor: cursor, changed_domains: [], source: "preview" };
+  return invoke<ChangeCursor>("get_changes", {
+    cursor,
+    domains: domains?.join(","),
+  });
 }
 
 export async function getStaticResourceScans(resourceId: string, limit = 50): Promise<StaticResourceScanHistoryResponse> {
@@ -661,7 +699,17 @@ export async function getRuntimeDecisions(limit = 200): Promise<RuntimeDecisionL
   if (!inTauri()) {
     return { decisions: [], summary: { total: 0, block: 0, confirm: 0, alert: 0, audit: 0, allow: 0, wouldBlock: 0 }, count: 0 };
   }
-  return invoke<RuntimeDecisionListResponse>("get_runtime_decisions", { limit });
+  const response = await invoke<RuntimeDecisionListResponse>("get_runtime_decisions", { limit });
+  // Rust's RuntimeDecisionRow uses serde(flatten), while the TS model keeps
+  // the decision nested for page ergonomics. Normalize both shapes here so
+  // older sidecars and the current Tauri command remain compatible.
+  const rawRows = (response as unknown as { decisions?: Array<Record<string, unknown>> }).decisions ?? [];
+  const decisions = rawRows.map((row) => {
+    if (row.decision && typeof row.decision === "object") return row as unknown as RuntimeDecisionListResponse["decisions"][number];
+    const { detection, ...decision } = row;
+    return { decision, detection } as unknown as RuntimeDecisionListResponse["decisions"][number];
+  });
+  return { ...response, decisions };
 }
 
 export async function getRuntimeDecisionDetail(decisionId: string): Promise<RuntimeDecisionDetail> {
@@ -729,6 +777,11 @@ export async function getAgents(query: AgentListQuery = {}): Promise<AgentSnapsh
     return { capturedAt: new Date().toISOString(), agents: [], processes: [], warning: "浏览器预览模式不具备本机进程访问权限" };
   }
   return invoke<AgentSnapshot>("get_agents", { query });
+}
+
+export async function triggerAgentScan(mode = "full"): Promise<StaticResourceScanAccepted> {
+  if (!inTauri()) return { status: "preview", progress: 0 };
+  return invoke<StaticResourceScanAccepted>("trigger_agent_scan", { mode });
 }
 
 export async function getAgentDetail(agentId: string): Promise<AgentInventory> {

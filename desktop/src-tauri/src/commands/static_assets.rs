@@ -164,20 +164,32 @@ pub fn trigger_static_resource_rescan(
     app: tauri::AppHandle,
     agent_id: Option<String>,
 ) -> Result<Value, String> {
-    let agent_id = agent_id
+    let path = match agent_id
         .as_deref()
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| "agent_id 不能为空".to_owned())?;
-    crate::commands::gateway_api::post_json::<Value, Value>(
-        &app,
-        &format!(
+    {
+        Some(agent_id) => format!(
             "/api/v1/agents/{}/static-resources/scan",
             urlencode(agent_id)
         ),
-        &serde_json::json!({}),
+        None => "/api/v1/static-resources/rescan".to_owned(),
+    };
+    crate::commands::gateway_api::post_json::<Value, Value>(&app, &path, &serde_json::json!({}))
+        .map_err(|error| format!("触发重新扫描失败：{error}"))
+}
+
+#[tauri::command]
+pub fn get_scan_status(app: tauri::AppHandle, scan_id: String) -> Result<Value, String> {
+    let scan_id = scan_id.trim();
+    if scan_id.is_empty() {
+        return Err("scan_id 不能为空".to_owned());
+    }
+    crate::commands::gateway_api::get_json::<Value>(
+        &app,
+        &format!("/api/v1/scans/{}", urlencode(scan_id)),
     )
-    .map_err(|error| format!("触发重新扫描失败：{error}"))
+    .map_err(|error| format!("获取扫描任务状态失败：{error}"))
 }
 
 #[tauri::command]

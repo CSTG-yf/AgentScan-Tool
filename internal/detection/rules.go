@@ -4,6 +4,10 @@
 
 package detection
 
+// RuleVersion is persisted in API/job metadata so a historical replay can be
+// attributed to the exact rule vocabulary that produced its verdicts.
+const RuleVersion = "runtime-rules-v1"
+
 // DefaultRules returns the standard agent-agnostic rule set:
 //
 //	Atomic (single event):

@@ -36,8 +36,15 @@ type pageBehaviorEvent struct {
 	Detail           string `json:"detail"`
 	AgentName        string `json:"agentName,omitempty"`
 	CanonicalAgentID string `json:"canonicalAgentId,omitempty"`
+	AgentInstanceID  string `json:"agentInstanceId,omitempty"`
 	SessionID        string `json:"sessionId,omitempty"`
 	TraceID          string `json:"traceId,omitempty"`
+	EventSource      string `json:"eventSource,omitempty"`
+	EventCategory    string `json:"eventCategory,omitempty"`
+	Operation        string `json:"operation,omitempty"`
+	Target           string `json:"target,omitempty"`
+	ToolName         string `json:"toolName,omitempty"`
+	Severity         string `json:"severity,omitempty"`
 }
 
 func (a *APIServer) handleBehaviorEvents(w http.ResponseWriter, r *http.Request) {
@@ -72,12 +79,23 @@ func (a *APIServer) handleBehaviorEvents(w http.ResponseWriter, r *http.Request)
 			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 			return
 		}
-		inserted, err := a.store.InsertBehaviorEvent(auditBehaviorEventFromPage(request))
+		legacy := auditBehaviorEventFromPage(request)
+		in := legacyBehaviorRuntimeInput(legacy)
+		eventID, err := a.store.RecordRuntimeEvent(in)
 		if err != nil {
 			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if behaviorEventShouldAudit(inserted) {
+		inserted, ok, readErr := a.store.GetRuntimeEvent(eventID)
+		if readErr != nil || !ok {
+			// Keep the POST contract useful even if a database driver cannot
+			// immediately read its just-inserted row.
+			inserted = behaviorEventFromRuntimeInput(in, eventID)
+		}
+		if engine := activeDetectionEngine(); engine != nil {
+			engine.EvaluateEvent(eventID)
+		}
+		if behaviorEventShouldAudit(legacy) {
 			_ = a.store.LogEvent(audit.Event{
 				Timestamp:        inserted.Timestamp,
 				Action:           "behavior." + strings.TrimSpace(inserted.EventType),
@@ -94,7 +112,22 @@ func (a *APIServer) handleBehaviorEvents(w http.ResponseWriter, r *http.Request)
 				Connector:        "desktop-behavior",
 			})
 		}
-		a.writeJSON(w, http.StatusCreated, pageBehaviorEventFromAudit(inserted))
+		response := pageBehaviorEventFromAudit(inserted)
+		response.EventSource = inserted.EventSource
+		response.EventCategory = inserted.EventCategory
+		response.Operation = inserted.Operation
+		response.Target = inserted.Target
+		response.ToolName = inserted.ToolName
+		response.Severity = inserted.Severity
+		a.writeJSON(w, http.StatusCreated, struct {
+			pageBehaviorEvent
+			EventID   int64 `json:"event_id"`
+			Evaluated bool  `json:"evaluated"`
+		}{
+			pageBehaviorEvent: response,
+			EventID:           eventID,
+			Evaluated:         activeDetectionEngine() != nil,
+		})
 	case http.MethodDelete:
 		retentionDays, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("retentionDays")))
 		maxRows, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("maxRows")))
@@ -135,8 +168,15 @@ func pageBehaviorEventFromAudit(row audit.BehaviorEvent) pageBehaviorEvent {
 		Detail:           row.Detail,
 		AgentName:        row.AgentName,
 		CanonicalAgentID: row.CanonicalAgentID,
+		AgentInstanceID:  row.AgentInstanceID,
 		SessionID:        row.SessionID,
 		TraceID:          row.TraceID,
+		EventSource:      row.EventSource,
+		EventCategory:    row.EventCategory,
+		Operation:        row.Operation,
+		Target:           row.Target,
+		ToolName:         row.ToolName,
+		Severity:         row.Severity,
 	}
 }
 
@@ -164,6 +204,95 @@ func auditBehaviorEventFromPage(in pageBehaviorEvent) audit.BehaviorEvent {
 		CanonicalAgentID: in.CanonicalAgentID,
 		SessionID:        in.SessionID,
 		TraceID:          in.TraceID,
+		EventSource:      in.EventSource,
+		EventCategory:    in.EventCategory,
+		Operation:        in.Operation,
+		Target:           in.Target,
+		ToolName:         in.ToolName,
+		Severity:         in.Severity,
+	}
+}
+
+// legacyBehaviorRuntimeInput is the compatibility adapter for the
+// Process Guard and file observer payloads emitted by older desktop
+// clients. It deliberately owns the native-to-unified vocabulary map;
+// the detection rules never need to know agent-specific event names.
+func legacyBehaviorRuntimeInput(e audit.BehaviorEvent) audit.RuntimeEventInput {
+	eventType := strings.TrimSpace(e.EventType)
+	canonicalType := eventType
+	switch strings.ToLower(eventType) {
+	case "agentprocessstart", "agentcommandstart", "processguardrulematch", "agentcommandrulematched", "agent-command-rule-matched":
+		canonicalType = audit.RuntimeEventProcessExec
+	case "fileread":
+		canonicalType = audit.RuntimeEventFileRead
+	case "filewrite", "filecreate":
+		canonicalType = audit.RuntimeEventFileWrite
+	case "filedelete", "filedeleteintent":
+		canonicalType = audit.RuntimeEventFileDelete
+	case "blacklistfileaccess":
+		// A blacklist hit is still a file observation; keep the operation
+		// text so policy/detection can distinguish read vs write intent.
+		if strings.Contains(strings.ToLower(e.Action+" "+e.Detail), "write") || strings.Contains(strings.ToLower(e.Action+" "+e.Detail), "delete") {
+			canonicalType = audit.RuntimeEventFileWrite
+		} else {
+			canonicalType = audit.RuntimeEventFileRead
+		}
+	case "processexit", "process_exit":
+		canonicalType = audit.RuntimeEventProcessExit
+	}
+	if canonicalType == "" {
+		canonicalType = "agent.unknown"
+	}
+	severity := strings.ToUpper(strings.TrimSpace(e.Severity))
+	if severity == "" {
+		severity = behaviorEventSeverity(e)
+	}
+	target := pageFirstNonEmpty(e.Target, e.Path, e.ActorExecutable, e.Detail)
+	operation := pageFirstNonEmpty(e.Operation, e.Action, eventType)
+	attrs := map[string]any{
+		"legacy_event_type": eventType,
+		"legacy_source":     e.Source,
+	}
+	if e.Action != "" {
+		attrs["action"] = e.Action
+	}
+	return audit.RuntimeEventInput{
+		EventType:        canonicalType,
+		EventSource:      audit.RuntimeSourceOSSensor,
+		EventCategory:    audit.RuntimeCategoryForEventType(canonicalType),
+		CanonicalAgentID: e.CanonicalAgentID,
+		AgentName:        pageFirstNonEmpty(e.AgentName, e.AgentExecutable),
+		SessionID:        e.SessionID,
+		TraceID:          e.TraceID,
+		PID:              e.AgentPID,
+		AgentExecutable:  e.AgentExecutable,
+		ActorPID:         e.ActorPID,
+		ActorExecutable:  e.ActorExecutable,
+		AgentInstanceID:  e.AgentInstanceID,
+		Path:             e.Path,
+		Action:           e.Action,
+		PPID:             e.PPID,
+		Operation:        operation,
+		Target:           target,
+		Outcome:          pageFirstNonEmpty(e.Outcome, "observed"),
+		Detail:           e.Detail,
+		Severity:         severity,
+		Attributes:       attrs,
+		Timestamp:        e.Timestamp,
+	}
+}
+
+func behaviorEventFromRuntimeInput(in audit.RuntimeEventInput, id int64) audit.BehaviorEvent {
+	return audit.BehaviorEvent{
+		ID: id, Timestamp: in.Timestamp, EventType: in.EventType, Source: in.EventSource,
+		AgentPID: in.PID, AgentExecutable: in.AgentExecutable, ActorPID: in.ActorPID,
+		ActorExecutable: in.ActorExecutable, Path: in.Path, Action: in.Action,
+		Outcome: in.Outcome, Detail: in.Detail, AgentName: in.AgentName,
+		CanonicalAgentID: in.CanonicalAgentID, AgentInstanceID: in.AgentInstanceID,
+		SessionID: in.SessionID, TraceID: in.TraceID, EventSource: in.EventSource,
+		EventCategory: in.EventCategory, PPID: in.PPID, Operation: in.Operation,
+		Target: in.Target, ToolName: in.ToolName, Severity: in.Severity,
+		Attributes: in.Attributes,
 	}
 }
 

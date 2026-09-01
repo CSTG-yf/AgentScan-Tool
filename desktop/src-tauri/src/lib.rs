@@ -14,6 +14,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::environment::get_environment_snapshot,
             commands::agents::get_agents,
+            commands::agents::trigger_agent_scan,
             commands::agents::get_agent_detail,
             commands::agents::export_agents_report_pdf,
             commands::agent_governance::agent_governance_get,
@@ -56,6 +57,7 @@ pub fn run() {
             commands::static_assets::get_static_resource_relations,
             commands::static_assets::trigger_static_resource_scan,
             commands::static_assets::trigger_static_resource_rescan,
+            commands::static_assets::get_scan_status,
             commands::static_assets::get_static_resource_scans,
             commands::static_assets::export_static_resource_text_report,
             commands::static_assets::update_static_resource_status,
@@ -74,6 +76,9 @@ pub fn run() {
             commands::range::start_range_replay,
             commands::range::stop_range_replay,
             commands::static_scan::get_static_scan,
+            commands::jobs::create_event_replay_job,
+            commands::jobs::create_attack_chain_rebuild_job,
+            commands::jobs::get_changes,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run TraceBastion Desktop");

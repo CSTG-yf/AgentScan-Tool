@@ -5,12 +5,26 @@
 package detection
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/defenseclaw/defenseclaw/internal/audit"
 )
+
+type testRuntimeExecutor struct {
+	point  string
+	target string
+	result string
+	err    error
+}
+
+func (e testRuntimeExecutor) Point() string { return e.point }
+
+func (e testRuntimeExecutor) Execute(context.Context, RuntimeExecutionRequest) (string, string, error) {
+	return e.target, e.result, e.err
+}
 
 func newDetectionTestStore(t *testing.T) *audit.Store {
 	t.Helper()
@@ -318,5 +332,24 @@ func TestDetectionAgentAgnostic(t *testing.T) {
 		if findDetection(t, store, "credential_exfiltration") == nil {
 			t.Errorf("agent %q: expected credential exfiltration detection", agent)
 		}
+	}
+}
+
+func TestPolicyExecutorStatusRequiresConfirmedExecution(t *testing.T) {
+	store := newDetectionTestStore(t)
+	policy := NewPolicyEngine(store)
+	decision := audit.RuntimeDecision{
+		DecisionID: "V-test", DetectionID: "D-test", Decision: audit.RuntimeDecisionBlock,
+		EnforcementPoint: audit.EnforcementPointMCP, Mode: audit.RuntimeSecurityModeAction,
+	}
+
+	status, _, _ := policy.ExecuteNonProxy(context.Background(), decision, "MCP_BLOCK", nil, true)
+	if status != audit.ResponseStatusFailed {
+		t.Fatalf("missing executor status = %q, want failed", status)
+	}
+	policy.RegisterExecutor(testRuntimeExecutor{point: audit.EnforcementPointMCP, target: "server-x", result: "disabled"})
+	status, target, result := policy.ExecuteNonProxy(context.Background(), decision, "MCP_BLOCK", nil, true)
+	if status != audit.ResponseStatusExecuted || target != "server-x" || result != "disabled" {
+		t.Fatalf("executor result = (%q,%q,%q), want executed/server-x/disabled", status, target, result)
 	}
 }

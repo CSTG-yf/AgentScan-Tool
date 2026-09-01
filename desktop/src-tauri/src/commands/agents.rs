@@ -43,6 +43,21 @@ pub fn get_agents(app: tauri::AppHandle, query: Option<AgentListQuery>) -> Agent
     }
 }
 
+/// Start an explicit backend Agent discovery job. Reads stay side-effect
+/// free; the returned scan_id is polled by the desktop before refreshing.
+#[tauri::command]
+pub fn trigger_agent_scan(
+    app: tauri::AppHandle,
+    mode: Option<String>,
+) -> Result<serde_json::Value, String> {
+    crate::commands::gateway_api::post_json::<serde_json::Value, _>(
+        &app,
+        "/api/v1/scans/agents",
+        &serde_json::json!({"mode": mode.unwrap_or_else(|| "full".to_owned())}),
+    )
+    .map_err(|error| format!("触发 Agent 发现扫描失败：{error}"))
+}
+
 #[tauri::command]
 pub fn get_agent_detail(app: tauri::AppHandle, agent_id: String) -> Result<AgentInventory, String> {
     let agent_id = agent_id.trim();

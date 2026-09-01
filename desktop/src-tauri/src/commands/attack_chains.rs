@@ -6,6 +6,12 @@ pub struct AttackChainSnapshot {
     captured_at: String,
     source: String,
     chains: Vec<AttackChain>,
+    #[serde(default)]
+    total: Option<usize>,
+    #[serde(default)]
+    page: Option<usize>,
+    #[serde(default, alias = "page_size")]
+    page_size: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     warning: Option<String>,
 }

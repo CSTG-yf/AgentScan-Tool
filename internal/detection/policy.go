@@ -5,6 +5,7 @@
 package detection
 
 import (
+	"context"
 	"net/url"
 	"strconv"
 	"strings"
@@ -41,6 +42,8 @@ type PolicyEngine struct {
 	modeRead  time.Time
 	modeTTL   time.Duration
 	blocklist *NetworkBlocklist
+	executorMu sync.RWMutex
+	executors  map[string]RuntimeExecutor
 }
 
 // runtimeSecurityModeSettingKey is the app_settings key holding
@@ -54,10 +57,36 @@ func NewPolicyEngine(store *audit.Store) *PolicyEngine {
 		mode:      audit.RuntimeSecurityModeObserve,
 		modeTTL:   5 * time.Second,
 		blocklist: NewNetworkBlocklist(),
+		executors:  map[string]RuntimeExecutor{},
 	}
 	p.blocklist.setPersistTarget(store)
+	p.RegisterExecutor(ProcessExecutor{})
 	p.reloadMode()
 	return p
+}
+
+// RegisterExecutor attaches a concrete enforcement implementation to a
+// policy point. Sidecar integrations can replace the built-in process
+// executor, while tests and future MCP/file executors stay dependency-free.
+func (p *PolicyEngine) RegisterExecutor(executor RuntimeExecutor) {
+	if p == nil || executor == nil || strings.TrimSpace(executor.Point()) == "" {
+		return
+	}
+	p.executorMu.Lock()
+	if p.executors == nil {
+		p.executors = map[string]RuntimeExecutor{}
+	}
+	p.executors[executor.Point()] = executor
+	p.executorMu.Unlock()
+}
+
+func (p *PolicyEngine) executor(point string) RuntimeExecutor {
+	if p == nil {
+		return nil
+	}
+	p.executorMu.RLock()
+	defer p.executorMu.RUnlock()
+	return p.executors[point]
 }
 
 // Blocklist exposes the network blocklist so the proxy can check it.
@@ -292,34 +321,58 @@ func (p *PolicyEngine) dispatchResponse(decision audit.RuntimeDecision, actionTy
 			})
 			return
 		}
-		_, _ = p.store.RecordResponseAction(audit.ResponseActionInput{
-			DecisionID: decision.DecisionID,
-			ActionType: actionType,
-			Executor:   "proxy",
-			Target:     strings.Join(evidenceHosts(evidence), ", "),
-			Status:     audit.ResponseStatusWouldBlock,
-			Result:     "observe mode: would add host(s) to the runtime network blocklist",
-			ExecutedAt: time.Now().UTC(),
-		})
-	default:
-		// Guardrail / hook / MCP / process enforcement already exists
-		// in its own module; the decision is routed and recorded, the
-		// module stays authoritative.
-		status := audit.ResponseStatusDispatched
-		result := "routed to existing " + decision.EnforcementPoint + " enforcement"
-		if mode == audit.RuntimeSecurityModeObserve {
-			status = audit.ResponseStatusWouldBlock
-			result = "observe mode: would dispatch to " + decision.EnforcementPoint + " enforcement"
+		status := audit.ResponseStatusWouldBlock
+		result := "observe mode: would add host(s) to the runtime network blocklist"
+		if mode == audit.RuntimeSecurityModeAction {
+			// Action mode must never claim a block happened when the event did
+			// not contain a host that the proxy blocklist can enforce.
+			status = audit.ResponseStatusFailed
+			result = "action mode: no network host evidence is available for proxy blocking"
 		}
 		_, _ = p.store.RecordResponseAction(audit.ResponseActionInput{
 			DecisionID: decision.DecisionID,
 			ActionType: actionType,
+			Executor:   "proxy",
+			Target:     strings.Join(hosts, ", "),
+			Status:     status,
+			Result:     result,
+			ExecutedAt: time.Now().UTC(),
+		})
+	default:
+		status, target, result := p.ExecuteNonProxy(context.Background(), decision, actionType, evidence, mode != audit.RuntimeSecurityModeObserve)
+		_, _ = p.store.RecordResponseAction(audit.ResponseActionInput{
+			DecisionID: decision.DecisionID,
+			ActionType: actionType,
 			Executor:   decision.EnforcementPoint,
+			Target:     target,
 			Status:     status,
 			Result:     result,
 			ExecutedAt: time.Now().UTC(),
 		})
 	}
+}
+
+// ExecuteNonProxy runs an executor for guardrail, hook, MCP, file, and
+// process points. force is used by an explicit operator retry; automatic
+// policy dispatch passes false so observe mode remains a dry run.
+func (p *PolicyEngine) ExecuteNonProxy(ctx context.Context, decision audit.RuntimeDecision, actionType string, evidence []audit.DetectionEvidence, force bool) (status, target, result string) {
+	if p == nil {
+		return audit.ResponseStatusFailed, "", "runtime policy engine unavailable"
+	}
+	if !force && p.Mode() == audit.RuntimeSecurityModeObserve {
+		return audit.ResponseStatusWouldBlock, "", "observe mode: would dispatch to " + decision.EnforcementPoint + " enforcement"
+	}
+	executor := p.executor(decision.EnforcementPoint)
+	if executor == nil {
+		return audit.ResponseStatusFailed, "", "no confirmed executor is available for " + decision.EnforcementPoint
+	}
+	target, result, err := executor.Execute(ctx, RuntimeExecutionRequest{
+		Decision: decision, ActionType: actionType, Evidence: evidence,
+	})
+	if err != nil {
+		return audit.ResponseStatusFailed, target, err.Error()
+	}
+	return audit.ResponseStatusExecuted, target, result
 }
 
 // decideReason builds a human-readable explanation of the verdict.

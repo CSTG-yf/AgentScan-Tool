@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FilterOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Descriptions, Drawer, Empty, Input, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
+import { Alert, Button, Card, Descriptions, Drawer, Empty, Input, Segmented, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   getRuntimeDetectionDetail,
   getRuntimeDetectionEvents,
   getRuntimeDetections,
+  getRuntimeDecisions,
   getRuntimeEventsTimeline,
+  getRuntimeSecurityMode,
   getRuntimeSecurityAgents,
   getRuntimeSecuritySummary,
+  blockRuntimeDetection,
+  enforceRuntimeDecision,
+  setRuntimeSecurityMode,
+  createRuntimeEventReplay,
+  getScanStatus,
 } from "../bridge";
 import { formatClock, formatTimestamp, staticRiskTag } from "../app/display";
 import { staticRiskMeta } from "../data/staticAssets";
@@ -18,7 +25,9 @@ import type {
   RuntimeDetectionEvidenceEvent,
   RuntimeDetectionListQuery,
   RuntimeDetectionListResponse,
+  RuntimeDecisionRow,
   RuntimeEventsTimelineBucket,
+  RuntimeSecurityMode,
   RuntimeSecurityAgent,
   RuntimeSecuritySummary,
   StaticRisk,
@@ -29,6 +38,7 @@ const { Text, Title } = Typography;
 interface EventsPageProps {
   loading?: boolean;
   onRefresh?: () => Promise<void> | void;
+  refreshNonce?: number;
 }
 
 type SeverityFilter = StaticRisk | "all";
@@ -40,6 +50,17 @@ interface SourceBreakdown {
   count: number;
   attack: number;
   blocked: number;
+}
+
+async function waitForReplayCompletion(scanId?: string): Promise<void> {
+  if (!scanId) return;
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const status = await getScanStatus(scanId);
+    if (status.status === "completed") return;
+    if (status.status === "failed") throw new Error(status.error || "历史事件重放失败");
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
+  }
+  throw new Error("历史事件重放等待超时，请稍后刷新");
 }
 
 const emptySummary = (): RuntimeSecuritySummary => ({
@@ -172,7 +193,7 @@ function attributesText(value?: Record<string, unknown>) {
   return JSON.stringify(value, null, 2);
 }
 
-export function EventsPage({ loading = false, onRefresh }: EventsPageProps) {
+export function EventsPage({ loading = false, onRefresh, refreshNonce = 0 }: EventsPageProps) {
   const [globalSummary, setGlobalSummary] = useState<RuntimeSecuritySummary>(emptySummary);
   const [selectedSummary, setSelectedSummary] = useState<RuntimeSecuritySummary>(emptySummary);
   const [agents, setAgents] = useState<RuntimeSecurityAgent[]>([]);
@@ -193,6 +214,11 @@ export function EventsPage({ loading = false, onRefresh }: EventsPageProps) {
   const [detail, setDetail] = useState<RuntimeDetectionDetail>();
   const [detailEvents, setDetailEvents] = useState<RuntimeDetectionEvidenceEvent[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [runtimeMode, setRuntimeMode] = useState<RuntimeSecurityMode>("observe");
+  const [runtimeModeLoading, setRuntimeModeLoading] = useState(false);
+  const [decisions, setDecisions] = useState<RuntimeDecisionRow[]>([]);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [replayLoading, setReplayLoading] = useState(false);
 
   const detections = useMemo(
     () => [...(detectionsResponse.items?.length ? detectionsResponse.items : detectionsResponse.detections ?? [])],
@@ -221,9 +247,16 @@ export function EventsPage({ loading = false, onRefresh }: EventsPageProps) {
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
     try {
-      const [summary, agentRows] = await Promise.all([getRuntimeSecuritySummary(), getRuntimeSecurityAgents(200)]);
+      const [summary, agentRows, mode, decisionResponse] = await Promise.all([
+        getRuntimeSecuritySummary(),
+        getRuntimeSecurityAgents(200),
+        getRuntimeSecurityMode(),
+        getRuntimeDecisions(500),
+      ]);
       setGlobalSummary(summary);
       setAgents(agentRows);
+      setRuntimeMode(mode);
+      setDecisions(decisionResponse.decisions ?? []);
       setSelectedAgentId((current) => current && agentRows.some((agent) => agent.agentId === current) ? current : undefined);
       setDataError("");
     } catch (error) {
@@ -261,6 +294,11 @@ export function EventsPage({ loading = false, onRefresh }: EventsPageProps) {
   useEffect(() => {
     void loadSelectedData().catch(() => undefined);
   }, [loadSelectedData]);
+
+  useEffect(() => {
+    if (refreshNonce <= 0) return;
+    void Promise.all([loadOverview(), loadSelectedData()]).catch(() => undefined);
+  }, [loadOverview, loadSelectedData, refreshNonce]);
 
   const sourceBreakdown = useMemo(() => sourceBreakdownFromDetections(detections), [detections]);
   const sourceOptions = useMemo(() => {
@@ -337,6 +375,81 @@ export function EventsPage({ loading = false, onRefresh }: EventsPageProps) {
     }
   };
 
+  const replayHistoricalEvents = async () => {
+    setReplayLoading(true);
+    try {
+      const accepted = await createRuntimeEventReplay({ agentId: selectedAgentId });
+      await waitForReplayCompletion(accepted.scan_id);
+      await Promise.all([loadOverview(), loadSelectedData()]);
+      message.success("历史事件已重新检测");
+    } catch (error) {
+      message.error(`历史事件重放失败：${String(error)}`);
+    } finally {
+      setReplayLoading(false);
+    }
+  };
+
+  const selectedDecision = useMemo(() => {
+    const row = decisions.find((candidate) => candidate.decision.detectionId === selectedDetectionId || candidate.detection?.detectionId === selectedDetectionId);
+    return row?.decision;
+  }, [decisions, selectedDetectionId]);
+
+  const changeRuntimeMode = async (value: string | number) => {
+    const mode = String(value) as RuntimeSecurityMode;
+    if (mode !== "observe" && mode !== "action") return;
+    setRuntimeModeLoading(true);
+    try {
+      const next = await setRuntimeSecurityMode(mode);
+      setRuntimeMode(next);
+      message.success(next === "action" ? "运行态安全已切换为强制处置" : "运行态安全已切换为仅观察");
+      await loadOverview();
+    } catch (error) {
+      message.error(`切换运行态安全模式失败：${String(error)}`);
+    } finally {
+      setRuntimeModeLoading(false);
+    }
+  };
+
+  const blockSelectedDetection = async () => {
+    if (!selectedDetectionId) return;
+    setActionLoading(true);
+    try {
+      const result = await blockRuntimeDetection(selectedDetectionId, undefined, "manual_operator_action");
+      if (result.status === "blocked") {
+        message.success("阻断已执行");
+      } else if (result.status === "dispatched") {
+        message.info("处置已记录并转交对应执行模块，检测保持待确认");
+      } else {
+        message.warning(`阻断未执行：${result.status || "unknown"}`);
+      }
+      await Promise.all([loadOverview(), loadSelectedData()]);
+    } catch (error) {
+      message.error(`执行阻断失败：${String(error)}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const enforceSelectedDecision = async () => {
+    if (!selectedDecision?.decisionId) return;
+    setActionLoading(true);
+    try {
+      const result = await enforceRuntimeDecision(selectedDecision.decisionId);
+      if (result.status === "blocked") {
+        message.success("运行态决策已执行");
+      } else if (result.status === "dispatched") {
+        message.info("运行态决策已转交执行模块，检测保持待确认");
+      } else {
+        message.warning(`运行态决策未执行：${result.status || "unknown"}`);
+      }
+      await Promise.all([loadOverview(), loadSelectedData()]);
+    } catch (error) {
+      message.error(`执行运行态决策失败：${String(error)}`);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const selectedDetection = detail?.detection?.detectionId
     ? detail.detection
     : detections.find((detection) => detection.detectionId === selectedDetectionId);
@@ -382,8 +495,17 @@ export function EventsPage({ loading = false, onRefresh }: EventsPageProps) {
         <Space wrap>
           <Tag color="blue">Agent {globalSummary.coveredAgents}</Tag>
           <Tag color="red">攻击 {globalSummary.attackDetections}</Tag>
+          <Segmented
+            disabled={runtimeModeLoading || busy}
+            options={[{ label: "仅观察", value: "observe" }, { label: "强制处置", value: "action" }]}
+            value={runtimeMode}
+            onChange={(value) => void changeRuntimeMode(value)}
+          />
           <Button icon={<ReloadOutlined />} loading={busy || listLoading} onClick={() => void refreshEvents()}>
-            重新检测
+            刷新数据
+          </Button>
+          <Button loading={replayLoading} onClick={() => void replayHistoricalEvents()}>
+            重放历史检测
           </Button>
         </Space>
       </div>
@@ -593,7 +715,29 @@ export function EventsPage({ loading = false, onRefresh }: EventsPageProps) {
         }}
       >
         {selectedDetection ? (
-          <Tabs
+          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            <Card size="small" bordered={false}>
+              <Space wrap>
+                <Button danger loading={actionLoading} onClick={() => void blockSelectedDetection()}>
+                  立即阻断
+                </Button>
+                {selectedDecision?.decision === "BLOCK" ? (
+                  <Button loading={actionLoading} onClick={() => void enforceSelectedDecision()}>
+                    执行已有决策
+                  </Button>
+                ) : null}
+                <Tag color={runtimeMode === "action" ? "red" : "blue"}>
+                  当前模式：{runtimeMode === "action" ? "强制处置" : "仅观察"}
+                </Tag>
+                {selectedDecision ? <Tag>决策：{selectedDecision.decision}</Tag> : <Tag>尚无策略决策</Tag>}
+              </Space>
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary">
+                  “立即阻断”会创建人工 BLOCK 决策；只有后端返回 executed 时，检测才会标记为已阻断。
+                </Text>
+              </div>
+            </Card>
+            <Tabs
             items={[
               {
                 key: "overview",
@@ -660,7 +804,8 @@ export function EventsPage({ loading = false, onRefresh }: EventsPageProps) {
                 ),
               },
             ]}
-          />
+            />
+          </Space>
         ) : (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
         )}

@@ -365,21 +365,23 @@ SELECT sr.id,
        COALESCE(ag.vendor, '')
 FROM scan_results sr
 LEFT JOIN target_snapshots ts ON ts.scan_id = sr.id
-LEFT JOIN static_resources res ON res.id = sr.static_resource_id
-LEFT JOIN agents ag ON ag.id = COALESCE(sr.canonical_agent_id, res.canonical_agent_id)
+LEFT JOIN static_resources res ON res.id = sr.static_resource_id AND COALESCE(res."delete", 0) = 0
+LEFT JOIN agents ag ON ag.id = COALESCE(sr.canonical_agent_id, res.canonical_agent_id) AND COALESCE(ag."delete", 0) = 0
 JOIN (
     SELECT COALESCE(canonical_agent_id, '') AS agent_key, target, MAX(timestamp) AS latest_timestamp
     FROM scan_results
-    WHERE lower(scanner) LIKE '%static-resource%'
+    WHERE COALESCE("delete", 0) = 0
+      AND (lower(scanner) LIKE '%static-resource%'
        OR lower(scanner) LIKE '%skill%'
        OR lower(scanner) LIKE '%plugin%'
-       OR lower(scanner) LIKE '%mcp%'
+       OR lower(scanner) LIKE '%mcp%')
     GROUP BY COALESCE(canonical_agent_id, ''), target
 ) latest ON latest.agent_key = COALESCE(sr.canonical_agent_id, '') AND latest.target = sr.target AND latest.latest_timestamp = sr.timestamp
-WHERE lower(sr.scanner) LIKE '%static-resource%'
+WHERE COALESCE(sr."delete", 0) = 0
+  AND (lower(sr.scanner) LIKE '%static-resource%'
    OR lower(sr.scanner) LIKE '%skill%'
    OR lower(sr.scanner) LIKE '%plugin%'
-   OR lower(sr.scanner) LIKE '%mcp%'
+   OR lower(sr.scanner) LIKE '%mcp%')
 ORDER BY sr.timestamp DESC
 LIMIT ?`, limit)
 	if err != nil {
@@ -431,7 +433,8 @@ SELECT id,
        COALESCE(canonical_agent_id, ''),
        COALESCE(static_resource_id, '')
 FROM scan_findings
-WHERE lower(scanner) NOT LIKE '%skill-scanner%'
+WHERE COALESCE("delete", 0) = 0
+  AND lower(scanner) NOT LIKE '%skill-scanner%'
   AND lower(scanner) NOT LIKE '%plugin-scanner%'
   AND lower(scanner) NOT LIKE '%mcp-scanner%'
   AND lower(scanner) NOT LIKE '%static-resource%'
@@ -463,7 +466,7 @@ func (s *Store) ListScanFindings(scanID string) ([]ScanFindingRow, error) {
 	rows, err := s.db.Query(`
 SELECT id, scan_id, scanner, target, rule_id, category, severity, title, description, location, line_number,
        remediation, tags, confidence, evaluation_id
-FROM scan_findings WHERE scan_id = ? ORDER BY severity`, scanID)
+FROM scan_findings WHERE scan_id = ? AND COALESCE("delete", 0) = 0 ORDER BY severity`, scanID)
 	if err != nil {
 		return nil, fmt.Errorf("audit: list scan findings: %w", err)
 	}
@@ -520,7 +523,7 @@ func (s *Store) ListRecentFindingsInSession(sessionID, agentInstanceID string, l
 SELECT id, rule_id, category, severity,
        data_axis, tool_capability_class, content_fingerprint, external_endpoint, turn_id, timestamp
 FROM scan_findings
-WHERE session_id = ? AND agent_instance_id = ?
+WHERE session_id = ? AND agent_instance_id = ? AND COALESCE("delete", 0) = 0
 ORDER BY timestamp DESC
 LIMIT ?`, sessionID, agentInstanceID, limit)
 	if err != nil {

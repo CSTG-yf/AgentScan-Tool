@@ -3703,6 +3703,10 @@ func (s *Sidecar) runAPI(ctx context.Context) error {
 	} else {
 		fmt.Fprintf(os.Stderr, "[sidecar] load hook API tokens: %v\n", err)
 	}
+	// Durable discovery jobs continue while the desktop window is closed.
+	// The goroutine exits with the API lifecycle context and therefore cannot
+	// outlive the sidecar process.
+	go api.RunBackgroundJobs(ctx)
 	return api.Run(ctx)
 }
 

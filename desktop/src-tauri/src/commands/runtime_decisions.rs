@@ -65,7 +65,7 @@ pub struct RuntimeDecisionSummary {
     pub(crate) audit: usize,
     #[serde(default)]
     pub(crate) allow: usize,
-    #[serde(default)]
+    #[serde(default, alias = "would_block")]
     pub(crate) would_block: usize,
 }
 

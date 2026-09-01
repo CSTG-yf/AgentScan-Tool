@@ -245,6 +245,7 @@ func (e *Engine) record(trigger audit.BehaviorEvent, rule Rule, res DetectionRes
 		Severity:      res.Severity,
 		Confidence:    res.Confidence,
 		RuleID:        rule.ID(),
+		RuleVersion:   RuleVersion,
 		Title:         res.Title,
 		Detail:        res.Detail,
 		Remediation:   res.Remediation,

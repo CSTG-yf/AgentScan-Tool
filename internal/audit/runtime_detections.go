@@ -46,6 +46,7 @@ type RuntimeDetection struct {
 	Severity      string         `json:"severity"`
 	Confidence    float64        `json:"confidence"`
 	RuleID        string         `json:"rule_id"`
+	RuleVersion   string         `json:"rule_version,omitempty"`
 	Status        string         `json:"status"`
 	Title         string         `json:"title"`
 	Detail        string         `json:"detail,omitempty"`
@@ -84,6 +85,7 @@ type RuntimeDetectionInput struct {
 	Severity      string
 	Confidence    float64
 	RuleID        string
+	RuleVersion   string
 	Title         string
 	Detail        string
 	Remediation   string
@@ -155,7 +157,7 @@ func (s *Store) RecordRuntimeDetection(in RuntimeDetectionInput) (RuntimeDetecti
 	err := s.db.QueryRowContext(context.Background(), `
 SELECT detection_id, first_seen_at, last_seen_at, severity, confidence, status, event_count
 FROM runtime_detections
-WHERE rule_id = ? AND agent_id = ? AND detection_type = ?
+WHERE rule_id = ? AND agent_id = ? AND detection_type = ? AND "delete" = 0
   AND ((? IS NULL AND session_id IS NULL) OR session_id = ?)
   AND status != ? AND last_seen_at >= ?
 ORDER BY last_seen_at DESC
@@ -182,11 +184,13 @@ LIMIT 1`,
 UPDATE runtime_detections
 SET last_seen_at = ?, severity = ?, confidence = ?,
     status = ?, event_count = ?,
+    rule_version = CASE WHEN ? != '' THEN ? ELSE rule_version END,
     detail = CASE WHEN ? != '' THEN ? ELSE detail END,
     trace_id = COALESCE(NULLIF(?, ''), trace_id)
 WHERE detection_id = ?`,
 			nowStr, strings.ToUpper(newSeverity), confidence,
 			in.detectionStatusFromEvidence(status), eventCount,
+			in.RuleVersion, in.RuleVersion,
 			in.Detail, in.Detail,
 			in.TraceID,
 			existingID,
@@ -217,12 +221,12 @@ WHERE detection_id = ?`,
 INSERT INTO runtime_detections (
   detection_id, agent_id, agent_name, session_id, trace_id,
   detection_type, category, severity, confidence, rule_id, status,
-  title, detail, remediation, attributes_json,
+  rule_version, title, detail, remediation, attributes_json,
   first_seen_at, last_seen_at, event_count
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		detectionID, in.AgentID, nullStr(in.AgentName), nullStr(in.SessionID), nullStr(in.TraceID),
 		in.DetectionType, in.Category, strings.ToUpper(in.Severity), in.Confidence, in.RuleID,
-		in.detectionStatusFromEvidence(RuntimeDetectionStatusOpen),
+		in.detectionStatusFromEvidence(RuntimeDetectionStatusOpen), in.RuleVersion,
 		in.Title, nullStr(in.Detail), nullStr(in.Remediation), nullStr(attrsJSON),
 		nowStr, nowStr, len(in.Evidence),
 	); err != nil {
@@ -287,6 +291,7 @@ func (in RuntimeDetectionInput) toDetection(detectionID string) RuntimeDetection
 		Severity:      strings.ToUpper(in.Severity),
 		Confidence:    in.Confidence,
 		RuleID:        in.RuleID,
+		RuleVersion:   in.RuleVersion,
 		Status:        in.detectionStatusFromEvidence(RuntimeDetectionStatusOpen),
 		Title:         in.Title,
 		Detail:        in.Detail,
@@ -316,7 +321,7 @@ type RuntimeDetectionFilter struct {
 }
 
 func runtimeDetectionWhereClause(f RuntimeDetectionFilter) (string, []any) {
-	var conds []string
+	conds := []string{`"delete" = 0`}
 	var args []any
 	if f.AgentID != "" {
 		conds = append(conds, "agent_id = ?")
@@ -360,9 +365,10 @@ func runtimeDetectionWhereClause(f RuntimeDetectionFilter) (string, []any) {
 LOWER(detection_id) LIKE ? OR LOWER(agent_id) LIKE ? OR LOWER(COALESCE(agent_name, '')) LIKE ?
 OR LOWER(COALESCE(session_id, '')) LIKE ? OR LOWER(COALESCE(trace_id, '')) LIKE ?
 OR LOWER(detection_type) LIKE ? OR LOWER(category) LIKE ? OR LOWER(rule_id) LIKE ?
+OR LOWER(COALESCE(rule_version, '')) LIKE ?
 OR LOWER(title) LIKE ? OR LOWER(COALESCE(detail, '')) LIKE ? OR LOWER(COALESCE(remediation, '')) LIKE ?
 )`)
-		for i := 0; i < 11; i++ {
+		for i := 0; i < 12; i++ {
 			args = append(args, like)
 		}
 	}
@@ -453,7 +459,7 @@ func (s *Store) ListRuntimeDetections(f RuntimeDetectionFilter) ([]RuntimeDetect
 	rows, err := s.queryDB(context.Background(), "runtime_detections_list", `
 SELECT detection_id, agent_id, COALESCE(agent_name, ''), COALESCE(session_id, ''),
        COALESCE(trace_id, ''), detection_type, category, severity, confidence,
-       rule_id, status, title, COALESCE(detail, ''), COALESCE(remediation, ''),
+       rule_id, COALESCE(rule_version, ''), status, title, COALESCE(detail, ''), COALESCE(remediation, ''),
        COALESCE(attributes_json, ''), first_seen_at, last_seen_at, event_count
 FROM runtime_detections
 `+where+`
@@ -476,7 +482,7 @@ LIMIT ? OFFSET ?`, args...)
 		)
 		if err := rows.Scan(
 			&d.DetectionID, &d.AgentID, &d.AgentName, &d.SessionID, &d.TraceID,
-			&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID,
+			&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID, &d.RuleVersion,
 			&d.Status, &d.Title, &d.Detail, &d.Remediation, &attrs,
 			&firstSeen, &lastSeen, &eventCount,
 		); err != nil {
@@ -574,7 +580,7 @@ SELECT d.agent_id,
        COALESCE(NULLIF(MAX(a.runtime_status), ''), 'unknown')
 FROM runtime_detections d
 LEFT JOIN agents a ON a.id = d.agent_id
-WHERE d.agent_id != ''
+WHERE d.agent_id != '' AND d."delete" = 0
 GROUP BY d.agent_id
 ORDER BY MAX(d.last_seen_at) DESC, LOWER(COALESCE(NULLIF(MAX(d.agent_name), ''), NULLIF(MAX(a.display_name), ''), d.agent_id))
 LIMIT ?`, limit)
@@ -619,12 +625,12 @@ func (s *Store) GetRuntimeDetectionDetail(detectionID string) (RuntimeDetection,
 	err := s.db.QueryRowContext(context.Background(), `
 SELECT detection_id, agent_id, COALESCE(agent_name, ''), COALESCE(session_id, ''),
        COALESCE(trace_id, ''), detection_type, category, severity, confidence,
-       rule_id, status, title, COALESCE(detail, ''), COALESCE(remediation, ''),
+       rule_id, COALESCE(rule_version, ''), status, title, COALESCE(detail, ''), COALESCE(remediation, ''),
        COALESCE(attributes_json, ''), first_seen_at, last_seen_at, event_count
-FROM runtime_detections WHERE detection_id = ?`, detectionID,
+FROM runtime_detections WHERE detection_id = ? AND "delete" = 0`, detectionID,
 	).Scan(
 		&d.DetectionID, &d.AgentID, &d.AgentName, &d.SessionID, &d.TraceID,
-		&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID,
+		&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID, &d.RuleVersion,
 		&d.Status, &d.Title, &d.Detail, &d.Remediation, &attrs,
 		&firstSeen, &lastSeen, &eventCount,
 	)
@@ -657,14 +663,16 @@ SELECT l.detection_id, l.event_id, l.role, l.sequence, l.linked_at,
        b.id, b.timestamp, b.event_type, b.source,
        COALESCE(b.event_source, ''), COALESCE(b.event_category, ''),
        COALESCE(b.event_id, ''), COALESCE(b.span_id, ''), COALESCE(b.parent_span_id, ''),
-       b.agent_pid, COALESCE(b.ppid, 0),
+       b.agent_pid, COALESCE(b.agent_executable, ''), COALESCE(b.actor_pid, 0),
+       COALESCE(b.actor_executable, ''), COALESCE(b.path, ''), COALESCE(b.action, ''),
+       COALESCE(b.ppid, 0),
        COALESCE(b.operation, ''), COALESCE(b.target, ''), COALESCE(b.tool_name, ''), COALESCE(b.mcp_server, ''),
        COALESCE(b.severity, ''), COALESCE(b.confidence, 0), b.outcome, b.detail,
-       COALESCE(b.agent_name, ''), COALESCE(b.canonical_agent_id, ''),
+       COALESCE(b.agent_name, ''), COALESCE(b.canonical_agent_id, ''), COALESCE(b.agent_instance_id, ''),
        COALESCE(b.session_id, ''), COALESCE(b.trace_id, ''), COALESCE(b.attributes_json, '')
 FROM runtime_detection_events l
 JOIN behavior_events b ON b.id = l.event_id
-WHERE l.detection_id = ?
+WHERE l.detection_id = ? AND l."delete" = 0 AND b."delete" = 0
 ORDER BY l.sequence ASC, b.timestamp ASC`, detectionID)
 	if err != nil {
 		return nil, err
@@ -678,6 +686,7 @@ ORDER BY l.sequence ASC, b.timestamp ASC`, detectionID)
 			linkedAt   string
 			e          BehaviorEvent
 			ts         string
+			actorPID   int64
 			ppid       int64
 			confidence float64
 			attrs      string
@@ -686,15 +695,17 @@ ORDER BY l.sequence ASC, b.timestamp ASC`, detectionID)
 			&link.DetectionID, &link.EventID, &link.Role, &link.Sequence, &linkedAt,
 			&e.ID, &ts, &e.EventType, &e.Source,
 			&e.EventSource, &e.EventCategory, &e.EventID, &e.SpanID, &e.ParentSpanID,
-			&e.AgentPID, &ppid, &e.Operation, &e.Target, &e.ToolName, &e.MCPServer,
+			&e.AgentPID, &e.AgentExecutable, &actorPID, &e.ActorExecutable, &e.Path, &e.Action,
+			&ppid, &e.Operation, &e.Target, &e.ToolName, &e.MCPServer,
 			&e.Severity, &confidence, &e.Outcome, &e.Detail,
-			&e.AgentName, &e.CanonicalAgentID, &e.SessionID, &e.TraceID, &attrs,
+			&e.AgentName, &e.CanonicalAgentID, &e.AgentInstanceID, &e.SessionID, &e.TraceID, &attrs,
 		); err != nil {
 			return nil, err
 		}
 		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
 			e.Timestamp = t
 		}
+		e.ActorPID = uint32(actorPID)
 		if t, err := time.Parse(time.RFC3339Nano, linkedAt); err == nil {
 			link.LinkedAt = t
 		}
@@ -731,11 +742,11 @@ func (s *Store) DetectionIDsForEvents(eventIDs []int64) (map[int64][]RuntimeDete
 SELECT l.event_id,
        d.detection_id, d.agent_id, COALESCE(d.agent_name, ''), COALESCE(d.session_id, ''),
        COALESCE(d.trace_id, ''), d.detection_type, d.category, d.severity, d.confidence,
-       d.rule_id, d.status, d.title, COALESCE(d.detail, ''), COALESCE(d.remediation, ''),
+       d.rule_id, COALESCE(d.rule_version, ''), d.status, d.title, COALESCE(d.detail, ''), COALESCE(d.remediation, ''),
        '' AS attributes, d.first_seen_at, d.last_seen_at, d.event_count
 FROM runtime_detection_events l
 JOIN runtime_detections d ON d.detection_id = l.detection_id
-WHERE l.event_id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+WHERE l."delete" = 0 AND d."delete" = 0 AND l.event_id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 	if err != nil {
 		return out, err
 	}
@@ -753,7 +764,7 @@ WHERE l.event_id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 		if err := rows.Scan(
 			&eventID,
 			&d.DetectionID, &d.AgentID, &d.AgentName, &d.SessionID, &d.TraceID,
-			&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID,
+			&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID, &d.RuleVersion,
 			&d.Status, &d.Title, &d.Detail, &d.Remediation,
 			&firstSeen, &lastSeen, &eventCount,
 		); err != nil {
@@ -782,7 +793,7 @@ func (s *Store) UpdateRuntimeDetectionStatus(detectionID, status string) error {
 		return nil
 	}
 	_, err := s.execDB(context.Background(), "runtime_detection_status", `
-UPDATE runtime_detections SET status = ? WHERE detection_id = ?`, status, detectionID)
+UPDATE runtime_detections SET status = ? WHERE detection_id = ? AND "delete" = 0`, status, detectionID)
 	return err
 }
 

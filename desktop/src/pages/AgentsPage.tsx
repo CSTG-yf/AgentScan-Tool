@@ -16,7 +16,7 @@ import {
 import { Avatar, Button, Card, Descriptions, Drawer, Empty, Input, Select, Space, Spin, Table, Tag, Tooltip, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { formatUptime } from "../app/display";
-import { exportAgentsReportPdf, getAgentDetail } from "../bridge";
+import { exportAgentsReportPdf, getAgentDetail, getScanStatus, triggerAgentScan } from "../bridge";
 import type { AgentInventory, AgentStatus } from "../types";
 
 const { Text, Title } = Typography;
@@ -176,6 +176,17 @@ function reportFileName(agents: AgentInventory[]) {
   return `${prefix.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")}-${new Date().toISOString().slice(0, 10)}.pdf`;
 }
 
+async function waitForAgentScan(scanId?: string): Promise<void> {
+  if (!scanId) return;
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const status = await getScanStatus(scanId);
+    if (status.status === "completed") return;
+    if (status.status === "failed") throw new Error(status.error || "Agent 发现扫描失败");
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
+  }
+  throw new Error("Agent 发现扫描等待超时，请稍后刷新");
+}
+
 export function AgentsPage({ agents, totalAgents, warning, loading = false, onRefresh }: AgentsPageProps) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -238,6 +249,8 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
     if (!onRefresh) return;
     setRefreshing(true);
     try {
+      const accepted = await triggerAgentScan("full");
+      await waitForAgentScan(accepted.scan_id);
       await onRefresh();
       message.success("Agent 扫描完成");
     } catch (error) {

@@ -225,4 +225,14 @@ func TestRecordRuntimeEventLegacyCompatibility(t *testing.T) {
 	if sources[RuntimeSourceDesktop] != 1 || sources[RuntimeSourceAgentHook] != 1 {
 		t.Errorf("event source split = %v, want 1 desktop + 1 agent_hook", sources)
 	}
+
+	// Historical replay opts into the complete table, including legacy
+	// desktop rows, without accidentally filtering for an empty source.
+	allRows, err := store.ListRuntimeEvents(RuntimeEventFilter{IncludeDesktop: true, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRuntimeEvents IncludeDesktop: %v", err)
+	}
+	if len(allRows) != 2 {
+		t.Fatalf("expected 2 rows with IncludeDesktop, got %d", len(allRows))
+	}
 }

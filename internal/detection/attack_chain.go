@@ -50,6 +50,8 @@ func chainRelation(ev audit.BehaviorEvent) string {
 		return "file_read"
 	case audit.RuntimeEventFileWrite:
 		return "file_write"
+	case audit.RuntimeEventFileDelete:
+		return "file_delete"
 	case audit.RuntimeEventProcessExec:
 		return "process_exec"
 	case audit.RuntimeEventNetworkDownload:
@@ -142,4 +144,38 @@ func (p *PolicyEngine) detectionForDecision(decision audit.RuntimeDecision) audi
 		return audit.RuntimeDetection{}
 	}
 	return d
+}
+
+// RebuildAttackChains replays the persisted Detection -> Decision links into
+// the backend chain projection. It is intentionally idempotent because the
+// store keys chains by detection_id and de-duplicates event links. This is
+// used by the explicit attack_chain_rebuild job after rule/profile upgrades.
+func (p *PolicyEngine) RebuildAttackChains(limit int) error {
+	if p == nil || p.store == nil {
+		return nil
+	}
+	if limit <= 0 || limit > 5000 {
+		limit = 5000
+	}
+	decisions, detections, err := p.store.ListRuntimeDecisions(audit.RuntimeDecisionFilter{Limit: limit})
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for i, decision := range decisions {
+		if i >= len(detections) || seen[decision.DetectionID] {
+			continue
+		}
+		d := detections[i]
+		if !chainWorthyDetection(d) {
+			continue
+		}
+		seen[decision.DetectionID] = true
+		_, evidence, detailErr := p.store.GetRuntimeDetectionDetail(decision.DetectionID)
+		if detailErr != nil {
+			return detailErr
+		}
+		p.recordAttackChain(decision, evidence)
+	}
+	return nil
 }

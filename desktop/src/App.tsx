@@ -74,6 +74,8 @@ export default function App() {
   const [savingStaticScanSettings, setSavingStaticScanSettings] = useState(false);
   const [switchingDefenseMode, setSwitchingDefenseMode] = useState(false);
   const [replayBusy, setReplayBusy] = useState(false);
+  const [staticRefreshTick, setStaticRefreshTick] = useState(0);
+  const [eventRefreshTick, setEventRefreshTick] = useState(0);
 
   const persistPolicy = async (next: GuardPolicy) => {
     setSavingPolicy(true);
@@ -158,10 +160,11 @@ export default function App() {
         return;
       case "eventDetection": {
         setAttackChains(await getAttackChains());
+        setEventRefreshTick((tick) => tick + 1);
         return;
       }
       case "staticAssets":
-        await getStaticResourceAgents();
+        setStaticRefreshTick((tick) => tick + 1);
         return;
       case "rangeStatus": {
         const status = await getRangeStatus();
@@ -417,9 +420,9 @@ export default function App() {
       case "trace":
         return <TracePage trace={trace} events={traceEvents} fileTraceCount={fileTraceCount} />;
       case "staticAssets":
-        return <StaticAssetsPage loading={loading} onRefresh={() => refreshTask("staticAssets")} />;
+        return <StaticAssetsPage loading={loading} refreshNonce={staticRefreshTick} onRefresh={() => refreshTask("staticAssets")} />;
       case "events":
-        return <EventsPage loading={loading} onRefresh={() => refreshTask("eventDetection")} />;
+        return <EventsPage loading={loading} refreshNonce={eventRefreshTick} onRefresh={() => refreshTask("eventDetection")} />;
       case "policies":
         return (
           <PoliciesPage

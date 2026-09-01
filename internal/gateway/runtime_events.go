@@ -442,6 +442,12 @@ type runtimeEventPostRequest struct {
 	TraceID   string `json:"trace_id,omitempty"`
 	PID       uint32 `json:"pid,omitempty"`
 	PPID      uint32 `json:"ppid,omitempty"`
+	AgentExecutable string `json:"agent_executable,omitempty"`
+	ActorPID        uint32 `json:"actor_pid,omitempty"`
+	ActorExecutable string `json:"actor_executable,omitempty"`
+	AgentInstanceID string `json:"agent_instance_id,omitempty"`
+	Path            string `json:"path,omitempty"`
+	Action          string `json:"action,omitempty"`
 	Operation string `json:"operation,omitempty"`
 	Target    string `json:"target,omitempty"`
 	ToolName  string `json:"tool_name,omitempty"`
@@ -466,6 +472,7 @@ type runtimeDetectionListItem struct {
 	Severity      string         `json:"severity"`
 	Confidence    float64        `json:"confidence"`
 	RuleID        string         `json:"rule_id"`
+	RuleVersion   string         `json:"rule_version,omitempty"`
 	Status        string         `json:"status"`
 	Title         string         `json:"title"`
 	Description   string         `json:"description,omitempty"`
@@ -586,6 +593,7 @@ func runtimeDetectionListItemFromAudit(d audit.RuntimeDetection) runtimeDetectio
 		Severity:      strings.ToLower(d.Severity),
 		Confidence:    d.Confidence,
 		RuleID:        d.RuleID,
+		RuleVersion:   d.RuleVersion,
 		Status:        d.Status,
 		Title:         d.Title,
 		Description:   firstNonEmpty(d.Detail, d.Remediation),
@@ -831,7 +839,7 @@ func (a *APIServer) handleRuntimeEventsGet(w http.ResponseWriter, r *http.Reques
 			pid = uint32(parsed)
 		}
 	}
-	events, err := a.store.ListRuntimeEvents(audit.RuntimeEventFilter{
+	filter := audit.RuntimeEventFilter{
 		AgentID:       strings.TrimSpace(q.Get("agent_id")),
 		SessionID:     strings.TrimSpace(q.Get("session_id")),
 		TraceID:       strings.TrimSpace(q.Get("trace_id")),
@@ -845,7 +853,13 @@ func (a *APIServer) handleRuntimeEventsGet(w http.ResponseWriter, r *http.Reques
 		Until:         parseAPITime(q.Get("end_time")),
 		Limit:         limit,
 		Offset:        offset,
-	})
+	}
+	events, err := a.store.ListRuntimeEvents(filter)
+	if err != nil {
+		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	total, err := a.store.CountRuntimeEvents(filter)
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -854,6 +868,7 @@ func (a *APIServer) handleRuntimeEventsGet(w http.ResponseWriter, r *http.Reques
 		"events":    events,
 		"items":     events,
 		"count":     len(events),
+		"total":     total,
 		"page":      page,
 		"page_size": pageSize,
 		"limit":     limit,
@@ -889,8 +904,14 @@ func (a *APIServer) handleRuntimeEventsPost(w http.ResponseWriter, r *http.Reque
 		TraceID:          req.TraceID,
 		PID:              req.PID,
 		PPID:             req.PPID,
+		AgentExecutable:  req.AgentExecutable,
+		ActorPID:         req.ActorPID,
+		ActorExecutable:  req.ActorExecutable,
+		AgentInstanceID:  req.AgentInstanceID,
+		Path:             req.Path,
+		Action:           req.Action,
 		Operation:        req.Operation,
-		Target:           truncate(redaction.ForSinkString(firstNonEmpty(req.Target, req.Command)), 300),
+		Target:           truncate(redaction.ForSinkString(firstNonEmpty(req.Target, req.Path, req.Command)), 300),
 		ToolName:         req.ToolName,
 		Severity:         strings.ToUpper(req.Severity),
 		Outcome:          firstNonEmpty(req.Outcome, "observed"),
@@ -947,6 +968,10 @@ func (a *APIServer) handleRuntimeDetections(w http.ResponseWriter, r *http.Reque
 				return
 			}
 			a.handleRuntimeDetectionEvents(w, r, detectionID)
+			return
+		}
+		if len(parts) == 2 && parts[1] == "actions" {
+			a.handleRuntimeDetectionBlockAction(w, r, detectionID)
 			return
 		}
 		if len(parts) == 3 && parts[1] == "actions" && parts[2] == "block" {
@@ -1175,7 +1200,7 @@ func (a *APIServer) handleRuntimeDecisions(w http.ResponseWriter, r *http.Reques
 		http.NotFound(w, r)
 		return
 	}
-	if len(parts) == 2 && parts[1] == "enforce" {
+	if len(parts) == 2 && (parts[1] == "enforce" || parts[1] == "execute") {
 		a.handleRuntimeDecisionEnforce(w, r, decisionID)
 		return
 	}

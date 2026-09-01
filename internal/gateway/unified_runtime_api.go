@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -22,7 +23,9 @@ type apiScanStatus struct {
 	Mode       string `json:"mode,omitempty"`
 	AgentID    string `json:"agent_id,omitempty"`
 	ResourceID string `json:"resource_id,omitempty"`
+	RuleVersion string `json:"rule_version,omitempty"`
 	Status     string `json:"status"`
+	Progress   int    `json:"progress"`
 	StartedAt  string `json:"started_at"`
 	FinishedAt string `json:"finished_at,omitempty"`
 	Error      string `json:"error,omitempty"`
@@ -122,7 +125,7 @@ func (a *APIServer) handleAgentsAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *APIServer) handleAgentsList(w http.ResponseWriter, r *http.Request) {
-	snap, err := a.buildPageAgentInventory(pageLimit(r, 5000, 50, 5000))
+	snap, err := a.buildPageAgentInventoryReadOnly(pageLimit(r, 5000, 50, 5000))
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -148,7 +151,7 @@ func (a *APIServer) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *APIServer) handleAgentsSummary(w http.ResponseWriter, r *http.Request) {
-	snap, err := a.buildPageAgentInventory(pageLimit(r, 5000, 50, 5000))
+	snap, err := a.buildPageAgentInventoryReadOnly(pageLimit(r, 5000, 50, 5000))
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -158,7 +161,7 @@ func (a *APIServer) handleAgentsSummary(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *APIServer) handleAgentDetail(w http.ResponseWriter, r *http.Request, agentID string) {
-	snap, err := a.buildPageAgentInventory(pageLimit(r, 5000, 50, 5000))
+	snap, err := a.buildPageAgentInventoryReadOnly(pageLimit(r, 5000, 50, 5000))
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -241,6 +244,12 @@ func (a *APIServer) handleScanStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	status, ok := a.lookupAPIScan(scanID)
 	if !ok {
+		if a.store != nil {
+			if job, found, err := a.store.GetScanJob(scanID); err == nil && found {
+				a.writeJSON(w, http.StatusOK, job)
+				return
+			}
+		}
 		a.writeJSON(w, http.StatusNotFound, map[string]string{"error": "scan not found"})
 		return
 	}
@@ -255,7 +264,11 @@ func (a *APIServer) startAPIScan(kind, mode, agentID, resourceID string, run fun
 		AgentID:    agentID,
 		ResourceID: resourceID,
 		Status:     "running",
+		Progress:   0,
 		StartedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if kind == "event_replay" || kind == "attack_chain_rebuild" {
+		status.RuleVersion = detection.RuleVersion
 	}
 	a.storeAPIScan(status)
 	go func() {
@@ -263,10 +276,19 @@ func (a *APIServer) startAPIScan(kind, mode, agentID, resourceID string, run fun
 		if err := run(); err != nil {
 			next.Status = "failed"
 			next.Error = err.Error()
+			next.Progress = 0
 		} else {
 			next.Status = "completed"
+			next.Progress = 100
 		}
 		next.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		// Cancellation is durable and wins over a late completion from the
+		// worker. Do not resurrect a cancelled job in either projection.
+		if a.store != nil {
+			if current, ok, err := a.store.GetScanJob(status.ScanID); err == nil && ok && current.Status == "cancelled" {
+				return
+			}
+		}
 		a.storeAPIScan(next)
 	}()
 	return status
@@ -274,11 +296,29 @@ func (a *APIServer) startAPIScan(kind, mode, agentID, resourceID string, run fun
 
 func (a *APIServer) storeAPIScan(status apiScanStatus) {
 	a.scanStatusMu.Lock()
-	defer a.scanStatusMu.Unlock()
 	if a.scanStatuses == nil {
 		a.scanStatuses = map[string]apiScanStatus{}
 	}
 	a.scanStatuses[status.ScanID] = status
+	a.scanStatusMu.Unlock()
+
+	if a.store == nil {
+		return
+	}
+	job := audit.ScanJob{
+		JobID: status.ScanID, Kind: status.Type, Mode: status.Mode,
+		AgentID: status.AgentID, ResourceID: status.ResourceID,
+		RuleVersion: status.RuleVersion,
+		Status: status.Status, Progress: status.Progress,
+		StartedAt: status.StartedAt, FinishedAt: status.FinishedAt,
+		Error: status.Error,
+	}
+	if existing, ok, err := a.store.GetScanJob(status.ScanID); err == nil && ok {
+		job.CreatedAt = existing.CreatedAt
+		_ = a.store.UpdateScanJob(job)
+		return
+	}
+	_ = a.store.CreateScanJob(job)
 }
 
 func (a *APIServer) lookupAPIScan(scanID string) (apiScanStatus, bool) {
@@ -843,9 +883,12 @@ func (a *APIServer) handleRuntimeDetectionBlockAction(w http.ResponseWriter, r *
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	_ = a.store.UpdateRuntimeDetectionStatus(detectionID, audit.RuntimeDetectionStatusMitigated)
+	responseStatus := runtimeResponseStatus(responses)
+	if responseStatus == audit.ResponseStatusExecuted {
+		_ = a.store.UpdateRuntimeDetectionStatus(detectionID, audit.RuntimeDetectionStatusMitigated)
+	}
 	a.writeJSON(w, http.StatusOK, map[string]any{
-		"status":    "blocked",
+		"status":    runtimeEnforcementHTTPStatus(responseStatus),
 		"decision":  decision,
 		"responses": responses,
 	})
@@ -876,14 +919,53 @@ func (a *APIServer) handleRuntimeDecisionEnforce(w http.ResponseWriter, r *http.
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if decision.DetectionID != "" {
+	responseStatus := runtimeResponseStatus(responses)
+	if decision.DetectionID != "" && responseStatus == audit.ResponseStatusExecuted {
 		_ = a.store.UpdateRuntimeDetectionStatus(decision.DetectionID, audit.RuntimeDetectionStatusMitigated)
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{
-		"status":    "enforced",
+		"status":    runtimeEnforcementHTTPStatus(responseStatus),
 		"decision":  decision,
 		"responses": responses,
 	})
+}
+
+// runtimeResponseStatus is the source of truth for the public enforcement
+// result. A decision can be recorded and routed without the target module
+// actually executing it; only an executed response may close a detection.
+func runtimeResponseStatus(responses []audit.ResponseAction) string {
+	if len(responses) == 0 {
+		return audit.ResponseStatusFailed
+	}
+	for _, response := range responses {
+		if response.Status == audit.ResponseStatusExecuted {
+			return audit.ResponseStatusExecuted
+		}
+	}
+	for _, response := range responses {
+		if response.Status == audit.ResponseStatusDispatched {
+			return audit.ResponseStatusDispatched
+		}
+	}
+	for _, response := range responses {
+		if response.Status == audit.ResponseStatusWouldBlock {
+			return audit.ResponseStatusWouldBlock
+		}
+	}
+	return audit.ResponseStatusFailed
+}
+
+func runtimeEnforcementHTTPStatus(responseStatus string) string {
+	switch responseStatus {
+	case audit.ResponseStatusExecuted:
+		return "blocked"
+	case audit.ResponseStatusDispatched:
+		return "dispatched"
+	case audit.ResponseStatusWouldBlock:
+		return "would_block"
+	default:
+		return "failed"
+	}
 }
 
 func (a *APIServer) executeRuntimeDecisionResponse(decision audit.RuntimeDecision, actionType string, evidence []audit.DetectionEvidence, force bool) ([]audit.ResponseAction, error) {
@@ -921,6 +1003,11 @@ func (a *APIServer) executeRuntimeDecisionResponse(decision audit.RuntimeDecisio
 			status = audit.ResponseStatusFailed
 			result = "runtime blocklist unavailable"
 		}
+	} else if engine := activeDetectionEngine(); engine != nil && engine.Policy() != nil {
+		status, target, result = engine.Policy().ExecuteNonProxy(context.Background(), decision, actionType, evidence, force)
+	} else {
+		status = audit.ResponseStatusFailed
+		result = "runtime policy engine unavailable"
 	}
 	action, err := a.store.RecordResponseAction(audit.ResponseActionInput{
 		DecisionID: decision.DecisionID,
@@ -957,6 +1044,11 @@ func manualActionPlan(rawActionType, detectionType string) (string, string, erro
 		return audit.EnforcementPointMCP, "DISABLE_RESOURCE", nil
 	case "QUARANTINE_RESOURCE":
 		return audit.EnforcementPointFile, "QUARANTINE_RESOURCE", nil
+	case "BLOCK":
+		// Desktop clients used the generic BLOCK action before the
+		// enforcement-point vocabulary was exposed. Resolve it using the
+		// same policy plan as automatic decisions.
+		return detection.EnforcementPlan(detectionType)
 	default:
 		return "", "", fmt.Errorf("unsupported action_type %q", rawActionType)
 	}

@@ -21,7 +21,8 @@ import (
 // the EventType carries the unified vocabulary (prompt.submit,
 // content.prompt_injection, network.blocked, ...). The legacy
 // desktop-behavior fields (AgentExecutable/Actor*/Path/Action) stay for
-// the Tauri process observer and are empty for runtime events.
+// the Tauri process observer and may also be populated by the OS sensor
+// compatibility adapter when a legacy payload carries process context.
 type BehaviorEvent struct {
 	ID                int64     `json:"id"`
 	Timestamp         time.Time `json:"timestamp"`
@@ -182,6 +183,7 @@ SELECT id,
        COALESCE(target, ''),
        COALESCE(severity, '')
 FROM behavior_events
+WHERE "delete" = 0
 ORDER BY id DESC
 LIMIT ?`, limit)
 	if err != nil {

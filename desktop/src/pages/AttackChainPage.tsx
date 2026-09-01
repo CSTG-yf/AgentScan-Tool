@@ -5,6 +5,7 @@ import type { ColumnsType } from "antd/es/table";
 import { chainKindTag, defenseModeColors, defenseModeLabels, eventStatusTag, formatClock, formatTimestamp, staticRiskTag } from "../app/display";
 import { chainKindMeta } from "../data/attackChains";
 import { staticRiskMeta } from "../data/staticAssets";
+import { createAttackChainRebuildJob, getScanStatus } from "../bridge";
 import type { AttackChain, AttackChainSnapshot, ChainEvidenceRow, GatewayAuditEvent, GatewayAuditSnapshot, RangeMode, StaticRisk } from "../types";
 
 const { Text, Title } = Typography;
@@ -92,12 +93,24 @@ function gatewayEventMatchesChain(event: GatewayAuditEvent, chain?: AttackChain,
   return false;
 }
 
+async function waitForChainRebuild(scanId?: string): Promise<void> {
+  if (!scanId) return;
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const status = await getScanStatus(scanId);
+    if (status.status === "completed") return;
+    if (status.status === "failed") throw new Error(status.error || "攻击链重建失败");
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 1000));
+  }
+  throw new Error("攻击链重建等待超时，请稍后刷新");
+}
+
 export function AttackChainPage({ defenseMode, gatewayAudit, snapshot, loading = false, onRefresh }: AttackChainPageProps) {
   const [selectedAgentKey, setSelectedAgentKey] = useState("");
   const [chainId, setChainId] = useState("");
   const [stepIndex, setStepIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
   const chains = useMemo(
     () => [...(snapshot?.chains ?? [])].sort((left, right) => new Date(right.endedAt).getTime() - new Date(left.endedAt).getTime()),
     [snapshot],
@@ -175,11 +188,25 @@ export function AttackChainPage({ defenseMode, gatewayAudit, snapshot, loading =
     setRefreshing(true);
     try {
       await onRefresh();
-      message.success("已刷新后端攻击链重建结果");
+      message.success("已刷新后端攻击链数据");
     } catch (error) {
       message.error(`刷新攻击链失败：${String(error)}`);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const rebuildChains = async () => {
+    setRebuilding(true);
+    try {
+      const accepted = await createAttackChainRebuildJob(5000);
+      await waitForChainRebuild(accepted.scan_id);
+      await onRefresh?.();
+      message.success("攻击链重建完成");
+    } catch (error) {
+      message.error(`重建攻击链失败：${String(error)}`);
+    } finally {
+      setRebuilding(false);
     }
   };
 
@@ -255,14 +282,17 @@ export function AttackChainPage({ defenseMode, gatewayAudit, snapshot, loading =
         <div>
           <Text className="eyebrow">ATTACK CHAIN RECONSTRUCTION</Text>
           <Title level={2}>攻击链</Title>
-          <Text type="secondary">按 Agent 归并后端真实事件，把 audit_events、scan_findings、Trace 和 Process Guard 事件重建为攻击链。</Text>
+          <Text type="secondary">按 Agent 展示后端持久化的 Detection/Evidence 攻击链；历史数据需要通过“重建攻击链”任务更新。</Text>
         </div>
         <Space wrap>
           <Tag color={defenseModeColors[defenseMode]}>{defenseModeLabels[defenseMode]}</Tag>
-          <Tag color="purple">{chains.length} 条链路</Tag>
+          <Tag color="purple">{snapshot?.total ?? chains.length} 条链路</Tag>
           <Tag color="blue">{agentSummaries.length} Agents</Tag>
           <Button className="chain-action-button" icon={<ReloadOutlined />} loading={loading || refreshing} onClick={() => void refreshChains()}>
-            重新构建
+            刷新数据
+          </Button>
+          <Button className="chain-action-button" loading={rebuilding} onClick={() => void rebuildChains()}>
+            重建攻击链
           </Button>
         </Space>
       </div>
@@ -405,7 +435,10 @@ export function AttackChainPage({ defenseMode, gatewayAudit, snapshot, loading =
             <Card bordered={false} className="chain-control-card">
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无后端攻击链重建结果">
                 <Button className="chain-action-button" icon={<ReloadOutlined />} loading={loading || refreshing} onClick={() => void refreshChains()}>
-                  重新构建
+                  刷新数据
+                </Button>
+                <Button className="chain-action-button" loading={rebuilding} onClick={() => void rebuildChains()}>
+                  重建攻击链
                 </Button>
               </Empty>
             </Card>

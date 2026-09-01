@@ -28,6 +28,8 @@ pub struct RuntimeDetection {
     pub(crate) confidence: f64,
     #[serde(default, alias = "rule_id")]
     pub(crate) rule_id: String,
+    #[serde(default, alias = "rule_version")]
+    pub(crate) rule_version: String,
     #[serde(default)]
     pub(crate) status: String,
     #[serde(default)]

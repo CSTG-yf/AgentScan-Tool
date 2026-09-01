@@ -121,7 +121,7 @@ func (s *Store) RecordRuntimeDecision(in RuntimeDecisionInput) (RuntimeDecision,
 	var existingID string
 	err := s.db.QueryRowContext(context.Background(), `
 SELECT decision_id FROM runtime_decisions
-WHERE detection_id = ? AND decision = ? AND created_at >= ?
+WHERE detection_id = ? AND decision = ? AND created_at >= ? AND "delete" = 0
 ORDER BY created_at DESC LIMIT 1`,
 		in.DetectionID, in.Decision, cutoff,
 	).Scan(&existingID)
@@ -184,6 +184,7 @@ func (s *Store) ListRuntimeDecisions(f RuntimeDecisionFilter) ([]RuntimeDecision
 	}
 	var conds []string
 	var args []any
+	conds = append(conds, `v."delete" = 0`, `(d.detection_id IS NULL OR d."delete" = 0)`)
 	if f.AgentID != "" {
 		conds = append(conds, "v.agent_id = ?")
 		args = append(args, f.AgentID)
@@ -219,6 +220,7 @@ SELECT v.decision_id, v.detection_id, v.agent_id, COALESCE(v.agent_name, ''),
        v.risk_score, v.confidence, COALESCE(v.policy_id, ''), COALESCE(v.reason, ''),
        COALESCE(v.enforcement_point, ''), v.mode, v.would_block, v.created_at,
        d.detection_type, COALESCE(d.category, ''), COALESCE(d.severity, ''),
+       COALESCE(d.rule_id, ''), COALESCE(d.rule_version, ''),
        COALESCE(d.title, ''), COALESCE(d.status, ''), COALESCE(d.confidence, 0),
        COALESCE(d.event_count, 0), COALESCE(d.first_seen_at, ''), COALESCE(d.last_seen_at, '')
 FROM runtime_decisions v
@@ -252,6 +254,7 @@ LIMIT ?`, args...)
 			&riskScore, &confidence, &v.PolicyID, &v.Reason,
 			&v.EnforcementPoint, &v.Mode, &wouldBlock, &createdAt,
 			&d.DetectionType, &d.Category, &d.Severity,
+			&d.RuleID, &d.RuleVersion,
 			&d.Title, &d.Status, &dConfidence, &eventCount, &firstSeen, &lastSeen,
 		); err != nil {
 			return nil, nil, err
@@ -290,7 +293,7 @@ SELECT decision_id, detection_id, agent_id, COALESCE(agent_name, ''),
        COALESCE(session_id, ''), COALESCE(trace_id, ''), decision,
        risk_score, confidence, COALESCE(policy_id, ''), COALESCE(reason, ''),
        COALESCE(enforcement_point, ''), mode, would_block, created_at
-FROM runtime_decisions WHERE decision_id = ?`, decisionID,
+FROM runtime_decisions WHERE decision_id = ? AND "delete" = 0`, decisionID,
 	).Scan(
 		&v.DecisionID, &v.DetectionID, &v.AgentID, &v.AgentName,
 		&v.SessionID, &v.TraceID, &v.Decision,
@@ -375,7 +378,7 @@ func (s *Store) ListResponseActions(decisionID string) ([]ResponseAction, error)
 SELECT response_id, decision_id, action_type, COALESCE(executor, ''),
        COALESCE(target, ''), status, COALESCE(result, ''), executed_at
 FROM runtime_response_actions
-WHERE decision_id = ?
+WHERE decision_id = ? AND "delete" = 0
 ORDER BY executed_at ASC`, decisionID)
 	if err != nil {
 		return nil, err
@@ -402,8 +405,8 @@ ORDER BY executed_at ASC`, decisionID)
 
 // RuntimeAttackChain is the backend security object for a correlated
 // attack: the event sequence, its detection, and the decision that
-// responded to it. The page-level attack-chain builder stays as a
-// display fallback; this table is the authoritative record.
+// responded to it. This table is the authoritative record; page handlers
+// must not reconstruct security meaning from display strings.
 type RuntimeAttackChain struct {
 	AttackChainID string    `json:"attack_chain_id"`
 	AgentID       string    `json:"agent_id"`
@@ -449,7 +452,7 @@ func (s *Store) UpsertRuntimeAttackChain(in RuntimeAttackChain, events []AttackC
 	)
 	err := s.db.QueryRowContext(context.Background(), `
 SELECT attack_chain_id, start_time FROM runtime_attack_chains
-WHERE detection_id = ? ORDER BY start_time DESC LIMIT 1`, in.DetectionID,
+WHERE detection_id = ? AND "delete" = 0 ORDER BY start_time DESC LIMIT 1`, in.DetectionID,
 	).Scan(&existingID, &startTime)
 	if err == nil {
 		// Refresh: bump end_time/severity/status and append events.
@@ -457,7 +460,7 @@ WHERE detection_id = ? ORDER BY start_time DESC LIMIT 1`, in.DetectionID,
 UPDATE runtime_attack_chains
 SET end_time = ?, severity = ?, status = ?, decision_id = ?,
     trace_id = COALESCE(NULLIF(?, ''), trace_id)
-WHERE attack_chain_id = ?`,
+WHERE attack_chain_id = ? AND "delete" = 0`,
 			in.EndTime.UTC().Format(time.RFC3339Nano),
 			strings.ToUpper(in.Severity), in.Status, in.DecisionID,
 			in.TraceID, existingID,
@@ -504,8 +507,11 @@ func (s *Store) linkAttackChainEvents(chainID string, events []AttackChainEventL
 			continue
 		}
 		_, _ = s.execDB(context.Background(), "runtime_attack_chain_event_link", `
-INSERT OR IGNORE INTO runtime_attack_chain_events (attack_chain_id, event_id, sequence, relation)
-VALUES (?, ?, ?, ?)`, chainID, ev.EventID, ev.Sequence, ev.Relation)
+INSERT INTO runtime_attack_chain_events (attack_chain_id, event_id, sequence, relation)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(attack_chain_id, event_id) DO UPDATE SET
+  sequence = excluded.sequence, relation = excluded.relation, "delete" = 0`,
+			chainID, ev.EventID, ev.Sequence, ev.Relation)
 	}
 }
 
@@ -523,15 +529,8 @@ type AttackChainFilter struct {
 	Limit      int
 }
 
-// ListRuntimeAttackChains returns chains newest-first.
-func (s *Store) ListRuntimeAttackChains(f AttackChainFilter) ([]RuntimeAttackChain, error) {
-	if s == nil || s.db == nil {
-		return nil, nil
-	}
-	if f.Limit <= 0 {
-		f.Limit = 100
-	}
-	var conds []string
+func runtimeAttackChainWhereClause(f AttackChainFilter) (string, []any) {
+	conds := []string{`"delete" = 0`}
 	var args []any
 	if f.AgentID != "" {
 		conds = append(conds, "agent_id = ?")
@@ -565,10 +564,18 @@ func (s *Store) ListRuntimeAttackChains(f AttackChainFilter) ([]RuntimeAttackCha
 		conds = append(conds, "start_time <= ?")
 		args = append(args, f.EndTime.UTC().Format(time.RFC3339Nano))
 	}
-	where := ""
-	if len(conds) > 0 {
-		where = "WHERE " + strings.Join(conds, " AND ")
+	return "WHERE " + strings.Join(conds, " AND "), args
+}
+
+// ListRuntimeAttackChains returns chains newest-first.
+func (s *Store) ListRuntimeAttackChains(f AttackChainFilter) ([]RuntimeAttackChain, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
 	}
+	if f.Limit <= 0 {
+		f.Limit = 100
+	}
+	where, args := runtimeAttackChainWhereClause(f)
 	if f.Offset < 0 {
 		f.Offset = 0
 	}
@@ -608,6 +615,21 @@ LIMIT ? OFFSET ?`, args...)
 	return out, rows.Err()
 }
 
+// CountRuntimeAttackChains returns the total number of non-deleted chains
+// matching the same filters as ListRuntimeAttackChains.
+func (s *Store) CountRuntimeAttackChains(f AttackChainFilter) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, nil
+	}
+	where, args := runtimeAttackChainWhereClause(f)
+	var total int
+	if err := s.db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM runtime_attack_chains `+where, args...).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
 // GetRuntimeAttackChainDetail returns one chain with its event
 // sequence (joined with behavior_events) in chain order.
 func (s *Store) GetRuntimeAttackChainDetail(chainID string) (RuntimeAttackChain, []AttackChainEvent, error) {
@@ -621,7 +643,7 @@ SELECT attack_chain_id, agent_id, COALESCE(agent_name, ''),
        COALESCE(session_id, ''), COALESCE(trace_id, ''),
        attack_type, severity, status, start_time, end_time,
        COALESCE(detection_id, ''), COALESCE(decision_id, '')
-FROM runtime_attack_chains WHERE attack_chain_id = ?`, chainID,
+FROM runtime_attack_chains WHERE attack_chain_id = ? AND "delete" = 0`, chainID,
 	).Scan(
 		&c.AttackChainID, &c.AgentID, &c.AgentName,
 		&c.SessionID, &c.TraceID, &c.AttackType, &c.Severity,
@@ -641,14 +663,16 @@ SELECT l.attack_chain_id, l.event_id, l.sequence, COALESCE(l.relation, ''),
        b.id, b.timestamp, b.event_type, b.source,
        COALESCE(b.event_source, ''), COALESCE(b.event_category, ''),
        COALESCE(b.event_id, ''), COALESCE(b.span_id, ''), COALESCE(b.parent_span_id, ''),
-       b.agent_pid, COALESCE(b.ppid, 0),
+       b.agent_pid, COALESCE(b.agent_executable, ''), COALESCE(b.actor_pid, 0),
+       COALESCE(b.actor_executable, ''), COALESCE(b.path, ''), COALESCE(b.action, ''),
+       COALESCE(b.ppid, 0),
        COALESCE(b.operation, ''), COALESCE(b.target, ''), COALESCE(b.tool_name, ''), COALESCE(b.mcp_server, ''),
        COALESCE(b.severity, ''), COALESCE(b.confidence, 0), b.outcome, b.detail,
        COALESCE(b.agent_name, ''), COALESCE(b.canonical_agent_id, ''),
        COALESCE(b.session_id, ''), COALESCE(b.trace_id, ''), COALESCE(b.attributes_json, '')
 FROM runtime_attack_chain_events l
 JOIN behavior_events b ON b.id = l.event_id
-WHERE l.attack_chain_id = ?
+WHERE l.attack_chain_id = ? AND l."delete" = 0 AND b."delete" = 0
 ORDER BY l.sequence ASC, b.timestamp ASC`, chainID)
 	if err != nil {
 		return RuntimeAttackChain{}, nil, err
@@ -661,6 +685,8 @@ ORDER BY l.sequence ASC, b.timestamp ASC`, chainID)
 			link       AttackChainEvent
 			e          BehaviorEvent
 			ts         string
+			agentPID   int64
+			actorPID   int64
 			ppid       int64
 			confidence float64
 			attrs      string
@@ -669,7 +695,8 @@ ORDER BY l.sequence ASC, b.timestamp ASC`, chainID)
 			&link.AttackChainID, &link.EventID, &link.Sequence, &link.Relation,
 			&e.ID, &ts, &e.EventType, &e.Source,
 			&e.EventSource, &e.EventCategory, &e.EventID, &e.SpanID, &e.ParentSpanID,
-			&e.AgentPID, &ppid, &e.Operation, &e.Target, &e.ToolName, &e.MCPServer,
+			&agentPID, &e.AgentExecutable, &actorPID, &e.ActorExecutable, &e.Path, &e.Action,
+			&ppid, &e.Operation, &e.Target, &e.ToolName, &e.MCPServer,
 			&e.Severity, &confidence, &e.Outcome, &e.Detail,
 			&e.AgentName, &e.CanonicalAgentID, &e.SessionID, &e.TraceID, &attrs,
 		); err != nil {
@@ -678,6 +705,8 @@ ORDER BY l.sequence ASC, b.timestamp ASC`, chainID)
 		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
 			e.Timestamp = t
 		}
+		e.AgentPID = uint32(agentPID)
+		e.ActorPID = uint32(actorPID)
 		e.PPID = uint32(ppid)
 		e.Confidence = confidence
 		if attrs != "" {

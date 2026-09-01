@@ -49,6 +49,7 @@ const (
 	RuntimeEventProcessExit = "process.exit"
 	RuntimeEventFileRead    = "file.read"
 	RuntimeEventFileWrite   = "file.write"
+	RuntimeEventFileDelete  = "file.delete"
 )
 
 // RuntimeEventSource identifies which of the three runtime pipelines
@@ -95,8 +96,14 @@ type RuntimeEventInput struct {
 	ParentSpanID     string
 
 	// Process identity when observable.
-	PID  uint32
-	PPID uint32
+	PID              uint32
+	PPID             uint32
+	AgentExecutable  string
+	ActorPID         uint32
+	ActorExecutable  string
+	AgentInstanceID  string
+	Path             string
+	Action           string
 
 	// What happened, on what.
 	Operation string
@@ -158,7 +165,7 @@ func (s *Store) RecordRuntimeEvent(in RuntimeEventInput) (int64, error) {
 
 	agent, err := s.EnsureAgent(AgentIdentityInput{
 		AgentID:    in.CanonicalAgentID,
-		AgentName:  in.AgentName,
+		AgentName:  firstNonEmpty(in.AgentName, in.AgentExecutable),
 		Source:     "runtime_events:" + in.EventSource,
 		Status:     "running",
 		ObservedAt: in.Timestamp,
@@ -202,11 +209,12 @@ func (s *Store) RecordRuntimeEvent(in RuntimeEventInput) (int64, error) {
 INSERT INTO behavior_events (
   timestamp, event_type, source, event_source, event_category,
   event_id, span_id, parent_span_id,
-  agent_pid, ppid, operation, target, tool_name, mcp_server,
+  agent_pid, agent_executable, actor_pid, actor_executable, path, action,
+  ppid, operation, target, tool_name, mcp_server,
   severity, confidence, outcome, detail,
-  agent_name, canonical_agent_id, session_id, trace_id,
+  agent_name, canonical_agent_id, agent_instance_id, session_id, trace_id,
   attributes_json, raw_data_json, sidecar_instance_id
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.Timestamp.UTC().Format(time.RFC3339Nano),
 		in.EventType,
 		// source is the legacy NOT NULL column; keep it aligned with
@@ -218,6 +226,11 @@ INSERT INTO behavior_events (
 		nullStr(in.SpanID),
 		nullStr(in.ParentSpanID),
 		in.PID,
+		nullStr(in.AgentExecutable),
+		in.ActorPID,
+		nullStr(in.ActorExecutable),
+		nullStr(in.Path),
+		nullStr(in.Action),
 		in.PPID,
 		nullStr(in.Operation),
 		nullStr(in.Target),
@@ -229,6 +242,7 @@ INSERT INTO behavior_events (
 		in.Detail,
 		nullStr(in.AgentName),
 		nullStr(in.CanonicalAgentID),
+		nullStr(in.AgentInstanceID),
 		nullStr(in.SessionID),
 		nullStr(in.TraceID),
 		nullStr(attrsJSON),
@@ -253,12 +267,14 @@ func (s *Store) GetRuntimeEvent(id int64) (BehaviorEvent, bool, error) {
 SELECT id, timestamp, event_type, source,
        COALESCE(event_source, ''), COALESCE(event_category, ''),
        COALESCE(event_id, ''), COALESCE(span_id, ''), COALESCE(parent_span_id, ''),
-       agent_pid, COALESCE(ppid, 0),
+       agent_pid, COALESCE(agent_executable, ''), COALESCE(actor_pid, 0),
+       COALESCE(actor_executable, ''), COALESCE(path, ''), COALESCE(action, ''),
+       COALESCE(ppid, 0),
        COALESCE(operation, ''), COALESCE(target, ''), COALESCE(tool_name, ''), COALESCE(mcp_server, ''),
        COALESCE(severity, ''), COALESCE(confidence, 0), outcome, detail,
-       COALESCE(agent_name, ''), COALESCE(canonical_agent_id, ''),
+       COALESCE(agent_name, ''), COALESCE(canonical_agent_id, ''), COALESCE(agent_instance_id, ''),
        COALESCE(session_id, ''), COALESCE(trace_id, ''), COALESCE(attributes_json, '')
-FROM behavior_events WHERE id = ?`, id)
+FROM behavior_events WHERE id = ? AND "delete" = 0`, id)
 	if err != nil {
 		return BehaviorEvent{}, false, err
 	}
@@ -294,6 +310,12 @@ func runtimeCategoryForType(eventType string) string {
 	default:
 		return RuntimeCategoryLifecycle
 	}
+}
+
+// RuntimeCategoryForEventType exposes the normalizer's category mapping to
+// compatibility adapters without duplicating the vocabulary rules.
+func RuntimeCategoryForEventType(eventType string) string {
+	return runtimeCategoryForType(eventType)
 }
 
 // nullFloat64 mirrors nullStr for the REAL confidence column.
@@ -434,10 +456,10 @@ func (s *Store) ListRuntimeSessions(agentID string, limit int) ([]RuntimeSession
 	if limit <= 0 {
 		limit = 100
 	}
-	where := ""
+	where := `WHERE s."delete" = 0`
 	args := []any{}
 	if agentID != "" {
-		where = "WHERE s.agent_id = ?"
+		where += " AND s.agent_id = ?"
 		args = append(args, agentID)
 	}
 	args = append(args, limit)
@@ -445,7 +467,7 @@ func (s *Store) ListRuntimeSessions(agentID string, limit int) ([]RuntimeSession
 SELECT s.session_id, s.agent_id, COALESCE(a.display_name, ''),
        s.root_pid, s.started_at, s.ended_at,
        COALESCE(s.working_directory, ''), COALESCE(s.user, ''), s.status,
-       (SELECT COUNT(*) FROM behavior_events b WHERE b.session_id = s.session_id)
+       (SELECT COUNT(*) FROM behavior_events b WHERE b.session_id = s.session_id AND b."delete" = 0)
 FROM agent_runtime_sessions s
 LEFT JOIN agents a ON a.id = s.agent_id
 `+where+`
@@ -497,29 +519,29 @@ type RuntimeEventFilter struct {
 	Keyword       string
 	Since         time.Time
 	Until         time.Time
+	// IncludeDesktop includes legacy desktop-behavior rows. Normal page
+	// timelines omit them, while historical replay can opt in explicitly.
+	IncludeDesktop bool
 	Offset        int
 	Limit         int
 }
 
-// ListRuntimeEvents returns unified runtime events in chronological
-// order for the "who did what, when, through which pipeline" timeline.
-func (s *Store) ListRuntimeEvents(f RuntimeEventFilter) ([]BehaviorEvent, error) {
-	if s == nil || s.db == nil {
-		return nil, nil
-	}
-	if f.Limit <= 0 {
-		f.Limit = 300
-	}
+func runtimeEventWhereClause(f RuntimeEventFilter) (string, []any) {
 	var conds []string
 	var args []any
+	conds = append(conds, `"delete" = 0`)
 	// The unified timeline carries Guardrail / Agent Hook / Proxy
 	// runtime events. Legacy desktop-behavior rows stay out unless the
 	// caller explicitly asks for that source.
-	if f.EventSource == "" {
-		conds = append(conds, "COALESCE(event_source, '') != '"+RuntimeSourceDesktop+"'")
-	} else {
-		conds = append(conds, "COALESCE(event_source, '') = ?")
+	if f.EventSource != "" {
+		conds = append(conds, "COALESCE(NULLIF(event_source, ''), source, '') = ?")
 		args = append(args, f.EventSource)
+	} else if !f.IncludeDesktop {
+		// Legacy rows written before event_source was introduced have
+		// source=desktop-behavior but a NULL event_source. Treat both
+		// representations identically so they do not leak into the
+		// unified runtime timeline.
+		conds = append(conds, "COALESCE(NULLIF(event_source, ''), source, '') != '"+RuntimeSourceDesktop+"'")
 	}
 	if f.AgentID != "" {
 		conds = append(conds, "canonical_agent_id = ?")
@@ -571,10 +593,19 @@ OR LOWER(COALESCE(mcp_server, '')) LIKE ? OR LOWER(COALESCE(detail, '')) LIKE ?
 			args = append(args, like)
 		}
 	}
-	where := ""
-	if len(conds) > 0 {
-		where = "WHERE " + strings.Join(conds, " AND ")
+	return "WHERE " + strings.Join(conds, " AND "), args
+}
+
+// ListRuntimeEvents returns unified runtime events in chronological
+// order for the "who did what, when, through which pipeline" timeline.
+func (s *Store) ListRuntimeEvents(f RuntimeEventFilter) ([]BehaviorEvent, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
 	}
+	if f.Limit <= 0 {
+		f.Limit = 300
+	}
+	where, args := runtimeEventWhereClause(f)
 	if f.Offset < 0 {
 		f.Offset = 0
 	}
@@ -583,10 +614,12 @@ OR LOWER(COALESCE(mcp_server, '')) LIKE ? OR LOWER(COALESCE(detail, '')) LIKE ?
 SELECT id, timestamp, event_type, source,
        COALESCE(event_source, ''), COALESCE(event_category, ''),
        COALESCE(event_id, ''), COALESCE(span_id, ''), COALESCE(parent_span_id, ''),
-       agent_pid, COALESCE(ppid, 0),
+       agent_pid, COALESCE(agent_executable, ''), COALESCE(actor_pid, 0),
+       COALESCE(actor_executable, ''), COALESCE(path, ''), COALESCE(action, ''),
+       COALESCE(ppid, 0),
        COALESCE(operation, ''), COALESCE(target, ''), COALESCE(tool_name, ''), COALESCE(mcp_server, ''),
        COALESCE(severity, ''), COALESCE(confidence, 0), outcome, detail,
-       COALESCE(agent_name, ''), COALESCE(canonical_agent_id, ''),
+       COALESCE(agent_name, ''), COALESCE(canonical_agent_id, ''), COALESCE(agent_instance_id, ''),
        COALESCE(session_id, ''), COALESCE(trace_id, ''), COALESCE(attributes_json, '')
 FROM behavior_events
 `+where+`
@@ -608,6 +641,22 @@ LIMIT ? OFFSET ?`, args...)
 	return out, rows.Err()
 }
 
+// CountRuntimeEvents returns the number of active runtime events matching the
+// same filters as ListRuntimeEvents, without applying pagination. It lets the
+// API distinguish a page size from the total event count.
+func (s *Store) CountRuntimeEvents(f RuntimeEventFilter) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, nil
+	}
+	where, args := runtimeEventWhereClause(f)
+	var total int
+	if err := s.db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM behavior_events `+where, args...).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
 // scanRuntimeEventRow scans the unified runtime event projection into
 // the shared BehaviorEvent struct.
 func scanRuntimeEventRow(rows *sql.Rows) (BehaviorEvent, error) {
@@ -615,15 +664,17 @@ func scanRuntimeEventRow(rows *sql.Rows) (BehaviorEvent, error) {
 		e          BehaviorEvent
 		ts         string
 		ppid       int64
+		actorPID   int64
 		confidence float64
 		attrs      string
 	)
 	if err := rows.Scan(
 		&e.ID, &ts, &e.EventType, &e.Source,
 		&e.EventSource, &e.EventCategory, &e.EventID, &e.SpanID, &e.ParentSpanID,
-		&e.AgentPID, &ppid, &e.Operation, &e.Target, &e.ToolName, &e.MCPServer,
+		&e.AgentPID, &e.AgentExecutable, &actorPID, &e.ActorExecutable, &e.Path, &e.Action,
+		&ppid, &e.Operation, &e.Target, &e.ToolName, &e.MCPServer,
 		&e.Severity, &confidence, &e.Outcome, &e.Detail,
-		&e.AgentName, &e.CanonicalAgentID, &e.SessionID, &e.TraceID, &attrs,
+		&e.AgentName, &e.CanonicalAgentID, &e.AgentInstanceID, &e.SessionID, &e.TraceID, &attrs,
 	); err != nil {
 		return e, err
 	}
@@ -631,6 +682,7 @@ func scanRuntimeEventRow(rows *sql.Rows) (BehaviorEvent, error) {
 		e.Timestamp = t
 	}
 	e.PPID = uint32(ppid)
+	e.ActorPID = uint32(actorPID)
 	e.Confidence = confidence
 	if attrs != "" {
 		_ = json.Unmarshal([]byte(attrs), &e.Attributes)

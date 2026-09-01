@@ -66,6 +66,8 @@ func (a *APIServer) handleStaticResourcesAPI(w http.ResponseWriter, r *http.Requ
 		a.handleStaticResourceAgents(w, r)
 	case rest == "summary":
 		a.handleStaticResourceSummary(w, r)
+	case rest == "rescan":
+		a.handleStaticResourceRescan(w, r)
 	default:
 		parts := strings.Split(strings.Trim(rest, "/"), "/")
 		resourceID := parts[0]
@@ -382,14 +384,20 @@ func (a *APIServer) serveStaticDirectoryContent(w http.ResponseWriter, resourceI
 }
 
 // handleStaticResourceRelations serves GET /api/v1/static-resources/{id}/relations.
-// Resource-relation analysis is not built yet; the endpoint exists so the
-// drawer tab has a stable contract and can be filled in later.
+// Relation analysis is intentionally explicit until the graph builder is
+// available; an empty list alone would be indistinguishable from "no
+// relations" and would mislead operators.
 func (a *APIServer) handleStaticResourceRelations(w http.ResponseWriter, r *http.Request, resourceID string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"items": []any{}})
+	a.writeJSON(w, http.StatusOK, map[string]any{
+		"resource_id": resourceID,
+		"supported":   false,
+		"items":       []any{},
+		"reason":      "resource relation analysis is not available in this build",
+	})
 }
 
 // handleStaticResourceScan serves POST /api/v1/static-resources/{id}/scan —
@@ -442,17 +450,11 @@ func (a *APIServer) handleStaticResourceRescan(w http.ResponseWriter, r *http.Re
 		a.writeJSON(w, http.StatusConflict, map[string]string{"error": "another manual scan is already running"})
 		return
 	}
-	go func() {
+	status := a.startAPIScan("static-resources", "rescan", agentID, "", func() error {
 		defer staticScanInFlight.Store(false)
-		if err := rescan(agentID); err != nil {
-			fmt.Fprintf(os.Stderr, "[api] on-demand rescan (agent=%q): %v\n", agentID, err)
-		}
-	}()
-	resp := map[string]any{"status": "queued"}
-	if agentID != "" {
-		resp["agent_id"] = agentID
-	}
-	a.writeJSON(w, http.StatusAccepted, resp)
+		return rescan(agentID)
+	})
+	a.writeJSON(w, http.StatusAccepted, status)
 }
 
 // isVirtualTarget mirrors the watcher's virtual-resource check for content

@@ -440,6 +440,7 @@ var softDeleteTables = []string{
 	"runtime_response_actions",
 	"runtime_attack_chains",
 	"runtime_attack_chain_events",
+	"scan_jobs",
 }
 
 func ensureSoftDeleteColumn(ex dbExecer, table string) error {
@@ -2184,6 +2185,7 @@ WHERE id = ?`,
 				severity TEXT NOT NULL DEFAULT 'medium',
 				confidence REAL NOT NULL DEFAULT 0,
 				rule_id TEXT NOT NULL DEFAULT '',
+				rule_version TEXT NOT NULL DEFAULT '',
 				status TEXT NOT NULL DEFAULT 'open',
 				title TEXT NOT NULL DEFAULT '',
 				detail TEXT,
@@ -2521,6 +2523,109 @@ WHERE id = ?`,
 				return fmt.Errorf("create risk explain tables: %w", err)
 			}
 			return seedRiskExplainModel(ex)
+		},
+	},
+		{
+			description: "durable scan jobs: explicit agent and resource scan lifecycle",
+			apply: func(ex dbExecer) error {
+			if _, err := ex.Exec(`
+			CREATE TABLE IF NOT EXISTS scan_jobs (
+				job_id TEXT PRIMARY KEY,
+				kind TEXT NOT NULL,
+				mode TEXT NOT NULL DEFAULT '',
+				agent_id TEXT NOT NULL DEFAULT '',
+				resource_id TEXT NOT NULL DEFAULT '',
+				status TEXT NOT NULL DEFAULT 'queued',
+				progress INTEGER NOT NULL DEFAULT 0,
+				started_at DATETIME NOT NULL,
+				finished_at DATETIME,
+				error TEXT,
+				created_at DATETIME NOT NULL,
+				updated_at DATETIME NOT NULL,
+				"delete" INTEGER NOT NULL DEFAULT 0
+			);
+			CREATE INDEX IF NOT EXISTS idx_scan_jobs_status ON scan_jobs(status, updated_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_scan_jobs_kind ON scan_jobs(kind, created_at DESC);
+			`); err != nil {
+				return fmt.Errorf("create scan jobs table: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		description: "change cursor: durable domain invalidation log",
+		apply: func(ex dbExecer) error {
+			if _, err := ex.Exec(`
+			CREATE TABLE IF NOT EXISTS change_log (
+				revision INTEGER PRIMARY KEY AUTOINCREMENT,
+				domain TEXT NOT NULL,
+				changed_at DATETIME NOT NULL
+			);
+			CREATE INDEX IF NOT EXISTS idx_change_log_domain_revision ON change_log(domain, revision);
+			CREATE INDEX IF NOT EXISTS idx_change_log_changed_at ON change_log(changed_at DESC);
+			`); err != nil {
+				return fmt.Errorf("create change log table: %w", err)
+			}
+
+			// These triggers deliberately cover soft-delete UPDATEs as well as
+			// inserts/deletes. The cursor is an invalidation signal, not a row
+			// replica; page APIs still read their authoritative projections.
+			for _, table := range []string{
+				"agents", "static_resources", "scan_results", "scan_findings", "behavior_events", "runtime_detections",
+				"runtime_decisions", "runtime_response_actions", "runtime_attack_chains",
+				"runtime_attack_chain_events", "scan_jobs",
+			} {
+				for _, operation := range []string{"insert", "update", "delete"} {
+					trigger := fmt.Sprintf(`
+					CREATE TRIGGER IF NOT EXISTS change_log_%s_%s
+					AFTER %s ON %s
+					BEGIN
+						INSERT INTO change_log(domain, changed_at) VALUES ('%s', CURRENT_TIMESTAMP);
+					END;`, table, operation, strings.ToUpper(operation), table, table)
+					if _, err := ex.Exec(trigger); err != nil {
+						return fmt.Errorf("create %s change trigger: %w", table+"."+operation, err)
+					}
+				}
+			}
+			return nil
+		},
+	},
+	{
+		description: "scan jobs: persist rule version metadata",
+		apply: func(ex dbExecer) error {
+			exists, err := tableExists(ex, "scan_jobs")
+			if err != nil || !exists {
+				return err
+			}
+			has, err := hasColumnDB(ex, "scan_jobs", "rule_version")
+			if err != nil {
+				return err
+			}
+			if !has {
+				if _, err := ex.Exec(`ALTER TABLE scan_jobs ADD COLUMN rule_version TEXT NOT NULL DEFAULT ''`); err != nil {
+					return fmt.Errorf("alter scan_jobs.rule_version: %w", err)
+				}
+			}
+			return nil
+		},
+	},
+	{
+		description: "runtime detections: persist rule version metadata",
+		apply: func(ex dbExecer) error {
+			exists, err := tableExists(ex, "runtime_detections")
+			if err != nil || !exists {
+				return err
+			}
+			has, err := hasColumnDB(ex, "runtime_detections", "rule_version")
+			if err != nil {
+				return err
+			}
+			if !has {
+				if _, err := ex.Exec(`ALTER TABLE runtime_detections ADD COLUMN rule_version TEXT NOT NULL DEFAULT ''`); err != nil {
+					return fmt.Errorf("alter runtime_detections.rule_version: %w", err)
+				}
+			}
+			return nil
 		},
 	},
 }
@@ -3045,6 +3150,9 @@ func (s *Store) Init() error {
 	if err := s.backfillAgentInventory(); err != nil {
 		return err
 	}
+	if err := s.MarkRunningScanJobsFailed(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -3125,6 +3233,7 @@ var knownTables = map[string]bool{
 	"static_resources":      true,
 	"behavior_events":       true,
 	"app_settings":          true,
+	"scan_jobs":              true,
 	// v7 additions
 	"scan_findings":   true,
 	"activity_events": true,

@@ -420,43 +420,25 @@ func (a *APIServer) handleAttackChains(w http.ResponseWriter, r *http.Request) {
 		a.handleAttackChainDetail(w, r, strings.Split(rest, "/")[0])
 		return
 	}
-	// Phase 3: persisted attack chains (runtime_attack_chains) are the
-	// authoritative backend security objects — the correlation engine
-	// wrote them when Detection → Decision completed. The page-level
-	// reconstruction below stays as a legacy fallback.
-	if a.store != nil {
-		if chains := a.backendAttackChains(r); len(chains) > 0 {
-			page, pageSize := requestPage(r, 1, 100, 200)
-			a.writeJSON(w, http.StatusOK, pageAttackChainSnapshot{
-				CapturedAt: time.Now().UTC().Format(time.RFC3339Nano),
-				Source:     "runtime-attack-chains",
-				Chains:     chains,
-				Items:      chains,
-				Total:      len(chains),
-				Page:       page,
-				PageSize:   pageSize,
-			})
-			return
-		}
+	if a.store == nil {
+		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit store unavailable"})
+		return
 	}
-	events, err := a.buildPageEventDetections(pageLimit(r, 500, 100, 1000))
+	chains, total, err := a.backendAttackChains(r)
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	chains := pageCorrelateAttackChains(events.Events)
-	if len(chains) > 80 {
-		chains = chains[:80]
-	}
+	page, pageSize := requestPage(r, 1, 100, 200)
 	a.writeJSON(w, http.StatusOK, pageAttackChainSnapshot{
 		CapturedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		Source:     events.Source,
+		Source:     "runtime-attack-chains",
 		Chains:     chains,
 		Items:      chains,
-		Total:      len(chains),
-		Page:       1,
-		PageSize:   len(chains),
-		Warning:    events.Warning,
+		Total:      total,
+		Page:       page,
+		PageSize:   pageSize,
+		Warning:    pageAttackChainWarning(total),
 	})
 }
 
@@ -466,91 +448,75 @@ func (a *APIServer) handleAttackChainDetail(w http.ResponseWriter, r *http.Reque
 		http.NotFound(w, r)
 		return
 	}
-	if a.store != nil {
-		chain, events, err := a.store.GetRuntimeAttackChainDetail(chainID)
-		if err != nil {
-			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if chain.AttackChainID != "" {
-			pageChain := pageAttackChainFromRuntime(chain)
-			pageChain.Steps, pageChain.Evidence, pageChain.Sources = pageChainStepsFromRuntime(events)
-			pageChain.StepCount = len(pageChain.Steps)
-			pageChain.EvidenceCount = len(pageChain.Evidence)
-			detections, decision, responses := a.attackChainSecurityContext(chain)
-			a.writeJSON(w, http.StatusOK, map[string]any{
-				"attack_chain": chain,
-				"events":       events,
-				"chain":        pageChain,
-				"nodes":        pageChain.Steps,
-				"edges":        pageAttackChainEdges(pageChain.Steps),
-				"evidence":     pageChain.Evidence,
-				"detections":   detections,
-				"decision":     decision,
-				"response":     firstRuntimeResponse(responses),
-				"responses":    responses,
-			})
-			return
-		}
+	if a.store == nil {
+		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit store unavailable"})
+		return
 	}
-	events, err := a.buildPageEventDetections(pageLimit(r, 500, 100, 1000))
+	chain, events, err := a.store.GetRuntimeAttackChainDetail(chainID)
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	for _, chain := range pageCorrelateAttackChains(events.Events) {
-		if chain.ID == chainID {
-			a.writeJSON(w, http.StatusOK, map[string]any{
-				"chain":    chain,
-				"nodes":    chain.Steps,
-				"edges":    pageAttackChainEdges(chain.Steps),
-				"evidence": chain.Evidence,
-				"source":   events.Source,
-			})
-			return
-		}
+	if chain.AttackChainID == "" {
+		a.writeJSON(w, http.StatusNotFound, map[string]string{"error": "attack chain not found"})
+		return
 	}
-	a.writeJSON(w, http.StatusNotFound, map[string]string{"error": "attack chain not found"})
+	pageChain := pageAttackChainFromRuntime(chain)
+	pageChain.Steps, pageChain.Evidence, pageChain.Sources = pageChainStepsFromRuntime(events)
+	pageChain.StepCount = len(pageChain.Steps)
+	pageChain.EvidenceCount = len(pageChain.Evidence)
+	detections, decision, responses := a.attackChainSecurityContext(chain)
+	a.writeJSON(w, http.StatusOK, map[string]any{
+		"attack_chain": chain,
+		"events":       events,
+		"chain":        pageChain,
+		"nodes":        pageChain.Steps,
+		"edges":        pageAttackChainEdges(pageChain.Steps),
+		"evidence":     pageChain.Evidence,
+		"detections":   detections,
+		"decision":     decision,
+		"response":     firstRuntimeResponse(responses),
+		"responses":    responses,
+	})
 }
 
 func (a *APIServer) handleAttackChainsSummary(w http.ResponseWriter, r *http.Request) {
+	if a.store == nil {
+		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit store unavailable"})
+		return
+	}
 	chains := []pageAttackChain{}
-	if a.store != nil {
-		q := r.URL.Query()
-		rows, err := a.store.ListRuntimeAttackChains(audit.AttackChainFilter{
-			AgentID:    strings.TrimSpace(q.Get("agent_id")),
-			SessionID:  strings.TrimSpace(q.Get("session_id")),
-			TraceID:    strings.TrimSpace(q.Get("trace_id")),
-			AttackType: strings.TrimSpace(q.Get("attack_type")),
-			Severity:   strings.ToUpper(strings.TrimSpace(q.Get("severity"))),
-			Status:     attackChainStatusFilter(q.Get("status")),
-			StartTime:  parseAPITime(q.Get("start_time")),
-			EndTime:    parseAPITime(q.Get("end_time")),
-			Limit:      1000,
-		})
-		if err != nil {
-			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		for _, row := range rows {
-			chains = append(chains, pageAttackChainFromRuntime(row))
-		}
+	q := r.URL.Query()
+	filter := audit.AttackChainFilter{
+		AgentID:    strings.TrimSpace(q.Get("agent_id")),
+		SessionID:  strings.TrimSpace(q.Get("session_id")),
+		TraceID:    strings.TrimSpace(q.Get("trace_id")),
+		AttackType: strings.TrimSpace(q.Get("attack_type")),
+		Severity:   strings.ToUpper(strings.TrimSpace(q.Get("severity"))),
+		Status:     attackChainStatusFilter(q.Get("status")),
+		StartTime:  parseAPITime(q.Get("start_time")),
+		EndTime:    parseAPITime(q.Get("end_time")),
+		Limit:      1000,
 	}
-	if len(chains) == 0 {
-		events, err := a.buildPageEventDetections(pageLimit(r, 500, 100, 1000))
-		if err != nil {
-			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		chains = pageCorrelateAttackChains(events.Events)
+	rows, err := a.store.ListRuntimeAttackChains(filter)
+	if err != nil {
+		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
-	a.writeJSON(w, http.StatusOK, summarizeAttackChains(chains))
+	for _, row := range rows {
+		chains = append(chains, pageAttackChainFromRuntime(row))
+	}
+	summary := summarizeAttackChains(chains)
+	if total, err := a.store.CountRuntimeAttackChains(filter); err == nil {
+		summary["total_chains"] = total
+	}
+	a.writeJSON(w, http.StatusOK, summary)
 }
 
 // backendAttackChains loads persisted attack chains with their event
-// sequences and maps them onto the page DTO so the frontend renders
-// both sources identically.
-func (a *APIServer) backendAttackChains(r *http.Request) []pageAttackChain {
+// sequences and maps them onto the page DTO. The database count is returned
+// separately so pagination never reports only the current page length.
+func (a *APIServer) backendAttackChains(r *http.Request) ([]pageAttackChain, int, error) {
 	q := r.URL.Query()
 	page, pageSize := requestPage(r, 1, 100, 200)
 	limit := pageSize
@@ -565,7 +531,7 @@ func (a *APIServer) backendAttackChains(r *http.Request) []pageAttackChain {
 			offset = parsed
 		}
 	}
-	rows, err := a.store.ListRuntimeAttackChains(audit.AttackChainFilter{
+	filter := audit.AttackChainFilter{
 		AgentID:    strings.TrimSpace(q.Get("agent_id")),
 		SessionID:  strings.TrimSpace(q.Get("session_id")),
 		TraceID:    strings.TrimSpace(q.Get("trace_id")),
@@ -576,9 +542,14 @@ func (a *APIServer) backendAttackChains(r *http.Request) []pageAttackChain {
 		EndTime:    parseAPITime(q.Get("end_time")),
 		Limit:      limit,
 		Offset:     offset,
-	})
-	if err != nil || len(rows) == 0 {
-		return nil
+	}
+	rows, err := a.store.ListRuntimeAttackChains(filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := a.store.CountRuntimeAttackChains(filter)
+	if err != nil {
+		return nil, 0, err
 	}
 	chains := make([]pageAttackChain, 0, len(rows))
 	for _, row := range rows {
@@ -590,7 +561,14 @@ func (a *APIServer) backendAttackChains(r *http.Request) []pageAttackChain {
 		}
 		chains = append(chains, chain)
 	}
-	return chains
+	return chains, total, nil
+}
+
+func pageAttackChainWarning(total int) string {
+	if total == 0 {
+		return "后端尚未持久化攻击链；请先产生检测或执行攻击链重建任务。"
+	}
+	return ""
 }
 
 func (a *APIServer) attackChainSecurityContext(chain audit.RuntimeAttackChain) ([]audit.RuntimeDetection, audit.RuntimeDecision, []audit.ResponseAction) {
@@ -683,8 +661,15 @@ func attackChainStatusFilter(raw string) string {
 
 func pageAttackChainFromRuntime(c audit.RuntimeAttackChain) pageAttackChain {
 	status := c.Status
-	if status == audit.AttackChainStatusContained {
+	switch strings.ToLower(status) {
+	case audit.AttackChainStatusContained, "blocked", "mitigated":
 		status = "blocked"
+	case audit.AttackChainStatusActive, "", "open":
+		// The page status vocabulary is shared with event cards; an
+		// active backend chain is still awaiting containment.
+		status = "pending"
+	default:
+		status = "pending"
 	}
 	agent := c.AgentName
 	if agent == "" {
@@ -695,9 +680,11 @@ func pageAttackChainFromRuntime(c audit.RuntimeAttackChain) pageAttackChain {
 		TraceID:   c.TraceID,
 		SessionID: c.SessionID,
 		Agent:     firstNonEmpty(agent, "Unknown Agent"),
-		Runtime:   "",
+		Runtime:   "runtime-detection",
 		Category:  c.AttackType,
-		Risk:      strings.ToUpper(c.Severity),
+		// Keep the page risk vocabulary lowercase; the frontend metadata map
+		// indexes these values directly (critical/high/medium/low/info).
+		Risk:      pageNormalizeRisk(c.Severity),
 		Status:    status,
 		StartedAt: c.StartTime.UTC().Format(time.RFC3339Nano),
 		EndedAt:   c.EndTime.UTC().Format(time.RFC3339Nano),
@@ -728,8 +715,8 @@ func pageChainStepsFromRuntime(events []audit.AttackChainEvent) ([]pageAttackCha
 			OccurredAt:    e.Timestamp.UTC().Format(time.RFC3339Nano),
 			Title:         firstNonEmpty(ev.Relation, e.EventType),
 			Stage:         firstNonEmpty(ev.Relation, e.EventType),
-			Kind:          "attack",
-			Severity:      strings.ToUpper(e.Severity),
+			Kind:          pageChainNodeKind(e.EventType, ev.Relation),
+			Severity:      pageNormalizeRisk(e.Severity),
 			Actor:         firstNonEmpty(e.AgentName, e.CanonicalAgentID),
 			Tool:          e.ToolName,
 			Resource:      firstNonEmpty(e.MCPServer, e.Target),
@@ -768,6 +755,35 @@ func pageChainStepsFromRuntime(events []audit.AttackChainEvent) ([]pageAttackCha
 	return steps, evidence, unique
 }
 
+// pageChainNodeKind translates the backend event vocabulary to the finite
+// node-kind enum consumed by the desktop graph. Security severity is carried
+// separately; using a made-up kind such as "attack" would make the UI lookup
+// chainKindMeta[step.kind] undefined and hide the step label.
+func pageChainNodeKind(eventType, relation string) string {
+	typ := strings.ToLower(strings.TrimSpace(eventType))
+	rel := strings.ToLower(strings.TrimSpace(relation))
+	switch {
+	case strings.Contains(rel, "block") || strings.Contains(rel, "defen") || strings.HasSuffix(typ, ".blocked"):
+		return "defense"
+	case strings.HasPrefix(typ, "prompt."), strings.HasPrefix(typ, "content."):
+		return "llm"
+	case strings.HasPrefix(typ, "tool."):
+		return "tool"
+	case strings.HasPrefix(typ, "mcp."):
+		return "mcp"
+	case strings.HasPrefix(typ, "file."):
+		return "data"
+	case strings.HasPrefix(typ, "network."):
+		return "network"
+	case strings.HasPrefix(typ, "process."):
+		return "agent"
+	case strings.HasPrefix(typ, "agent."):
+		return "entry"
+	default:
+		return "agent"
+	}
+}
+
 func (a *APIServer) handleGatewayAuditInventory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -798,6 +814,17 @@ func pageLimit(r *http.Request, def, min, max int) int {
 }
 
 func (a *APIServer) buildPageAgentInventory(limit int) (pageAgentSnapshot, error) {
+	return a.buildPageAgentInventoryWithDiscovery(limit, true)
+}
+
+// buildPageAgentInventoryReadOnly serves GET page reads without mutating the
+// canonical inventory. Discovery is an explicit POST /api/v1/scans/agents
+// job; GET must remain safe for dashboards and polling clients.
+func (a *APIServer) buildPageAgentInventoryReadOnly(limit int) (pageAgentSnapshot, error) {
+	return a.buildPageAgentInventoryWithDiscovery(limit, false)
+}
+
+func (a *APIServer) buildPageAgentInventoryWithDiscovery(limit int, discover bool) (pageAgentSnapshot, error) {
 	var warnings []string
 	processes := []pageProcess{}
 
@@ -811,7 +838,9 @@ func (a *APIServer) buildPageAgentInventory(limit int) (pageAgentSnapshot, error
 		}, nil
 	}
 
-	warnings = append(warnings, a.refreshAgentInventoryFromScanner()...)
+	if discover {
+		warnings = append(warnings, a.refreshAgentInventoryFromScanner()...)
+	}
 
 	agentRows, err := a.store.ListAgents(limit)
 	if err != nil {
@@ -1505,7 +1534,7 @@ func (a *APIServer) buildPageStaticInventory(limit int) (pageStaticSnapshot, err
 		pagePushStaticResource(&agents, agentIndex, candidate.Agent, pageStaticResourceFromCandidate(candidate))
 	}
 
-	if inventory, err := a.buildPageAgentInventory(limit); err == nil {
+	if inventory, err := a.buildPageAgentInventoryReadOnly(limit); err == nil {
 		for _, agent := range inventory.Agents {
 			pageEnsureStaticAgentFromInventory(&agents, agentIndex, agent)
 		}
@@ -1657,7 +1686,7 @@ func (a *APIServer) buildPageEventDetections(limit int) (pageEventSnapshot, erro
 	} else {
 		warnings = append(warnings, err.Error())
 	}
-	agentInventory, err := a.buildPageAgentInventory(limit)
+	agentInventory, err := a.buildPageAgentInventoryReadOnly(limit)
 	if err != nil {
 		warnings = append(warnings, err.Error())
 	}
