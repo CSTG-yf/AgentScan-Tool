@@ -513,6 +513,8 @@ type RuntimeAttackChain struct {
 	AttackChainID   string    `json:"attack_chain_id"`
 	AgentID         string    `json:"agent_id"`
 	AgentName       string    `json:"agent_name,omitempty"`
+	AgentTypeID     int64     `json:"agent_type_id,omitempty"`
+	AgentTypeName   string    `json:"agent_type_name,omitempty"`
 	SessionID       string    `json:"session_id,omitempty"`
 	TraceID         string    `json:"trace_id,omitempty"`
 	AttackType      string    `json:"attack_type"`
@@ -631,16 +633,19 @@ ON CONFLICT(attack_chain_id, event_id) DO UPDATE SET
 
 // AttackChainFilter selects chains for the API.
 type AttackChainFilter struct {
-	AgentID    string
-	SessionID  string
-	TraceID    string
-	AttackType string
-	Severity   string
-	Status     string
-	StartTime  time.Time
-	EndTime    time.Time
-	Offset     int
-	Limit      int
+	AgentID     string
+	AgentTypeID int64
+	SessionID   string
+	TraceID     string
+	AttackType  string
+	Severity    string
+	Status      string
+	Keyword     string
+	Sort        string
+	StartTime   time.Time
+	EndTime     time.Time
+	Offset      int
+	Limit       int
 }
 
 func runtimeAttackChainWhereClause(f AttackChainFilter) (string, []any) {
@@ -649,6 +654,15 @@ func runtimeAttackChainWhereClause(f AttackChainFilter) (string, []any) {
 	if f.AgentID != "" {
 		conds = append(conds, "agent_id = ?")
 		args = append(args, f.AgentID)
+	}
+	if f.AgentTypeID > 0 {
+		conds = append(conds, `EXISTS (
+SELECT 1 FROM agents agent_type_filter
+WHERE agent_type_filter.id = runtime_attack_chains.agent_id
+  AND COALESCE(agent_type_filter.agent_type_id, 0) = ?
+  AND COALESCE(agent_type_filter."delete", 0) = 0
+)`)
+		args = append(args, f.AgentTypeID)
 	}
 	if f.SessionID != "" {
 		conds = append(conds, "session_id = ?")
@@ -670,6 +684,18 @@ func runtimeAttackChainWhereClause(f AttackChainFilter) (string, []any) {
 		conds = append(conds, "status = ?")
 		args = append(args, strings.ToLower(f.Status))
 	}
+	if keyword := strings.ToLower(strings.TrimSpace(f.Keyword)); keyword != "" {
+		like := "%" + keyword + "%"
+		conds = append(conds, `(
+LOWER(attack_chain_id) LIKE ? OR LOWER(agent_id) LIKE ? OR LOWER(COALESCE(agent_name, '')) LIKE ?
+OR LOWER(COALESCE(session_id, '')) LIKE ? OR LOWER(COALESCE(trace_id, '')) LIKE ?
+OR LOWER(attack_type) LIKE ? OR LOWER(severity) LIKE ? OR LOWER(status) LIKE ?
+OR LOWER(COALESCE(detection_id, '')) LIKE ? OR LOWER(COALESCE(decision_id, '')) LIKE ?
+)`)
+		for i := 0; i < 10; i++ {
+			args = append(args, like)
+		}
+	}
 	if !f.StartTime.IsZero() {
 		conds = append(conds, "end_time >= ?")
 		args = append(args, f.StartTime.UTC().Format(time.RFC3339Nano))
@@ -679,6 +705,23 @@ func runtimeAttackChainWhereClause(f AttackChainFilter) (string, []any) {
 		args = append(args, f.EndTime.UTC().Format(time.RFC3339Nano))
 	}
 	return "WHERE " + strings.Join(conds, " AND "), args
+}
+
+// runtimeAttackChainOrderBy returns a SQL fragment from a closed set of
+// values. Keeping the mapping here prevents sort input from becoming SQL.
+func runtimeAttackChainOrderBy(sortValue string) string {
+	switch strings.ToLower(strings.TrimSpace(sortValue)) {
+	case "oldest", "time_asc", "start_time:asc", "started_at:asc":
+		return "start_time ASC, attack_chain_id ASC"
+	case "end_time:asc", "ended_at:asc":
+		return "end_time ASC, attack_chain_id ASC"
+	case "severity", "severity:desc", "severity_desc":
+		return "CASE UPPER(severity) WHEN 'CRITICAL' THEN 5 WHEN 'HIGH' THEN 4 WHEN 'MEDIUM' THEN 3 WHEN 'LOW' THEN 2 ELSE 1 END DESC, start_time DESC, attack_chain_id DESC"
+	case "time_desc", "newest", "start_time:desc", "started_at:desc", "":
+		return "start_time DESC, attack_chain_id DESC"
+	default:
+		return "start_time DESC, attack_chain_id DESC"
+	}
 }
 
 // ListRuntimeAttackChains returns chains newest-first.
@@ -696,13 +739,15 @@ func (s *Store) ListRuntimeAttackChains(f AttackChainFilter) ([]RuntimeAttackCha
 	args = append(args, f.Limit, f.Offset)
 	rows, err := s.queryDB(context.Background(), "runtime_attack_chains_list", `
 SELECT attack_chain_id, agent_id, COALESCE(agent_name, ''),
-       COALESCE(session_id, ''), COALESCE(trace_id, ''),
+		COALESCE(session_id, ''), COALESCE(trace_id, ''),
+		COALESCE((SELECT agent_type_id FROM agents WHERE id = runtime_attack_chains.agent_id AND COALESCE("delete", 0) = 0), 0),
+		COALESCE((SELECT t.name FROM agents a JOIN agent_types t ON t.id = a.agent_type_id AND COALESCE(t."delete", 0) = 0 WHERE a.id = runtime_attack_chains.agent_id AND COALESCE(a."delete", 0) = 0), ''),
        attack_type, severity, status, start_time, end_time,
        COALESCE(detection_id, ''), COALESCE(decision_id, ''),
        COALESCE(builder_version, ''), COALESCE(policy_version, ''), COALESCE(evaluation_job_id, '')
 FROM runtime_attack_chains
 `+where+`
-ORDER BY start_time DESC
+ORDER BY `+runtimeAttackChainOrderBy(f.Sort)+`
 LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err
@@ -718,7 +763,7 @@ LIMIT ? OFFSET ?`, args...)
 		)
 		if err := rows.Scan(
 			&c.AttackChainID, &c.AgentID, &c.AgentName,
-			&c.SessionID, &c.TraceID, &c.AttackType, &c.Severity,
+			&c.SessionID, &c.TraceID, &c.AgentTypeID, &c.AgentTypeName, &c.AttackType, &c.Severity,
 			&c.Status, &startTime, &endTime, &c.DetectionID, &c.DecisionID,
 			&c.BuilderVersion, &c.PolicyVersion, &c.EvaluationJobID,
 		); err != nil {
@@ -756,14 +801,16 @@ func (s *Store) GetRuntimeAttackChainDetail(chainID string) (RuntimeAttackChain,
 	)
 	err := s.db.QueryRowContext(context.Background(), `
 SELECT attack_chain_id, agent_id, COALESCE(agent_name, ''),
-       COALESCE(session_id, ''), COALESCE(trace_id, ''),
+		COALESCE(session_id, ''), COALESCE(trace_id, ''),
+		COALESCE((SELECT agent_type_id FROM agents WHERE id = runtime_attack_chains.agent_id AND COALESCE("delete", 0) = 0), 0),
+		COALESCE((SELECT t.name FROM agents a JOIN agent_types t ON t.id = a.agent_type_id AND COALESCE(t."delete", 0) = 0 WHERE a.id = runtime_attack_chains.agent_id AND COALESCE(a."delete", 0) = 0), ''),
        attack_type, severity, status, start_time, end_time,
        COALESCE(detection_id, ''), COALESCE(decision_id, ''),
        COALESCE(builder_version, ''), COALESCE(policy_version, ''), COALESCE(evaluation_job_id, '')
 FROM runtime_attack_chains WHERE attack_chain_id = ? AND "delete" = 0`, chainID,
 	).Scan(
 		&c.AttackChainID, &c.AgentID, &c.AgentName,
-		&c.SessionID, &c.TraceID, &c.AttackType, &c.Severity,
+		&c.SessionID, &c.TraceID, &c.AgentTypeID, &c.AgentTypeName, &c.AttackType, &c.Severity,
 		&c.Status, &startTime, &endTime, &c.DetectionID, &c.DecisionID,
 		&c.BuilderVersion, &c.PolicyVersion, &c.EvaluationJobID,
 	)

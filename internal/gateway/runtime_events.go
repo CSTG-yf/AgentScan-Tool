@@ -470,6 +470,8 @@ type runtimeDetectionListItem struct {
 	DetectionID   string         `json:"detection_id"`
 	AgentID       string         `json:"agent_id"`
 	AgentName     string         `json:"agent_name,omitempty"`
+	AgentTypeID   int64          `json:"agent_type_id,omitempty"`
+	AgentTypeName string         `json:"agent_type_name,omitempty"`
 	SessionID     string         `json:"session_id,omitempty"`
 	TraceID       string         `json:"trace_id,omitempty"`
 	Type          string         `json:"type"`
@@ -493,8 +495,10 @@ type runtimeDetectionListItem struct {
 }
 
 type runtimeDetectionAgentContext struct {
-	AgentID string `json:"agent_id"`
-	Name    string `json:"name"`
+	AgentID       string `json:"agent_id"`
+	Name          string `json:"name"`
+	AgentTypeID   int64  `json:"agent_type_id,omitempty"`
+	AgentTypeName string `json:"agent_type_name,omitempty"`
 }
 
 type runtimeDetectionSessionContext struct {
@@ -571,6 +575,7 @@ func runtimeDetectionFilterFromQuery(r *http.Request, limitDefault, limitMax int
 	}
 	return audit.RuntimeDetectionFilter{
 		AgentID:       strings.TrimSpace(q.Get("agent_id")),
+		AgentTypeID:   requestAgentTypeID(r),
 		SessionID:     strings.TrimSpace(q.Get("session_id")),
 		TraceID:       strings.TrimSpace(q.Get("trace_id")),
 		DetectionType: firstNonEmpty(strings.TrimSpace(q.Get("detection_type")), strings.TrimSpace(q.Get("type"))),
@@ -592,6 +597,8 @@ func runtimeDetectionListItemFromAudit(d audit.RuntimeDetection) runtimeDetectio
 		DetectionID:   d.DetectionID,
 		AgentID:       d.AgentID,
 		AgentName:     d.AgentName,
+		AgentTypeID:   d.AgentTypeID,
+		AgentTypeName: d.AgentTypeName,
 		SessionID:     d.SessionID,
 		TraceID:       d.TraceID,
 		Type:          d.DetectionType,
@@ -1134,8 +1141,10 @@ func (a *APIServer) handleRuntimeDetections(w http.ResponseWriter, r *http.Reque
 			Detection:                item,
 			Evidence:                 runtimeDetectionEvidenceItems(evidence),
 			Agent: runtimeDetectionAgentContext{
-				AgentID: d.AgentID,
-				Name:    firstNonEmpty(d.AgentName, d.AgentID),
+				AgentID:       d.AgentID,
+				Name:          firstNonEmpty(d.AgentName, d.AgentID),
+				AgentTypeID:   d.AgentTypeID,
+				AgentTypeName: d.AgentTypeName,
 			},
 			RuntimeSession: runtimeDetectionSessionContext{SessionID: d.SessionID, TraceID: d.TraceID},
 			Trace:          runtimeDetectionSessionContext{SessionID: d.SessionID, TraceID: d.TraceID},
@@ -1248,12 +1257,14 @@ func (a *APIServer) handleRuntimeDetectionsList(w http.ResponseWriter, r *http.R
 		"total":      total,
 		"items":      items,
 		"detections": items,
+		"list":       items,
 		"summary":    summary,
 		"count":      len(items),
 		"limit":      filter.Limit,
 		"offset":     filter.Offset,
 		"page":       filter.Offset/filter.Limit + 1,
 		"page_size":  filter.Limit,
+		"pagesize":   filter.Limit,
 	})
 }
 

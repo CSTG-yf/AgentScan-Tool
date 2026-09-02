@@ -844,6 +844,10 @@ func requestPage(r *http.Request, defaultPage, defaultPageSize, maxPageSize int)
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
 			pageSize = parsed
 		}
+	} else if v := strings.TrimSpace(q.Get("pagesize")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			pageSize = parsed
+		}
 	}
 	if pageSize > maxPageSize {
 		pageSize = maxPageSize
@@ -863,6 +867,19 @@ func parseAPITime(raw string) time.Time {
 		return parsed.UTC()
 	}
 	return time.Time{}
+}
+
+// requestAgentTypeID accepts the spelling used by the desktop contract and
+// the two common JSON/API spellings. A non-positive or malformed value means
+// "all types", preserving the gateway's existing tolerant query semantics.
+func requestAgentTypeID(r *http.Request) int64 {
+	q := r.URL.Query()
+	raw := firstNonEmpty(q.Get("AgenttypeId"), q.Get("agent_type_id"), q.Get("agentTypeId"))
+	value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
 }
 
 func (a *APIServer) handleRuntimeEventDetail(w http.ResponseWriter, r *http.Request, rawID string) {

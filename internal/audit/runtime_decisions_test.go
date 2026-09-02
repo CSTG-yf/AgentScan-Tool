@@ -72,3 +72,53 @@ func TestListRuntimeDecisionsJoinsDetectionMetadata(t *testing.T) {
 		t.Fatalf("joined detection metrics = confidence=%v events=%d, want confidence=%v events=%d", joined.Confidence, joined.EventCount, detection.Confidence, detection.EventCount)
 	}
 }
+
+func TestRuntimeDetectionAndAttackChainFilterByAgentType(t *testing.T) {
+	store, done := newTestStore(t)
+	defer done()
+
+	const agentTypeID = int64(701)
+	if _, err := store.db.Exec(`
+INSERT INTO agent_types (id, type_key, name, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?)`, agentTypeID, "test-agent-type", "Test Agent Type", time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatalf("insert agent type: %v", err)
+	}
+	if _, err := store.EnsureAgent(AgentIdentityInput{
+		AgentID: "typed-runtime-agent", AgentTypeID: agentTypeID,
+		AgentName: "Typed Runtime Agent", ObservedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("EnsureAgent: %v", err)
+	}
+	detection, err := store.RecordRuntimeDetection(RuntimeDetectionInput{
+		AgentID: "typed-runtime-agent", AgentName: "Typed Runtime Agent",
+		DetectionType: "type_filter_test", Category: "attack", Severity: "HIGH",
+		RuleID: "type-filter-rule", Title: "type filter", SeenAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("RecordRuntimeDetection: %v", err)
+	}
+
+	detections, err := store.ListRuntimeDetections(RuntimeDetectionFilter{AgentTypeID: agentTypeID, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRuntimeDetections by type: %v", err)
+	}
+	if len(detections) != 1 || detections[0].AgentTypeID != agentTypeID || detections[0].AgentTypeName != "Test Agent Type" {
+		t.Fatalf("detection type projection = %+v", detections)
+	}
+
+	chain, err := store.UpsertRuntimeAttackChain(RuntimeAttackChain{
+		AgentID: "typed-runtime-agent", AgentName: "Typed Runtime Agent",
+		AttackType: "type_filter_test", Severity: "HIGH", Status: AttackChainStatusActive,
+		StartTime: time.Now().UTC(), EndTime: time.Now().UTC(), DetectionID: detection.DetectionID,
+	}, nil)
+	if err != nil {
+		t.Fatalf("UpsertRuntimeAttackChain: %v", err)
+	}
+	chains, err := store.ListRuntimeAttackChains(AttackChainFilter{AgentTypeID: agentTypeID, Keyword: chain.AttackChainID, Sort: "time_asc", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListRuntimeAttackChains by type: %v", err)
+	}
+	if len(chains) != 1 || chains[0].AgentTypeID != agentTypeID || chains[0].AgentTypeName != "Test Agent Type" {
+		t.Fatalf("chain type projection = %+v", chains)
+	}
+}

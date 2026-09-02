@@ -39,6 +39,8 @@ type RuntimeDetection struct {
 	DetectionID     string         `json:"detection_id"`
 	AgentID         string         `json:"agent_id"`
 	AgentName       string         `json:"agent_name,omitempty"`
+	AgentTypeID     int64          `json:"agent_type_id,omitempty"`
+	AgentTypeName   string         `json:"agent_type_name,omitempty"`
 	SessionID       string         `json:"session_id,omitempty"`
 	TraceID         string         `json:"trace_id,omitempty"`
 	DetectionType   string         `json:"detection_type"`
@@ -323,6 +325,7 @@ func (in RuntimeDetectionInput) toDetection(detectionID string) RuntimeDetection
 // RuntimeDetectionFilter selects detections for the page and API.
 type RuntimeDetectionFilter struct {
 	AgentID       string
+	AgentTypeID   int64
 	SessionID     string
 	TraceID       string
 	DetectionType string
@@ -344,6 +347,15 @@ func runtimeDetectionWhereClause(f RuntimeDetectionFilter) (string, []any) {
 	if f.AgentID != "" {
 		conds = append(conds, "agent_id = ?")
 		args = append(args, f.AgentID)
+	}
+	if f.AgentTypeID > 0 {
+		conds = append(conds, `EXISTS (
+SELECT 1 FROM agents agent_type_filter
+WHERE agent_type_filter.id = runtime_detections.agent_id
+  AND COALESCE(agent_type_filter.agent_type_id, 0) = ?
+  AND COALESCE(agent_type_filter."delete", 0) = 0
+)`)
+		args = append(args, f.AgentTypeID)
 	}
 	if f.SessionID != "" {
 		conds = append(conds, "session_id = ?")
@@ -492,8 +504,10 @@ func (s *Store) ListRuntimeDetections(f RuntimeDetectionFilter) ([]RuntimeDetect
 	where, args := runtimeDetectionWhereClause(f)
 	args = append(args, f.Limit, f.Offset)
 	rows, err := s.queryDB(context.Background(), "runtime_detections_list", `
-SELECT detection_id, agent_id, COALESCE(agent_name, ''), COALESCE(session_id, ''),
-       COALESCE(trace_id, ''), detection_type, category, severity, confidence,
+	SELECT detection_id, agent_id, COALESCE(agent_name, ''),
+	       COALESCE(session_id, ''), COALESCE(trace_id, ''), detection_type, category, severity, confidence,
+		COALESCE((SELECT agent_type_id FROM agents WHERE id = runtime_detections.agent_id AND COALESCE("delete", 0) = 0), 0),
+		COALESCE((SELECT t.name FROM agents a JOIN agent_types t ON t.id = a.agent_type_id AND COALESCE(t."delete", 0) = 0 WHERE a.id = runtime_detections.agent_id AND COALESCE(a."delete", 0) = 0), ''),
        rule_id, COALESCE(rule_version, ''), COALESCE(source, ''), COALESCE(evaluation_job_id, ''), status, title, COALESCE(detail, ''), COALESCE(remediation, ''),
        COALESCE(attributes_json, ''), first_seen_at, last_seen_at, event_count
 FROM runtime_detections
@@ -517,7 +531,7 @@ LIMIT ? OFFSET ?`, args...)
 		)
 		if err := rows.Scan(
 			&d.DetectionID, &d.AgentID, &d.AgentName, &d.SessionID, &d.TraceID,
-			&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID, &d.RuleVersion, &d.Source, &d.EvaluationJobID,
+			&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.AgentTypeID, &d.AgentTypeName, &d.RuleID, &d.RuleVersion, &d.Source, &d.EvaluationJobID,
 			&d.Status, &d.Title, &d.Detail, &d.Remediation, &attrs,
 			&firstSeen, &lastSeen, &eventCount,
 		); err != nil {
@@ -658,14 +672,16 @@ func (s *Store) GetRuntimeDetectionDetail(detectionID string) (RuntimeDetection,
 		eventCount int64
 	)
 	err := s.db.QueryRowContext(context.Background(), `
-SELECT detection_id, agent_id, COALESCE(agent_name, ''), COALESCE(session_id, ''),
-       COALESCE(trace_id, ''), detection_type, category, severity, confidence,
+	SELECT detection_id, agent_id, COALESCE(agent_name, ''), COALESCE(session_id, ''),
+	       COALESCE(trace_id, ''), detection_type, category, severity, confidence,
+	       COALESCE((SELECT agent_type_id FROM agents WHERE id = runtime_detections.agent_id AND COALESCE("delete", 0) = 0), 0),
+	       COALESCE((SELECT t.name FROM agents a JOIN agent_types t ON t.id = a.agent_type_id AND COALESCE(t."delete", 0) = 0 WHERE a.id = runtime_detections.agent_id AND COALESCE(a."delete", 0) = 0), ''),
        rule_id, COALESCE(rule_version, ''), COALESCE(source, ''), COALESCE(evaluation_job_id, ''), status, title, COALESCE(detail, ''), COALESCE(remediation, ''),
        COALESCE(attributes_json, ''), first_seen_at, last_seen_at, event_count
 FROM runtime_detections WHERE detection_id = ? AND "delete" = 0`, detectionID,
 	).Scan(
 		&d.DetectionID, &d.AgentID, &d.AgentName, &d.SessionID, &d.TraceID,
-		&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.RuleID, &d.RuleVersion, &d.Source, &d.EvaluationJobID,
+		&d.DetectionType, &d.Category, &d.Severity, &confidence, &d.AgentTypeID, &d.AgentTypeName, &d.RuleID, &d.RuleVersion, &d.Source, &d.EvaluationJobID,
 		&d.Status, &d.Title, &d.Detail, &d.Remediation, &attrs,
 		&firstSeen, &lastSeen, &eventCount,
 	)

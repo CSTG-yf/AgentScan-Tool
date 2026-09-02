@@ -245,20 +245,25 @@ type pageEvent struct {
 }
 
 type pageAttackChainSnapshot struct {
-	CapturedAt string            `json:"capturedAt"`
-	Source     string            `json:"source"`
-	Chains     []pageAttackChain `json:"chains"`
-	Items      []pageAttackChain `json:"items,omitempty"`
-	Total      int               `json:"total,omitempty"`
-	Page       int               `json:"page,omitempty"`
-	PageSize   int               `json:"page_size,omitempty"`
-	Warning    string            `json:"warning,omitempty"`
+	CapturedAt     string            `json:"capturedAt"`
+	Source         string            `json:"source"`
+	Chains         []pageAttackChain `json:"chains"`
+	List           []pageAttackChain `json:"list"`
+	Items          []pageAttackChain `json:"items,omitempty"`
+	Total          int               `json:"total,omitempty"`
+	Page           int               `json:"page,omitempty"`
+	PageSize       int               `json:"page_size,omitempty"`
+	PageSizeLegacy int               `json:"pagesize,omitempty"`
+	Warning        string            `json:"warning,omitempty"`
 }
 
 type pageAttackChain struct {
 	ID            string                  `json:"id"`
 	TraceID       string                  `json:"traceId"`
 	SessionID     string                  `json:"sessionId"`
+	AgentID       string                  `json:"agentId"`
+	AgentTypeID   int64                   `json:"agentTypeId,omitempty"`
+	AgentTypeName string                  `json:"agentTypeName,omitempty"`
 	Agent         string                  `json:"agent"`
 	Runtime       string                  `json:"runtime"`
 	Category      string                  `json:"category"`
@@ -434,14 +439,16 @@ func (a *APIServer) handleAttackChains(w http.ResponseWriter, r *http.Request) {
 	}
 	page, pageSize := requestPage(r, 1, 100, 200)
 	a.writeJSON(w, http.StatusOK, pageAttackChainSnapshot{
-		CapturedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		Source:     "runtime-attack-chains",
-		Chains:     chains,
-		Items:      chains,
-		Total:      total,
-		Page:       page,
-		PageSize:   pageSize,
-		Warning:    pageAttackChainWarning(total),
+		CapturedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+		Source:         "runtime-attack-chains",
+		Chains:         chains,
+		List:           chains,
+		Items:          chains,
+		Total:          total,
+		Page:           page,
+		PageSize:       pageSize,
+		PageSizeLegacy: pageSize,
+		Warning:        pageAttackChainWarning(total),
 	})
 }
 
@@ -491,15 +498,18 @@ func (a *APIServer) handleAttackChainsSummary(w http.ResponseWriter, r *http.Req
 	chains := []pageAttackChain{}
 	q := r.URL.Query()
 	filter := audit.AttackChainFilter{
-		AgentID:    strings.TrimSpace(q.Get("agent_id")),
-		SessionID:  strings.TrimSpace(q.Get("session_id")),
-		TraceID:    strings.TrimSpace(q.Get("trace_id")),
-		AttackType: strings.TrimSpace(q.Get("attack_type")),
-		Severity:   strings.ToUpper(strings.TrimSpace(q.Get("severity"))),
-		Status:     attackChainStatusFilter(q.Get("status")),
-		StartTime:  parseAPITime(q.Get("start_time")),
-		EndTime:    parseAPITime(q.Get("end_time")),
-		Limit:      1000,
+		AgentID:     strings.TrimSpace(q.Get("agent_id")),
+		AgentTypeID: requestAgentTypeID(r),
+		SessionID:   strings.TrimSpace(q.Get("session_id")),
+		TraceID:     strings.TrimSpace(q.Get("trace_id")),
+		AttackType:  strings.TrimSpace(q.Get("attack_type")),
+		Severity:    strings.ToUpper(strings.TrimSpace(q.Get("severity"))),
+		Status:      attackChainStatusFilter(q.Get("status")),
+		Keyword:     strings.TrimSpace(q.Get("keyword")),
+		Sort:        strings.TrimSpace(q.Get("sort")),
+		StartTime:   parseAPITime(q.Get("start_time")),
+		EndTime:     parseAPITime(q.Get("end_time")),
+		Limit:       1000,
 	}
 	rows, err := a.store.ListRuntimeAttackChains(filter)
 	if err != nil {
@@ -535,16 +545,19 @@ func (a *APIServer) backendAttackChains(r *http.Request) ([]pageAttackChain, int
 		}
 	}
 	filter := audit.AttackChainFilter{
-		AgentID:    strings.TrimSpace(q.Get("agent_id")),
-		SessionID:  strings.TrimSpace(q.Get("session_id")),
-		TraceID:    strings.TrimSpace(q.Get("trace_id")),
-		AttackType: strings.TrimSpace(q.Get("attack_type")),
-		Severity:   strings.ToUpper(strings.TrimSpace(q.Get("severity"))),
-		Status:     attackChainStatusFilter(q.Get("status")),
-		StartTime:  parseAPITime(q.Get("start_time")),
-		EndTime:    parseAPITime(q.Get("end_time")),
-		Limit:      limit,
-		Offset:     offset,
+		AgentID:     strings.TrimSpace(q.Get("agent_id")),
+		AgentTypeID: requestAgentTypeID(r),
+		SessionID:   strings.TrimSpace(q.Get("session_id")),
+		TraceID:     strings.TrimSpace(q.Get("trace_id")),
+		AttackType:  strings.TrimSpace(q.Get("attack_type")),
+		Severity:    strings.ToUpper(strings.TrimSpace(q.Get("severity"))),
+		Status:      attackChainStatusFilter(q.Get("status")),
+		Keyword:     strings.TrimSpace(q.Get("keyword")),
+		Sort:        strings.TrimSpace(q.Get("sort")),
+		StartTime:   parseAPITime(q.Get("start_time")),
+		EndTime:     parseAPITime(q.Get("end_time")),
+		Limit:       limit,
+		Offset:      offset,
 	}
 	rows, err := a.store.ListRuntimeAttackChains(filter)
 	if err != nil {
@@ -679,12 +692,15 @@ func pageAttackChainFromRuntime(c audit.RuntimeAttackChain) pageAttackChain {
 		agent = c.AgentID
 	}
 	return pageAttackChain{
-		ID:        c.AttackChainID,
-		TraceID:   c.TraceID,
-		SessionID: c.SessionID,
-		Agent:     firstNonEmpty(agent, "Unknown Agent"),
-		Runtime:   "runtime-detection",
-		Category:  c.AttackType,
+		ID:            c.AttackChainID,
+		TraceID:       c.TraceID,
+		SessionID:     c.SessionID,
+		AgentID:       c.AgentID,
+		AgentTypeID:   c.AgentTypeID,
+		AgentTypeName: c.AgentTypeName,
+		Agent:         firstNonEmpty(agent, "Unknown Agent"),
+		Runtime:       "runtime-detection",
+		Category:      c.AttackType,
 		// Keep the page risk vocabulary lowercase; the frontend metadata map
 		// indexes these values directly (critical/high/medium/low/info).
 		Risk:      pageNormalizeRisk(c.Severity),
