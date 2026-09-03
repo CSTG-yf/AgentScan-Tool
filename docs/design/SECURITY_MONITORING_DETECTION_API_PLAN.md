@@ -187,6 +187,7 @@ Desktop POST job/action    ──>  Job Orchestrator / Executor Router
 | `GET /{id}/events` | Detection 证据事件 | 已实现 | 可保留 |
 | `PATCH /{id}` | 修改 Detection 状态 | 已实现 | 状态变更与响应执行没有强一致约束 |
 | `GET /api/v1/runtime-security/summary` | 检测汇总 | 已实现 | 可保留 |
+| `GET /api/v1/runtime-detections/summary/agent-types` | 按 AgentType 汇总异常 Detection，风险等级动态聚合 | 已实现 | 数据库聚合；支持既有检测筛选条件 |
 | `POST /api/v1/behavior-events` | Windows 进程守护事件入库 | 已实现 | 当前作为兼容入口归一化后进入 Detection Engine |
 | `POST /api/v1/jobs`，`kind=event_replay` | 历史事件重新检测 | 已实现 | 后端按范围读取事件并重放当前规则 |
 
@@ -241,6 +242,7 @@ Desktop POST job/action    ──>  Job Orchestrator / Executor Router
 | `GET /api/v1/attack-chains` | 攻击链列表 | 已实现 | 当前只读持久化链并返回数据库 `total`，无链时明确 warning |
 | `GET /api/v1/attack-chains/{id}` | 链路详情 | 已实现 | 可关联 Detection、Decision、Response |
 | `GET /api/v1/attack-chains/summary` | 汇总 | 已实现 | 当前只读数据库聚合 |
+| `GET /api/v1/attack-chains/summary/agent-types` | 按 AgentType 汇总攻击链数量与状态/严重度 | 已实现 | 数据库聚合；支持既有攻击链筛选条件 |
 | `POST /api/v1/jobs`，`kind=attack_chain_rebuild` | 历史攻击链重建 | 已实现 | 后端异步重建，记录 `rule_version` |
 
 改造前持久化方向正确，但仍有以下问题（本轮已关闭回退和 total 两项）：

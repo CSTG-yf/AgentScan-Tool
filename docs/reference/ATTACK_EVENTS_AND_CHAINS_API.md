@@ -1,6 +1,6 @@
 # 攻击事件与攻击链接口文档
 
-核对日期：2026-09-02。本文对应本次接口增强后的实现，依据当前路由、响应结构和数据库查询整理，未替代线上联调。
+核对日期：2026-09-03。本文对应当前接口实现，依据当前路由、响应结构和数据库查询整理，未替代线上联调。
 
 第 1～6 节为**当前接口**及其兼容约定；第 7 节为实现依据。示例中的 ID 和业务内容均为说明用数据，不是实际检测结果。
 
@@ -10,8 +10,10 @@
 | --- | --- | --- | --- |
 | 攻击事件列表 | GET | `/api/v1/runtime-detections?category=attack` | `detection_id` |
 | 攻击事件详情 | GET | `/api/v1/runtime-detections/{detection_id}` | 字符串 |
+| 异常事件 AgentType 汇总 | GET | `/api/v1/runtime-detections/summary/agent-types` | `agent_type_id` |
 | 攻击链列表 | GET | `/api/v1/attack-chains` | 列表中的 `id` |
 | 攻击链详情 | GET | `/api/v1/attack-chains/{attack_chain_id}` | 字符串 |
+| 攻击链 AgentType 汇总 | GET | `/api/v1/attack-chains/summary/agent-types` | `agent_type_id` |
 
 这里将“攻击事件”定义为检测引擎产生的安全检测记录（Detection），严格限定攻击类别时加 `category=attack`。不加该参数会查询其他类别的检测。`/api/v1/runtime-events` 是原始行为事件流，包含正常行为，不能直接当作攻击列表；一条 Detection 可以关联多条原始事件。
 
@@ -24,7 +26,9 @@ Authorization: Bearer <gateway-token>
 Accept: application/json
 ```
 
-也可使用 `X-DefenseClaw-Token: <gateway-token>`。以下四个查询均无请求体，不会启动扫描或重建攻击链，只读取已持久化数据。
+也可使用 `X-DefenseClaw-Token: <gateway-token>`。以下查询均无请求体，不会启动扫描或重建攻击链，只读取已持久化数据。
+
+AgentType 汇总接口同样只读已持久化数据，不会启动检测、扫描或攻击链重建。它们默认返回当前数据中实际出现的 Agent 类型；若记录没有可解析的类型，会归入 `agent_type_id=0`、`agent_type=unknown`。
 
 时间统一使用 RFC3339 / RFC3339Nano，例如 `2026-09-02T00:00:00Z`；带 `+08:00` 的查询值需正确 URL 编码。以下“可选”字段可能在 JSON 中被省略。
 
@@ -41,6 +45,7 @@ Accept: application/json
 | `agent_id` 实例筛选 | 已支持，不等于 Agent 类型 | 已支持，不等于 Agent 类型 |
 | 基础信息数组 `list` | 已返回 `list`，并保留 `items` / `detections` | 已返回 `list`，并保留 `chains` / `items` |
 | 根据 ID 查询详情 | 已支持 | 已支持 |
+| AgentType 维度汇总 | `/runtime-detections/summary/agent-types`，风险键动态聚合 | `/attack-chains/summary/agent-types`，按类型统计链数量 |
 
 ## 2. 攻击事件列表
 
@@ -198,6 +203,59 @@ Evidence 字段：
 
 可单独读取证据：`GET /api/v1/runtime-detections/{detection_id}/events`，直接返回 Evidence 数组。检测详情不直接返回攻击链 ID；不能仅凭相同 Agent 就断言两条记录属于同一攻击链。
 
+### 3.1 按 AgentType 汇总异常事件
+
+`GET /api/v1/runtime-detections/summary/agent-types`
+
+该接口按 `agents.agent_type_id` 将匹配的 `runtime_detections` 分组，适合异常事件检测页面的类型卡片或柱状图。也支持以下兼容路径：
+
+- `/api/v1/runtime-detections/summary/by-agent-type`
+- `/api/v1/runtime-detections/agent-type-summary`
+- `/api/v1/runtime-security/summary/agent-types`
+- `/api/v1/runtime-security/summary/by-agent-type`
+- `/api/v1/runtime-security/summary?group_by=agent_type`
+
+请求参数复用检测列表的筛选参数（`category`、`keyword`、`severity`、`status`、`source`、`agent_id`、`AgentTypeId` / `AgenttypeId`、`session_id`、`trace_id`、`start_time`、`end_time` 等）。`page`、`pagesize`、`limit`、`offset` 对类型汇总没有意义，会被忽略；`agent_type` / `agentType` 可按类型 key、名称或 ID 精确筛选。
+
+HTTP 200 响应：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `items` | AgentTypeSummary[] | 每个实际出现的 Agent 类型一项 |
+| `list` | AgentTypeSummary[] | `items` 的兼容副本 |
+| `total` / `count` | integer | 返回的 Agent 类型数量 |
+| `captured_at` | string(datetime) | 本次汇总读取时间 |
+| `source` | string | `runtime_detections` |
+
+`items[]` 字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `agent_type_id` | integer | Agent 类型 ID；无法关联类型时为 `0` |
+| `agent_type` | string | 类型 key 优先，其次为类型名称；未知类型为 `unknown` |
+| `agent_type_key` / `agent_type_name` | string | 类型目录中的 key / 名称，可选 |
+| `total_events` | integer | 匹配的异常 Detection 行数；不是证据事件 `event_count` 之和 |
+| `risk_counts` | object<string, integer> | 按实际 severity 动态聚合，key 统一转为小写；不会预置 `critical/high/medium/low/info` |
+| `blocked_events` / `open_events` | integer | 已缓解/阻断、仍开放的 Detection 数量，可选 |
+| `latest_at` | string(datetime) | 该类型最后一次 Detection 时间，可选 |
+
+缺失 severity 的记录计入 `risk_counts.unknown`，保证风险分项之和与 `total_events` 一致。例如：
+
+```json
+{
+  "items": [
+    {
+      "agent_type_id": 1,
+      "agent_type": "codex",
+      "total_events": 10,
+      "risk_counts": {"critical": 1, "high": 2, "medium": 3, "low": 4}
+    }
+  ],
+  "total": 1,
+  "count": 1
+}
+```
+
 ## 4. 攻击链接口
 
 ### 4.1 列表请求
@@ -338,6 +396,59 @@ HTTP 200：
 Node.kind 当前取 `entry/agent/llm/tool/mcp/data/network/defense`。Node.id、sourceEventId 都来自原始数据库事件数字主键的字符串形式。当前转换未填充 prompt 和 stack，不能据此假定已采集到提示词与调用栈。
 
 Node.evidence 是 target 或 detail 的截断摘要；完整内容查看 events。Edge 仅连接前后相邻节点，表示展示顺序，不是已验证的因果关系。原始事件顺序按关联 sequence，再按 timestamp 排列。
+
+### 4.5 按 AgentType 汇总攻击链
+
+`GET /api/v1/attack-chains/summary/agent-types`
+
+该接口按 `agents.agent_type_id` 聚合已持久化的 `runtime_attack_chains`，用于攻击链页面的 Agent 类型汇总。兼容路径：
+
+- `/api/v1/attack-chains/summary/by-agent-type`
+- `/api/v1/attack-chains/agent-type-summary`
+- `/api/v1/attack-chains/summary?group_by=agent_type`
+
+请求参数复用攻击链列表的筛选参数（`attack_type`、`keyword`、`severity`、`status`、`agent_id`、`AgentTypeId` / `AgenttypeId`、`session_id`、`trace_id`、`start_time`、`end_time` 等）。分页参数会被忽略；`agent_type` / `agentType` 可按类型 key、名称或 ID 精确筛选。
+
+HTTP 200 响应：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `items` | AgentTypeChainSummary[] | 每个实际出现的 Agent 类型一项 |
+| `list` | AgentTypeChainSummary[] | `items` 的兼容副本 |
+| `total` / `count` | integer | 返回的 Agent 类型数量 |
+| `captured_at` | string(datetime) | 本次汇总读取时间 |
+| `source` | string | `runtime_attack_chains` |
+
+`items[]` 字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `agent_type_id` | integer | Agent 类型 ID；无法关联类型时为 `0` |
+| `agent_type` | string | 类型 key 优先，其次为类型名称；未知类型为 `unknown` |
+| `agent_type_key` / `agent_type_name` | string | 类型目录中的 key / 名称，可选 |
+| `total_chains` | integer | 该 Agent 类型下的攻击链数量 |
+| `status_counts` | object<string, integer> | 实际链状态的动态计数（通常包含 `active`、`contained`） |
+| `severity_counts` | object<string, integer> | 实际链 severity 的动态计数，key 统一转为小写 |
+| `active_chains` / `contained_chains` | integer | 对应状态的快捷计数，可选 |
+| `latest_at` | string(datetime) | 该类型最后结束的攻击链时间，可选 |
+
+示例：
+
+```json
+{
+  "items": [
+    {
+      "agent_type_id": 1,
+      "agent_type": "codex",
+      "total_chains": 4,
+      "status_counts": {"active": 1, "contained": 3},
+      "severity_counts": {"high": 2, "critical": 2}
+    }
+  ],
+  "total": 1,
+  "count": 1
+}
+```
 
 ## 5. 错误与当前接入注意事项
 

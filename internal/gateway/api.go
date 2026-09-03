@@ -841,6 +841,11 @@ func (a *APIServer) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/runtime-events/", a.handleRuntimeEvents)
 	mux.HandleFunc("/api/v1/runtime-sessions", a.handleRuntimeSessions)
 	mux.HandleFunc("/api/v1/runtime-security/summary", a.handleRuntimeSecuritySummary)
+	// AgentType rollup for the anomaly-detection page. The grouped response
+	// is also available through runtime-detections/summary/agent-types; these
+	// aliases keep the runtime-security summary namespace discoverable.
+	mux.HandleFunc("/api/v1/runtime-security/summary/agent-types", a.handleRuntimeDetectionAgentTypeSummary)
+	mux.HandleFunc("/api/v1/runtime-security/summary/by-agent-type", a.handleRuntimeDetectionAgentTypeSummary)
 	mux.HandleFunc("/api/v1/runtime-security/mode", a.handleRuntimeSecurityMode)
 	// Phase-2 runtime detections: structured risk findings derived
 	// from unified runtime events by generic (agent-agnostic) rules.

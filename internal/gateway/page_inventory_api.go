@@ -425,6 +425,11 @@ func (a *APIServer) handleAttackChains(w http.ResponseWriter, r *http.Request) {
 			a.handleAttackChainsSummary(w, r)
 			return
 		}
+		switch rest {
+		case "summary/agent-types", "summary/by-agent-type", "agent-type-summary":
+			a.handleRuntimeAttackChainAgentTypeSummary(w, r)
+			return
+		}
 		a.handleAttackChainDetail(w, r, strings.Split(rest, "/")[0])
 		return
 	}
@@ -493,6 +498,11 @@ func (a *APIServer) handleAttackChainDetail(w http.ResponseWriter, r *http.Reque
 func (a *APIServer) handleAttackChainsSummary(w http.ResponseWriter, r *http.Request) {
 	if a.store == nil {
 		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit store unavailable"})
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("group_by")), "agent_type") ||
+		strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("groupBy")), "agentType") {
+		a.handleRuntimeAttackChainAgentTypeSummary(w, r)
 		return
 	}
 	chains := []pageAttackChain{}

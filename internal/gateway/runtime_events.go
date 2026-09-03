@@ -1098,6 +1098,11 @@ func (a *APIServer) handleRuntimeDetections(w http.ResponseWriter, r *http.Reque
 		a.handleRuntimeDetectionsList(w, r)
 		return
 	}
+	switch rest {
+	case "summary", "summary/agent-types", "summary/by-agent-type", "agent-type-summary":
+		a.handleRuntimeDetectionAgentTypeSummary(w, r)
+		return
+	}
 	parts := strings.Split(rest, "/")
 	detectionID := parts[0]
 	if detectionID == "" || strings.ContainsAny(detectionID, `/\`) {
@@ -1275,6 +1280,11 @@ func (a *APIServer) handleRuntimeSecuritySummary(w http.ResponseWriter, r *http.
 	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("group_by")), "agent_type") ||
+		strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("groupBy")), "agentType") {
+		a.handleRuntimeDetectionAgentTypeSummary(w, r)
 		return
 	}
 	filter := runtimeDetectionFilterFromQuery(r, 200, 1000)

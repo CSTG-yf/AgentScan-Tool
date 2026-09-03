@@ -874,7 +874,7 @@ func parseAPITime(raw string) time.Time {
 // "all types", preserving the gateway's existing tolerant query semantics.
 func requestAgentTypeID(r *http.Request) int64 {
 	q := r.URL.Query()
-	raw := firstNonEmpty(q.Get("AgenttypeId"), q.Get("agent_type_id"), q.Get("agentTypeId"))
+	raw := firstNonEmpty(q.Get("AgenttypeId"), q.Get("AgentTypeId"), q.Get("agent_type_id"), q.Get("agentTypeId"), q.Get("agentTypeID"))
 	value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 	if err != nil || value <= 0 {
 		return 0
