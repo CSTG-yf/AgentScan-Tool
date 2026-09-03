@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize)]
@@ -14,6 +16,48 @@ pub struct AttackChainSnapshot {
     page_size: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     warning: Option<String>,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttackChainAgentTypeSummary {
+    #[serde(default, alias = "agent_type_id")]
+    pub(crate) agent_type_id: i64,
+    #[serde(default, alias = "agent_type")]
+    pub(crate) agent_type: String,
+    #[serde(default, alias = "agent_type_key")]
+    pub(crate) agent_type_key: String,
+    #[serde(default, alias = "agent_type_name")]
+    pub(crate) agent_type_name: String,
+    #[serde(default, alias = "total_chains")]
+    pub(crate) total_chains: usize,
+    #[serde(default, alias = "status_counts")]
+    pub(crate) status_counts: BTreeMap<String, usize>,
+    #[serde(default, alias = "severity_counts")]
+    pub(crate) severity_counts: BTreeMap<String, usize>,
+    #[serde(default, alias = "active_chains")]
+    pub(crate) active_chains: usize,
+    #[serde(default, alias = "contained_chains")]
+    pub(crate) contained_chains: usize,
+    #[serde(default, alias = "latest_at")]
+    pub(crate) latest_at: String,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttackChainAgentTypeSummaryResponse {
+    #[serde(default)]
+    pub(crate) items: Vec<AttackChainAgentTypeSummary>,
+    #[serde(default)]
+    pub(crate) list: Vec<AttackChainAgentTypeSummary>,
+    #[serde(default)]
+    pub(crate) total: usize,
+    #[serde(default)]
+    pub(crate) count: usize,
+    #[serde(default, alias = "captured_at")]
+    pub(crate) captured_at: String,
+    #[serde(default)]
+    pub(crate) source: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -100,4 +144,15 @@ pub fn get_attack_chains(
         &format!("/api/v1/attack-chains?limit={limit}"),
     )
     .map_err(|error| format!("Go Gateway 暂不可用，攻击链重建只能由 Go 后端提供：{error}"))
+}
+
+#[tauri::command]
+pub fn get_attack_chain_agent_type_summaries(
+    app: tauri::AppHandle,
+) -> Result<AttackChainAgentTypeSummaryResponse, String> {
+    crate::commands::gateway_api::get_json::<AttackChainAgentTypeSummaryResponse>(
+        &app,
+        "/api/v1/attack-chains/summary/agent-types",
+    )
+    .map_err(|error| format!("获取 AgentType 攻击链汇总失败：{error}"))
 }

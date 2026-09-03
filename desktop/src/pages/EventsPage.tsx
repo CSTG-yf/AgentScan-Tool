@@ -5,6 +5,7 @@ import type { ColumnsType } from "antd/es/table";
 import {
   getRuntimeDetectionDetail,
   getRuntimeDetectionEvents,
+  getRuntimeDetectionAgentTypeSummaries,
   getRuntimeDetections,
   getRuntimeDecisions,
   getRuntimeDecisionDetail,
@@ -23,6 +24,7 @@ import { formatClock, formatTimestamp, staticRiskTag } from "../app/display";
 import { staticRiskMeta } from "../data/staticAssets";
 import type {
   RuntimeDetection,
+  RuntimeDetectionAgentTypeSummary,
   RuntimeDetectionDetail,
   RuntimeDetectionEvidenceEvent,
   RuntimeDetectionListQuery,
@@ -197,10 +199,18 @@ function attributesText(value?: Record<string, unknown>) {
   return JSON.stringify(value, null, 2);
 }
 
+function dynamicCountEntries(counts?: Record<string, number>) {
+  return Object.entries(counts ?? {})
+    .filter(([, count]) => Number.isFinite(count) && count > 0)
+    .sort(([left], [right]) => left.localeCompare(right));
+}
+
 export function EventsPage({ loading = false, onRefresh, refreshNonce = 0 }: EventsPageProps) {
   const [globalSummary, setGlobalSummary] = useState<RuntimeSecuritySummary>(emptySummary);
   const [selectedSummary, setSelectedSummary] = useState<RuntimeSecuritySummary>(emptySummary);
   const [agents, setAgents] = useState<RuntimeSecurityAgent[]>([]);
+  const [agentTypeSummaries, setAgentTypeSummaries] = useState<RuntimeDetectionAgentTypeSummary[]>([]);
+  const [agentTypeSummaryError, setAgentTypeSummaryError] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState<string>();
   const [detectionsResponse, setDetectionsResponse] = useState<RuntimeDetectionListResponse>(emptyDetectionList);
   const [timeline, setTimeline] = useState<RuntimeEventsTimelineBucket[]>([]);
@@ -253,14 +263,22 @@ export function EventsPage({ loading = false, onRefresh, refreshNonce = 0 }: Eve
   const loadOverview = useCallback(async () => {
     setOverviewLoading(true);
     try {
-      const [summary, agentRows, mode, decisionResponse] = await Promise.all([
+      const [summary, agentRows, agentTypeResponse, mode, decisionResponse] = await Promise.all([
         getRuntimeSecuritySummary(),
         getRuntimeSecurityAgents(200),
+        getRuntimeDetectionAgentTypeSummaries().catch((error) => {
+          setAgentTypeSummaryError(`读取 AgentType 异常事件汇总失败：${String(error)}`);
+          return undefined;
+        }),
         getRuntimeSecurityMode(),
         getRuntimeDecisions(500),
       ]);
       setGlobalSummary(summary);
       setAgents(agentRows);
+      if (agentTypeResponse) {
+        setAgentTypeSummaries(agentTypeResponse.items ?? agentTypeResponse.list ?? []);
+        setAgentTypeSummaryError("");
+      }
       setRuntimeMode(mode);
       setDecisions(decisionResponse.decisions ?? []);
       setSelectedAgentId((current) => current && agentRows.some((agent) => agent.agentId === current) ? current : undefined);
@@ -503,6 +521,53 @@ export function EventsPage({ loading = false, onRefresh, refreshNonce = 0 }: Eve
     : detections.find((detection) => detection.detectionId === selectedDetectionId);
   const evidenceEvents = detailEvents.length ? detailEvents : detail?.evidence ?? [];
 
+  const agentTypeSummaryColumns: ColumnsType<RuntimeDetectionAgentTypeSummary> = [
+    {
+      title: "AgentType",
+      width: 210,
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <Text strong>{row.agentType || row.agentTypeName || row.agentTypeKey || "unknown"}</Text>
+          <Text type="secondary">ID {row.agentTypeId}{row.agentTypeName ? ` · ${row.agentTypeName}` : ""}</Text>
+        </Space>
+      ),
+    },
+    {
+      title: "异常事件",
+      dataIndex: "totalEvents",
+      width: 110,
+      render: (value: number) => <Text strong>{value}</Text>,
+    },
+    {
+      title: "风险分布（后端动态）",
+      dataIndex: "riskCounts",
+      render: (value: Record<string, number>) => {
+        const entries = dynamicCountEntries(value);
+        return entries.length ? (
+          <Space wrap size={[4, 4]}>
+            {entries.map(([risk, count]) => <Tag key={risk}>{risk}: {count}</Tag>)}
+          </Space>
+        ) : <Text type="secondary">暂无风险等级</Text>;
+      },
+    },
+    {
+      title: "状态",
+      width: 170,
+      render: (_, row) => (
+        <Space wrap size={[4, 4]}>
+          <Tag color="gold">开放 {row.openEvents ?? 0}</Tag>
+          <Tag color="green">已阻断 {row.blockedEvents ?? 0}</Tag>
+        </Space>
+      ),
+    },
+    {
+      title: "最近发现",
+      dataIndex: "latestAt",
+      width: 176,
+      render: (value: string) => <Text className="mono">{formatTimestamp(value || "")}</Text>,
+    },
+  ];
+
   const columns: ColumnsType<RuntimeDetection> = [
     {
       title: "时间",
@@ -559,6 +624,7 @@ export function EventsPage({ loading = false, onRefresh, refreshNonce = 0 }: Eve
       </div>
 
       {dataError ? <Alert type="warning" showIcon message={dataError} /> : null}
+      {agentTypeSummaryError ? <Alert type="warning" showIcon message={agentTypeSummaryError} /> : null}
 
       <div className="event-summary-grid">
         <Card bordered={false} className="event-metric-card">
@@ -582,6 +648,24 @@ export function EventsPage({ loading = false, onRefresh, refreshNonce = 0 }: Eve
           <Text>窗口 {globalSummary.windowStart ? `${formatClock(globalSummary.windowStart)} - ${formatClock(globalSummary.windowEnd ?? "")}` : "-"}</Text>
         </Card>
       </div>
+
+      <Card
+        bordered={false}
+        className="workspace-table-card agent-type-summary-card"
+        title="AgentType 异常事件汇总"
+        extra={<Text type="secondary">数据库实时聚合 · {agentTypeSummaries.length} 类</Text>}
+      >
+        <Table
+          rowKey={(row) => `${row.agentTypeId}:${row.agentType}`}
+          size="small"
+          loading={overviewLoading}
+          columns={agentTypeSummaryColumns}
+          dataSource={agentTypeSummaries}
+          pagination={false}
+          scroll={{ x: 820 }}
+          locale={{ emptyText: "暂无按 AgentType 聚合的异常事件" }}
+        />
+      </Card>
 
       <div className="event-workbench">
         <aside className="event-side-panel static-agent-panel">

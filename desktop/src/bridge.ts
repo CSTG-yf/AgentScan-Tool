@@ -4,6 +4,7 @@ import type {
   AgentInventory,
   AgentSnapshot,
   AgentTraceSnapshot,
+  AttackChainAgentTypeSummaryResponse,
   AttackChainSnapshot,
   ChangeCursor,
   EnvironmentSnapshot,
@@ -47,6 +48,7 @@ import type {
   RangeStatus,
   RuntimeDecisionDetail,
   RuntimeDecisionListResponse,
+  RuntimeDetectionAgentTypeSummaryResponse,
   RuntimeDetectionDetail,
   RuntimeDetectionEvidenceEvent,
   RuntimeDetectionListQuery,
@@ -106,6 +108,24 @@ const defaultRuntimeSecuritySummary = (): RuntimeSecuritySummary => ({
   blocked: 0,
   highOrAbove: 0,
   coveredAgents: 0,
+});
+
+const defaultRuntimeDetectionAgentTypeSummaries = (): RuntimeDetectionAgentTypeSummaryResponse => ({
+  items: [],
+  list: [],
+  total: 0,
+  count: 0,
+  capturedAt: new Date().toISOString(),
+  source: "desktop preview",
+});
+
+const defaultAttackChainAgentTypeSummaries = (): AttackChainAgentTypeSummaryResponse => ({
+  items: [],
+  list: [],
+  total: 0,
+  count: 0,
+  capturedAt: new Date().toISOString(),
+  source: "desktop preview",
 });
 
 const defaultRuntimeDetectionList = (): RuntimeDetectionListResponse => ({
@@ -636,6 +656,19 @@ export async function getRuntimeSecuritySummary(agentId?: string): Promise<Runti
   return invoke<RuntimeSecuritySummary>("get_runtime_security_summary", { agentId: agentId ?? null });
 }
 
+export async function getRuntimeDetectionAgentTypeSummaries(): Promise<RuntimeDetectionAgentTypeSummaryResponse> {
+  if (!inTauri()) return defaultRuntimeDetectionAgentTypeSummaries();
+  const response = await invoke<RuntimeDetectionAgentTypeSummaryResponse>("get_runtime_detection_agent_type_summaries");
+  const items = response.items?.length ? response.items : response.list ?? [];
+  return {
+    ...response,
+    items,
+    list: response.list?.length ? response.list : items,
+    total: response.total ?? items.length,
+    count: response.count ?? items.length,
+  };
+}
+
 export async function getRuntimeSecurityAgents(limit = 200): Promise<RuntimeSecurityAgent[]> {
   if (!inTauri()) return [];
   return invoke<RuntimeSecurityAgent[]>("get_runtime_security_agents", { limit });
@@ -695,6 +728,19 @@ export async function getRuntimeEventsTimeline(query: RuntimeEventsTimelineQuery
 
 export async function getAttackChains(limit = 500): Promise<AttackChainSnapshot> {
   return inTauri() ? invoke<AttackChainSnapshot>("get_attack_chains", { limit }) : defaultAttackChainSnapshot();
+}
+
+export async function getAttackChainAgentTypeSummaries(): Promise<AttackChainAgentTypeSummaryResponse> {
+  if (!inTauri()) return defaultAttackChainAgentTypeSummaries();
+  const response = await invoke<AttackChainAgentTypeSummaryResponse>("get_attack_chain_agent_type_summaries");
+  const items = response.items?.length ? response.items : response.list ?? [];
+  return {
+    ...response,
+    items,
+    list: response.list?.length ? response.list : items,
+    total: response.total ?? items.length,
+    count: response.count ?? items.length,
+  };
 }
 
 /** Phase-3 runtime decisions: list, detail, and security mode. */

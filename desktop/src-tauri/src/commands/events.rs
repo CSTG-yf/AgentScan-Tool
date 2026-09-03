@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Phase-2 structured runtime detection (runtime_detections row).
@@ -96,6 +98,48 @@ pub struct RuntimeSecurityAgent {
     pub(crate) latest_at: String,
     #[serde(default, alias = "runtime_status")]
     pub(crate) runtime_status: String,
+}
+
+/// AgentType-level anomaly totals returned by the Go gateway. The backend
+/// keeps risk buckets data-driven, so the map deliberately has no enum.
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeDetectionAgentTypeSummary {
+    #[serde(default, alias = "agent_type_id")]
+    pub(crate) agent_type_id: i64,
+    #[serde(default, alias = "agent_type")]
+    pub(crate) agent_type: String,
+    #[serde(default, alias = "agent_type_key")]
+    pub(crate) agent_type_key: String,
+    #[serde(default, alias = "agent_type_name")]
+    pub(crate) agent_type_name: String,
+    #[serde(default, alias = "total_events")]
+    pub(crate) total_events: usize,
+    #[serde(default, alias = "risk_counts")]
+    pub(crate) risk_counts: BTreeMap<String, usize>,
+    #[serde(default, alias = "blocked_events")]
+    pub(crate) blocked_events: usize,
+    #[serde(default, alias = "open_events")]
+    pub(crate) open_events: usize,
+    #[serde(default, alias = "latest_at")]
+    pub(crate) latest_at: String,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeDetectionAgentTypeSummaryResponse {
+    #[serde(default)]
+    pub(crate) items: Vec<RuntimeDetectionAgentTypeSummary>,
+    #[serde(default)]
+    pub(crate) list: Vec<RuntimeDetectionAgentTypeSummary>,
+    #[serde(default)]
+    pub(crate) total: usize,
+    #[serde(default)]
+    pub(crate) count: usize,
+    #[serde(default, alias = "captured_at")]
+    pub(crate) captured_at: String,
+    #[serde(default)]
+    pub(crate) source: String,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -307,6 +351,17 @@ pub fn get_runtime_security_summary(
         &path_with_query("/api/v1/runtime-security/summary", &query),
     )
     .map_err(|error| format!("获取运行态检测总览失败：{error}"))
+}
+
+#[tauri::command]
+pub fn get_runtime_detection_agent_type_summaries(
+    app: tauri::AppHandle,
+) -> Result<RuntimeDetectionAgentTypeSummaryResponse, String> {
+    crate::commands::gateway_api::get_json::<RuntimeDetectionAgentTypeSummaryResponse>(
+        &app,
+        "/api/v1/runtime-detections/summary/agent-types",
+    )
+    .map_err(|error| format!("获取 AgentType 异常事件汇总失败：{error}"))
 }
 
 #[tauri::command]

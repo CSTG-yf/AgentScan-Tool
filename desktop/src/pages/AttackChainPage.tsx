@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CaretRightOutlined, DownloadOutlined, PauseOutlined, ReloadOutlined, StepBackwardOutlined, StepForwardOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Empty, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { chainKindTag, defenseModeColors, defenseModeLabels, eventStatusTag, formatClock, formatTimestamp, staticRiskTag } from "../app/display";
 import { chainKindMeta } from "../data/attackChains";
 import { staticRiskMeta } from "../data/staticAssets";
-import { createAttackChainRebuildJob, getScanStatus } from "../bridge";
-import type { AttackChain, AttackChainSnapshot, ChainEvidenceRow, GatewayAuditEvent, GatewayAuditSnapshot, RangeMode, StaticRisk } from "../types";
+import { createAttackChainRebuildJob, getAttackChainAgentTypeSummaries, getScanStatus } from "../bridge";
+import type { AttackChain, AttackChainAgentTypeSummary, AttackChainSnapshot, ChainEvidenceRow, GatewayAuditEvent, GatewayAuditSnapshot, RangeMode, StaticRisk } from "../types";
 
 const { Text, Title } = Typography;
 
@@ -52,6 +52,12 @@ function chainIdentity(chain: AttackChain) {
 
 function filenameSafe(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, "-").replace(/^-+|-+$/g, "") || "attack-chain";
+}
+
+function dynamicCountEntries(counts?: Record<string, number>) {
+  return Object.entries(counts ?? {})
+    .filter(([, count]) => Number.isFinite(count) && count > 0)
+    .sort(([left], [right]) => left.localeCompare(right));
 }
 
 function buildAgentSummaries(chains: AttackChain[]): ChainAgentSummary[] {
@@ -107,6 +113,9 @@ async function waitForChainRebuild(scanId?: string): Promise<void> {
 export function AttackChainPage({ defenseMode, gatewayAudit, snapshot, loading = false, onRefresh }: AttackChainPageProps) {
   const [selectedAgentKey, setSelectedAgentKey] = useState("");
   const [chainId, setChainId] = useState("");
+  const [agentTypeSummaries, setAgentTypeSummaries] = useState<AttackChainAgentTypeSummary[]>([]);
+  const [agentTypeSummaryLoading, setAgentTypeSummaryLoading] = useState(false);
+  const [agentTypeSummaryError, setAgentTypeSummaryError] = useState("");
   const [stepIndex, setStepIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -116,6 +125,23 @@ export function AttackChainPage({ defenseMode, gatewayAudit, snapshot, loading =
     [snapshot],
   );
   const agentSummaries = useMemo(() => buildAgentSummaries(chains), [chains]);
+
+  const loadAgentTypeSummaries = useCallback(async () => {
+    setAgentTypeSummaryLoading(true);
+    try {
+      const response = await getAttackChainAgentTypeSummaries();
+      setAgentTypeSummaries(response.items ?? response.list ?? []);
+      setAgentTypeSummaryError("");
+    } catch (error) {
+      setAgentTypeSummaryError(`读取 AgentType 攻击链汇总失败：${String(error)}`);
+    } finally {
+      setAgentTypeSummaryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAgentTypeSummaries();
+  }, [loadAgentTypeSummaries, snapshot?.capturedAt]);
 
   useEffect(() => {
     if (!agentSummaries.length) {
@@ -188,6 +214,7 @@ export function AttackChainPage({ defenseMode, gatewayAudit, snapshot, loading =
     setRefreshing(true);
     try {
       await onRefresh();
+      await loadAgentTypeSummaries();
       message.success("已刷新后端攻击链数据");
     } catch (error) {
       message.error(`刷新攻击链失败：${String(error)}`);
@@ -202,6 +229,7 @@ export function AttackChainPage({ defenseMode, gatewayAudit, snapshot, loading =
       const accepted = await createAttackChainRebuildJob(5000);
       await waitForChainRebuild(accepted.scan_id);
       await onRefresh?.();
+      await loadAgentTypeSummaries();
       message.success("攻击链重建完成");
     } catch (error) {
       message.error(`重建攻击链失败：${String(error)}`);
@@ -209,6 +237,55 @@ export function AttackChainPage({ defenseMode, gatewayAudit, snapshot, loading =
       setRebuilding(false);
     }
   };
+
+  const agentTypeSummaryColumns: ColumnsType<AttackChainAgentTypeSummary> = [
+    {
+      title: "AgentType",
+      width: 210,
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <Text strong>{row.agentType || row.agentTypeName || row.agentTypeKey || "unknown"}</Text>
+          <Text type="secondary">ID {row.agentTypeId}{row.agentTypeName ? ` · ${row.agentTypeName}` : ""}</Text>
+        </Space>
+      ),
+    },
+    {
+      title: "攻击链",
+      dataIndex: "totalChains",
+      width: 100,
+      render: (value: number) => <Text strong>{value}</Text>,
+    },
+    {
+      title: "状态分布（后端动态）",
+      dataIndex: "statusCounts",
+      render: (value: Record<string, number>) => {
+        const entries = dynamicCountEntries(value);
+        return entries.length ? (
+          <Space wrap size={[4, 4]}>
+            {entries.map(([status, count]) => <Tag key={status}>{status}: {count}</Tag>)}
+          </Space>
+        ) : <Text type="secondary">暂无状态</Text>;
+      },
+    },
+    {
+      title: "严重度分布",
+      dataIndex: "severityCounts",
+      render: (value: Record<string, number>) => {
+        const entries = dynamicCountEntries(value);
+        return entries.length ? (
+          <Space wrap size={[4, 4]}>
+            {entries.map(([severity, count]) => <Tag key={severity}>{severity}: {count}</Tag>)}
+          </Space>
+        ) : <Text type="secondary">暂无严重度</Text>;
+      },
+    },
+    {
+      title: "最近结束",
+      dataIndex: "latestAt",
+      width: 176,
+      render: (value: string) => <Text className="mono">{formatTimestamp(value || "")}</Text>,
+    },
+  ];
 
   const evidenceColumns: ColumnsType<ChainEvidenceRow> = [
     { title: "步骤", dataIndex: "index", width: 82, render: (value) => <Tag color="geekblue">#{value}</Tag> },
@@ -298,6 +375,25 @@ export function AttackChainPage({ defenseMode, gatewayAudit, snapshot, loading =
       </div>
 
       {snapshot?.warning ? <Alert type="warning" showIcon message={snapshot.warning} /> : null}
+      {agentTypeSummaryError ? <Alert type="warning" showIcon message={agentTypeSummaryError} /> : null}
+
+      <Card
+        bordered={false}
+        className="workspace-table-card agent-type-summary-card"
+        title="AgentType 攻击链汇总"
+        extra={<Text type="secondary">数据库实时聚合 · {agentTypeSummaries.length} 类</Text>}
+      >
+        <Table
+          rowKey={(row) => `${row.agentTypeId}:${row.agentType}`}
+          size="small"
+          loading={loading || agentTypeSummaryLoading}
+          columns={agentTypeSummaryColumns}
+          dataSource={agentTypeSummaries}
+          pagination={false}
+          scroll={{ x: 920 }}
+          locale={{ emptyText: "暂无按 AgentType 聚合的攻击链" }}
+        />
+      </Card>
 
       <div className="chain-workbench">
         <aside className="chain-agent-panel static-agent-panel">

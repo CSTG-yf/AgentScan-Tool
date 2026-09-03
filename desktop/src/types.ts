@@ -366,6 +366,51 @@ export interface RuntimeSecuritySummary {
   windowEnd?: string;
 }
 
+/** Database-backed anomaly counts grouped by the governed Agent type. */
+export interface RuntimeDetectionAgentTypeSummary {
+  agentTypeId: number;
+  agentType: string;
+  agentTypeKey?: string;
+  agentTypeName?: string;
+  totalEvents: number;
+  riskCounts: Record<string, number>;
+  blockedEvents?: number;
+  openEvents?: number;
+  latestAt?: string;
+}
+
+export interface RuntimeDetectionAgentTypeSummaryResponse {
+  items: RuntimeDetectionAgentTypeSummary[];
+  list?: RuntimeDetectionAgentTypeSummary[];
+  total: number;
+  count: number;
+  capturedAt?: string;
+  source?: string;
+}
+
+/** Database-backed attack-chain counts grouped by the governed Agent type. */
+export interface AttackChainAgentTypeSummary {
+  agentTypeId: number;
+  agentType: string;
+  agentTypeKey?: string;
+  agentTypeName?: string;
+  totalChains: number;
+  statusCounts: Record<string, number>;
+  severityCounts: Record<string, number>;
+  activeChains?: number;
+  containedChains?: number;
+  latestAt?: string;
+}
+
+export interface AttackChainAgentTypeSummaryResponse {
+  items: AttackChainAgentTypeSummary[];
+  list?: AttackChainAgentTypeSummary[];
+  total: number;
+  count: number;
+  capturedAt?: string;
+  source?: string;
+}
+
 export interface RuntimeSecurityAgent {
   agentId: string;
   agentName: string;
