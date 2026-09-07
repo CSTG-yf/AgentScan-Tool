@@ -150,8 +150,9 @@ WHERE idempotency_key = ? AND "delete" = 0 LIMIT 1`, in.IdempotencyKey).Scan(&ex
 	err := s.db.QueryRowContext(context.Background(), `
 SELECT decision_id FROM runtime_decisions
 WHERE detection_id = ? AND decision = ? AND created_at >= ? AND "delete" = 0
+  AND COALESCE(policy_version,'') = ?
 ORDER BY created_at DESC LIMIT 1`,
-		in.DetectionID, in.Decision, cutoff,
+		in.DetectionID, in.Decision, cutoff, in.PolicyVersion,
 	).Scan(&existingID)
 	if err == nil {
 		// Same verdict inside the dedup window: nothing new to audit.

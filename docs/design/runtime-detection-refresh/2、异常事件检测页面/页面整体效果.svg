@@ -1,0 +1,315 @@
+<svg width="1976" height="1248" viewBox="0 0 1976 1248" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="softShadow" x="-20%" y="-30%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <filter id="navGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#43d8d0" flood-opacity="0.38"/>
+    </filter>
+  </defs>
+  <style>
+    .font { font-family: "Inter", "Microsoft YaHei", "PingFang SC", Arial, sans-serif; }
+    .sidebar { fill: #071421; }
+    .topbar { fill: #ffffff; stroke: #e5ebf4; stroke-width: 1; }
+    .canvas { fill: #f3f7fb; }
+    .card { fill: #ffffff; stroke: #e6edf6; stroke-width: 1; rx: 8; filter: url(#softShadow); }
+    .subcard { fill: #f8fafc; stroke: #e1e8f2; stroke-width: 1; rx: 8; }
+    .subcardActive { fill: #eaf4ff; stroke: #2f8cff; stroke-width: 1.6; rx: 8; }
+    .input { fill: #ffffff; stroke: #d8e1ee; stroke-width: 1; rx: 8; }
+    .selectDark { fill: #071c35; stroke: #113b66; stroke-width: 1; rx: 8; }
+    .navActive { fill: #0b2b34; stroke: #36d4c6; stroke-width: 1.6; rx: 14; }
+    .tagBlue { fill: #e7f1ff; stroke: #9bc9ff; rx: 5; }
+    .tagRed { fill: #260d12; rx: 5; }
+    .tagOrange { fill: #331407; rx: 5; }
+    .tagGreen { fill: #102b1d; rx: 5; }
+    .tagPurple { fill: #24113f; rx: 5; }
+    .tableHead { fill: #fbfcfe; stroke: #e8eef6; stroke-width: 1; }
+    .tableRow { fill: #ffffff; stroke: #edf2f7; stroke-width: 1; }
+    .tableRowHover { fill: #f6f9ff; stroke: #bfd9ff; stroke-width: 1; }
+    .line { stroke: #edf2f7; stroke-width: 1; }
+    .title { fill: #0f1f35; font-size: 31px; font-weight: 800; }
+    .h2 { fill: #14213a; font-size: 22px; font-weight: 780; }
+    .strong { fill: #14213a; font-size: 15px; font-weight: 760; }
+    .body { fill: #334155; font-size: 14px; }
+    .muted { fill: #718096; font-size: 13px; }
+    .small { fill: #8a99ad; font-size: 12px; }
+    .mono { font-family: "Cascadia Code", Consolas, monospace; }
+    .eyebrow { fill: #1d6fff; font-size: 11px; font-weight: 800; letter-spacing: 4px; }
+    .navText { fill: #8aa0b8; font-size: 14px; }
+    .navTextActive { fill: #ecfeff; font-size: 14px; font-weight: 700; }
+    .logo { fill: #d9f7f7; font-size: 15px; font-weight: 800; }
+    .logoSub { fill: #7e94ad; font-size: 8px; font-weight: 800; letter-spacing: 2px; }
+  </style>
+
+  <rect width="1976" height="1248" class="canvas"/>
+  <rect width="218" height="1248" class="sidebar"/>
+
+  <g class="font">
+    <g transform="translate(20 25)">
+      <rect width="36" height="36" rx="10" fill="#55d9d6" filter="url(#navGlow)"/>
+      <path d="M18 9 L27 13 L27 23 C27 27 23 30 18 32 C13 30 9 27 9 23 L9 13 Z" fill="none" stroke="#064052" stroke-width="2"/>
+      <path d="M14 19 L17 22 L23 15" fill="none" stroke="#064052" stroke-width="2" stroke-linecap="round"/>
+      <text x="48" y="15" class="logo">TraceBastion</text>
+      <text x="48" y="27" class="logoSub">AGENT SECURITY CONTROL</text>
+      <text x="48" y="38" class="logoSub">PLANE</text>
+    </g>
+
+    <g transform="translate(30 115)">
+      <text y="0" class="navText">⌁  安全总览</text>
+      <text y="42" class="navText">♜  靶场控制</text>
+      <text y="84" class="navText">◇  Agent 治理中心</text>
+      <text y="126" class="navText">◎  Agent 检测</text>
+      <text y="168" class="navText">▦  静态资源检测</text>
+      <g transform="translate(-20 188)">
+        <rect width="190" height="38" class="navActive"/>
+        <text x="22" y="25" class="navTextActive">▤  事件检测</text>
+      </g>
+      <text y="258" class="navText">▧  攻击链</text>
+      <text y="300" class="navText">⚙  系统设置</text>
+      <text y="342" class="navText">⌘  告警中心</text>
+      <text y="384" class="navText">▣  行为追踪</text>
+      <text y="426" class="navText">▥  策略中心</text>
+      <text y="468" class="navText">♡  报告与证据</text>
+    </g>
+
+    <rect x="218" y="0" width="1758" height="84" class="topbar"/>
+    <text x="248" y="31" class="eyebrow">WINDOWS 安全工作台</text>
+    <g transform="translate(1088 22)">
+      <rect width="58" height="36" rx="10" fill="#071c35"/>
+      <text x="17" y="24" fill="#9fb6cf" font-size="14">◉</text>
+      <text x="39" y="24" fill="#9fb6cf" font-size="14">☰</text>
+      <rect x="70" width="664" height="42" rx="10" fill="#ffffff" stroke="#d6e2f1"/>
+      <text x="86" y="26" class="muted">全局防护模式</text>
+      <rect x="154" y="7" width="194" height="28" rx="8" fill="#071c35"/>
+      <text x="170" y="26" fill="#aebdd0" font-size="13">Baseline</text>
+      <rect x="222" y="7" width="70" height="28" rx="7" fill="#123b63"/>
+      <text x="242" y="26" fill="#eaf4ff" font-size="13">Observe</text>
+      <text x="306" y="26" fill="#aebdd0" font-size="13">Action</text>
+      <rect x="362" y="10" width="72" height="22" rx="7" fill="#0b3359"/>
+      <text x="382" y="26" fill="#7fc2ff" font-size="12">Observe</text>
+      <text x="444" y="26" class="muted">观察审计，检测本机 Agent 和靶场流量但不阻断</text>
+      <rect x="748" y="6" width="100" height="30" rx="10" fill="#071c35"/>
+      <text x="773" y="26" fill="#ffffff" font-size="13">刷新状态</text>
+    </g>
+
+    <g transform="translate(248 118)">
+      <text class="eyebrow">RUNTIME DETECTION</text>
+      <text y="42" class="title">事件检测</text>
+      <text y="69" class="body">基于 Agent 运行时事件识别提示词注入、工具滥用、异常外联、凭证访问等异常行为。</text>
+      <g transform="translate(1328 48)">
+        <rect width="98" height="30" rx="8" fill="#071c35"/>
+        <text x="24" y="20" fill="#ffffff" font-size="13">导出报告</text>
+        <rect x="110" width="138" height="30" rx="8" fill="#43d4b7"/>
+        <text x="132" y="20" fill="#ffffff" font-size="13">重放历史检测</text>
+        <rect x="260" width="100" height="30" rx="8" fill="#071c35"/>
+        <text x="286" y="20" fill="#ffffff" font-size="13">刷新结果</text>
+      </g>
+    </g>
+
+    <g transform="translate(248 213)">
+      <rect width="410" height="128" class="card"/>
+      <text x="18" y="31" class="muted">覆盖 Agent</text>
+      <text x="18" y="81" fill="#1d6fff" font-size="38" font-weight="800">7</text>
+      <text x="70" y="80" class="muted" font-weight="700">Agents</text>
+      <text x="18" y="107" class="body">来自后端 Agent 与事件归属聚合</text>
+    </g>
+    <g transform="translate(672 213)">
+      <rect width="410" height="128" class="card"/>
+      <text x="18" y="31" class="muted">异常事件总数</text>
+      <text x="18" y="81" fill="#7c3aed" font-size="38" font-weight="800">1,284</text>
+      <text x="138" y="80" class="muted" font-weight="700">Events</text>
+      <text x="18" y="107" class="body">全局 runtime_detections 聚合结果</text>
+    </g>
+    <g transform="translate(1096 213)">
+      <rect width="410" height="128" class="card"/>
+      <text x="18" y="31" class="muted">攻击事件数量</text>
+      <text x="18" y="81" fill="#f97316" font-size="38" font-weight="800">342</text>
+      <text x="112" y="80" class="muted" font-weight="700">Attacks</text>
+      <text x="18" y="107" class="body">category=attack 的检测记录</text>
+    </g>
+    <g transform="translate(1520 213)">
+      <rect width="410" height="128" class="card"/>
+      <text x="18" y="31" class="muted">高危及以上</text>
+      <text x="18" y="81" fill="#ef4444" font-size="38" font-weight="800">91</text>
+      <text x="92" y="80" class="muted" font-weight="700">High+</text>
+      <text x="18" y="107" class="body">critical 12 / high 79 / unknown 4</text>
+    </g>
+
+    <g transform="translate(248 356)">
+      <rect width="224" height="675" class="card"/>
+      <text x="14" y="28" class="muted" font-weight="700">Agents</text>
+      <rect x="190" y="13" width="20" height="20" rx="6" fill="#071c35"/>
+      <text x="196" y="28" fill="#ffffff" font-size="12">7</text>
+      <g transform="translate(14 44)">
+        <rect width="196" height="82" class="subcardActive"/>
+        <text x="12" y="27" class="strong">全部 Agent</text>
+        <text x="12" y="48" class="small">runtime-detections</text>
+        <text x="12" y="71" class="muted">1,284 Events</text>
+        <text x="144" y="71" fill="#ff4d4f" font-size="12" font-weight="700">342 Attacks</text>
+      </g>
+      <g transform="translate(14 134)">
+        <rect width="196" height="82" class="subcard"/>
+        <text x="12" y="27" class="strong">AgentRange / OpsPilot</text>
+        <text x="12" y="48" class="small">codex-agent</text>
+        <text x="12" y="71" class="muted">428 Events</text>
+        <text x="148" y="71" fill="#ff4d4f" font-size="12" font-weight="700">42 High+</text>
+      </g>
+      <g transform="translate(14 224)">
+        <rect width="196" height="82" class="subcard"/>
+        <text x="12" y="27" class="strong">OpenClaw</text>
+        <text x="12" y="48" class="small">openclaw</text>
+        <text x="12" y="71" class="muted">311 Events</text>
+        <text x="148" y="71" fill="#ff4d4f" font-size="12" font-weight="700">28 High+</text>
+      </g>
+      <g transform="translate(14 314)">
+        <rect width="196" height="82" class="subcard"/>
+        <text x="12" y="27" class="strong">System Environment</text>
+        <text x="12" y="48" class="small">未知 Agent 类型</text>
+        <text x="12" y="71" class="muted">96 Events</text>
+        <text x="154" y="71" class="muted">7 Open</text>
+      </g>
+      <g transform="translate(14 404)">
+        <rect width="196" height="82" class="subcard"/>
+        <text x="12" y="27" class="strong">Claude Code</text>
+        <text x="12" y="48" class="small">claude-code</text>
+        <text x="12" y="71" class="muted">82 Events</text>
+        <text x="154" y="71" class="muted">5 Open</text>
+      </g>
+      <g transform="translate(14 494)">
+        <rect width="196" height="82" class="subcard"/>
+        <text x="12" y="27" class="strong">Cline</text>
+        <text x="12" y="48" class="small">cline</text>
+        <text x="12" y="71" class="muted">21 Events</text>
+        <text x="154" y="71" class="muted">0 High+</text>
+      </g>
+    </g>
+
+    <g transform="translate(488 356)">
+      <rect width="1442" height="86" class="card"/>
+      <text x="18" y="40" class="h2">全部 Agent / 异常事件</text>
+      <text x="18" y="65" class="body">1,284 Events · 342 Attacks · 168 Open · 64 Mitigated</text>
+      <text x="1300" y="30" class="mono small">runtime-detections</text>
+    </g>
+
+    <g transform="translate(488 458)">
+      <rect width="154" height="94" class="subcardActive"/>
+      <text x="15" y="31" class="strong">全部检测</text>
+      <text x="15" y="63" class="strong">1,284 Events</text>
+      <text x="15" y="82" class="muted">342 Attacks</text>
+      <rect x="164" width="154" height="94" class="subcard"/>
+      <text x="179" y="31" class="strong">Codex Agent</text>
+      <text x="179" y="63" class="strong">428 Events</text>
+      <text x="179" y="82" fill="#ff4d4f" font-size="12">38 High+</text>
+      <rect x="328" width="154" height="94" class="subcard"/>
+      <text x="343" y="31" class="strong">Claude Code</text>
+      <text x="343" y="63" class="strong">311 Events</text>
+      <text x="343" y="82" fill="#ff4d4f" font-size="12">28 Attacks</text>
+      <rect x="492" width="154" height="94" class="subcard"/>
+      <text x="507" y="31" class="strong">Cursor</text>
+      <text x="507" y="63" class="strong">194 Events</text>
+      <text x="507" y="82" class="muted">20 Open</text>
+      <rect x="656" width="154" height="94" class="subcard"/>
+      <text x="671" y="31" class="strong">unknown</text>
+      <text x="671" y="63" class="strong">29 Events</text>
+      <text x="671" y="82" class="muted">risk_counts.unknown</text>
+      <rect x="820" width="154" height="94" class="subcard"/>
+      <text x="835" y="31" class="strong">已阻断</text>
+      <text x="835" y="63" class="strong">64 Events</text>
+      <text x="835" y="82" class="muted">mitigated / blocked</text>
+    </g>
+
+    <g transform="translate(488 576)">
+      <rect width="1442" height="455" class="card"/>
+      <g transform="translate(16 16)">
+        <rect width="980" height="30" class="input"/>
+        <text x="14" y="20" class="muted">⌕  搜索 Detection、Agent、Session、Trace、规则或说明</text>
+        <rect x="1010" width="136" height="30" class="selectDark"/>
+        <text x="1042" y="20" fill="#ffffff" font-size="13">全部类别</text>
+        <rect x="1158" width="136" height="30" class="selectDark"/>
+        <text x="1190" y="20" fill="#ffffff" font-size="13">全部风险</text>
+        <rect x="1306" width="104" height="30" class="selectDark"/>
+        <text x="1330" y="20" fill="#ffffff" font-size="13">全部状态</text>
+      </g>
+      <g transform="translate(16 58)">
+        <text x="0" y="17" class="strong">异常事件</text>
+        <rect x="76" y="-3" width="116" height="26" rx="6" fill="#071c35"/>
+        <text x="94" y="15" fill="#ffffff" font-size="12">category=attack</text>
+        <rect x="202" y="-3" width="108" height="26" rx="6" fill="#fff7e6" stroke="#ffd591"/>
+        <text x="219" y="15" fill="#ad4e00" font-size="12">severity=high</text>
+        <text x="1324" y="17" class="muted">1,284 项检测</text>
+      </g>
+      <g transform="translate(16 92)">
+        <rect width="1410" height="42" class="tableHead"/>
+        <text x="16" y="27" class="strong">时间</text>
+        <text x="178" y="27" class="strong">异常事件</text>
+        <text x="528" y="27" class="strong">Agent</text>
+        <text x="752" y="27" class="strong">风险</text>
+        <text x="862" y="27" class="strong">状态</text>
+        <text x="976" y="27" class="strong">会话 / Trace</text>
+        <text x="1190" y="27" class="strong">证据</text>
+        <text x="1280" y="27" class="strong">来源</text>
+
+        <g transform="translate(0 42)">
+          <rect width="1410" height="70" class="tableRowHover"/>
+          <text x="16" y="30" class="body">2026/09/05 15:22:31</text>
+          <text x="178" y="26" class="strong">疑似提示词注入</text>
+          <text x="178" y="49" class="muted">prompt_injection / rule-prompt-001</text>
+          <text x="528" y="26" class="strong">AgentRange / OpsPilot</text>
+          <text x="528" y="49" class="mono small">agentrange-opspilot</text>
+          <rect x="752" y="19" width="52" height="24" class="tagRed"/>
+          <text x="765" y="36" fill="#ffb4ab" font-size="12" font-weight="700">高风险</text>
+          <rect x="862" y="19" width="52" height="24" class="tagOrange"/>
+          <text x="875" y="36" fill="#ffd591" font-size="12" font-weight="700">待处理</text>
+          <text x="976" y="30" class="mono small">trace-b103</text>
+          <text x="1205" y="30" class="body">2</text>
+          <text x="1280" y="30" class="muted">runtime_detection</text>
+        </g>
+        <g transform="translate(0 112)">
+          <rect width="1410" height="70" class="tableRow"/>
+          <text x="16" y="30" class="body">2026/09/05 15:19:04</text>
+          <text x="178" y="26" class="strong">敏感工具链调用</text>
+          <text x="178" y="49" class="muted">tool_abuse / rule-tool-027</text>
+          <text x="528" y="26" class="strong">Build Assistant</text>
+          <text x="528" y="49" class="mono small">agent-build</text>
+          <rect x="752" y="19" width="52" height="24" class="tagRed"/>
+          <text x="765" y="36" fill="#ffb4ab" font-size="12" font-weight="700">严重</text>
+          <rect x="862" y="19" width="52" height="24" class="tagGreen"/>
+          <text x="875" y="36" fill="#9ae6b4" font-size="12" font-weight="700">已缓解</text>
+          <text x="976" y="30" class="mono small">sess-47a9</text>
+          <text x="1205" y="30" class="body">5</text>
+          <text x="1280" y="30" class="muted">correlation_engine</text>
+        </g>
+        <g transform="translate(0 182)">
+          <rect width="1410" height="70" class="tableRow"/>
+          <text x="16" y="30" class="body">2026/09/05 15:11:48</text>
+          <text x="178" y="26" class="strong">会话中出现异常外联</text>
+          <text x="178" y="49" class="muted">network_exfiltration / rule-net-014</text>
+          <text x="528" y="26" class="strong">Research Bot</text>
+          <text x="528" y="49" class="mono small">agent-research</text>
+          <rect x="752" y="19" width="52" height="24" class="tagOrange"/>
+          <text x="765" y="36" fill="#ffd591" font-size="12" font-weight="700">中风险</text>
+          <rect x="862" y="19" width="52" height="24" class="tagBlue"/>
+          <text x="875" y="36" fill="#1d6fff" font-size="12" font-weight="700">已处理</text>
+          <text x="976" y="30" class="mono small">trace-78cc</text>
+          <text x="1205" y="30" class="body">3</text>
+          <text x="1280" y="30" class="muted">runtime_detection</text>
+        </g>
+        <g transform="translate(0 252)">
+          <rect width="1410" height="70" class="tableRow"/>
+          <text x="16" y="30" class="body">2026/09/05 15:02:17</text>
+          <text x="178" y="26" class="strong">凭证访问路径异常</text>
+          <text x="178" y="49" class="muted">credential_access / rule-secret-008</text>
+          <text x="528" y="26" class="strong">OpenClaw</text>
+          <text x="528" y="49" class="mono small">openclaw</text>
+          <rect x="752" y="19" width="52" height="24" class="tagRed"/>
+          <text x="765" y="36" fill="#ffb4ab" font-size="12" font-weight="700">高风险</text>
+          <rect x="862" y="19" width="52" height="24" class="tagOrange"/>
+          <text x="875" y="36" fill="#ffd591" font-size="12" font-weight="700">待处理</text>
+          <text x="976" y="30" class="mono small">trace-02ff</text>
+          <text x="1205" y="30" class="body">4</text>
+          <text x="1280" y="30" class="muted">runtime_detection</text>
+        </g>
+      </g>
+    </g>
+  </g>
+</svg>

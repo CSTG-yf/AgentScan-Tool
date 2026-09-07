@@ -47,38 +47,7 @@ type pageStaticResourceScanSettings struct {
 }
 
 func (a *APIServer) handleDesktopScanSchedule(w http.ResponseWriter, r *http.Request) {
-	if a.store == nil {
-		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit store is not attached"})
-		return
-	}
-	switch r.Method {
-	case http.MethodGet:
-		settings := defaultPageScanScheduleSettings()
-		if ok, err := a.store.LoadJSONSetting(desktopScanScheduleSettingKey, &settings); err != nil {
-			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		} else if !ok {
-			settings = defaultPageScanScheduleSettings()
-		}
-		a.writeJSON(w, http.StatusOK, settings.normalize())
-	case http.MethodPut:
-		var settings pageScanScheduleSettings
-		if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
-			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
-			return
-		}
-		settings = settings.normalize()
-		if err := a.store.SaveJSONSetting(desktopScanScheduleSettingKey, settings); err != nil {
-			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if a.logger != nil {
-			_ = a.logger.LogActionCtx(r.Context(), string(audit.ActionConfigUpdate), desktopScanScheduleSettingKey, "desktop scan schedule updated via API")
-		}
-		a.writeJSON(w, http.StatusOK, settings)
-	default:
-		a.writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-	}
+	a.handlePageRefreshSettings(w, r)
 }
 
 func (a *APIServer) handleStaticResourceScanSettings(w http.ResponseWriter, r *http.Request) {
@@ -189,11 +158,11 @@ func staticResourceScanSettingUpdates(settings pageStaticResourceScanSettings) m
 func defaultPageScanScheduleSettings() pageScanScheduleSettings {
 	return pageScanScheduleSettings{
 		Version:           1,
-		Environment:       pageScanTaskSchedule{Enabled: true, IntervalSec: 30},
+		Environment:       pageScanTaskSchedule{Enabled: true, IntervalSec: 10},
 		AgentDiscovery:    pageScanTaskSchedule{Enabled: true, IntervalSec: 15},
-		StaticAssets:      pageScanTaskSchedule{Enabled: true, IntervalSec: 300},
-		BehaviorTrace:     pageScanTaskSchedule{Enabled: true, IntervalSec: 5},
-		EventDetection:    pageScanTaskSchedule{Enabled: true, IntervalSec: 15},
+		StaticAssets:      pageScanTaskSchedule{Enabled: true, IntervalSec: 10},
+		BehaviorTrace:     pageScanTaskSchedule{Enabled: true, IntervalSec: 15},
+		EventDetection:    pageScanTaskSchedule{Enabled: true, IntervalSec: 8},
 		ProcessGuardAudit: pageScanTaskSchedule{Enabled: true, IntervalSec: 10},
 		GatewayAudit:      pageScanTaskSchedule{Enabled: true, IntervalSec: 10},
 		RangeStatus:       pageScanTaskSchedule{Enabled: true, IntervalSec: 30},
@@ -205,11 +174,11 @@ func (s pageScanScheduleSettings) normalize() pageScanScheduleSettings {
 		s = defaultPageScanScheduleSettings()
 	}
 	s.Version = 1
-	s.Environment = s.Environment.normalize(30)
+	s.Environment = s.Environment.normalize(10)
 	s.AgentDiscovery = s.AgentDiscovery.normalize(15)
-	s.StaticAssets = s.StaticAssets.normalize(300)
-	s.BehaviorTrace = s.BehaviorTrace.normalize(5)
-	s.EventDetection = s.EventDetection.normalize(15)
+	s.StaticAssets = s.StaticAssets.normalize(10)
+	s.BehaviorTrace = s.BehaviorTrace.normalize(15)
+	s.EventDetection = s.EventDetection.normalize(8)
 	s.ProcessGuardAudit = s.ProcessGuardAudit.normalize(10)
 	s.GatewayAudit = s.GatewayAudit.normalize(10)
 	s.RangeStatus = s.RangeStatus.normalize(30)

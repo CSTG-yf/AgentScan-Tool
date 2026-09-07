@@ -22,23 +22,23 @@ const scanTaskKeys: ScanTaskKey[] = [
 ];
 
 const scanTaskCopy: Record<ScanTaskKey, { title: string; description: string }> = {
-  environment: { title: "环境状态", description: "检测 Gateway、AgentRange 和进程守护服务状态。" },
+  environment: { title: "安全总览", description: "刷新总览中的环境、Agent、风险事件和攻击链摘要。" },
   agentDiscovery: { title: "Agent 发现", description: "重新枚举系统中的 Agent 进程和运行时信息。" },
   staticAssets: { title: "静态资源页面刷新", description: "刷新配置、技能、MCP、提示词等静态资源页面数据。" },
   behaviorTrace: { title: "行为追踪页面刷新", description: "刷新 Agent 进程、命令和文件访问轨迹。" },
   eventDetection: { title: "事件检测页面刷新", description: "刷新风险事件归并和检测结果展示。" },
-  processGuardAudit: { title: "进程守护审计", description: "读取本机进程守护服务产生的审计记录。" },
-  gatewayAudit: { title: "网关审计", description: "读取 TraceBastion Gateway 审计事件。" },
+  processGuardAudit: { title: "攻击链页面刷新", description: "刷新攻击链汇总和列表。" },
+  gatewayAudit: { title: "告警中心页面刷新", description: "刷新异常检测和响应动作告警。" },
   rangeStatus: { title: "靶场状态", description: "检测 AgentRange 配置和服务运行状态。" },
 };
 
 const defaultScanSettings = (): ScanScheduleSettings => ({
   version: 1,
-  environment: { enabled: true, intervalSec: 30 },
+  environment: { enabled: true, intervalSec: 10 },
   agentDiscovery: { enabled: true, intervalSec: 15 },
-  staticAssets: { enabled: true, intervalSec: 300 },
-  behaviorTrace: { enabled: true, intervalSec: 5 },
-  eventDetection: { enabled: true, intervalSec: 15 },
+  staticAssets: { enabled: true, intervalSec: 10 },
+  behaviorTrace: { enabled: true, intervalSec: 15 },
+  eventDetection: { enabled: true, intervalSec: 8 },
   processGuardAudit: { enabled: true, intervalSec: 10 },
   gatewayAudit: { enabled: true, intervalSec: 10 },
   rangeStatus: { enabled: true, intervalSec: 30 },

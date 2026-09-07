@@ -538,7 +538,7 @@ func (w *InstallWatcher) processPending(ctx context.Context) {
 
 	for _, work := range ready {
 		if len(work.RescanTypes) > 0 {
-			w.runRescanCycleForTypes(ctx, work.RescanTypes...)
+			w.runTrackedRescan(ctx, "watcher", work.RescanTypes...)
 			continue
 		}
 		evt := work.Event

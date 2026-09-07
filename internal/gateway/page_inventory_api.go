@@ -258,6 +258,8 @@ type pageAttackChainSnapshot struct {
 }
 
 type pageAttackChain struct {
+	RawStatus     string                  `json:"rawStatus"`
+	RawSeverity   string                  `json:"rawSeverity"`
 	ID            string                  `json:"id"`
 	TraceID       string                  `json:"traceId"`
 	SessionID     string                  `json:"sessionId"`
@@ -702,6 +704,8 @@ func pageAttackChainFromRuntime(c audit.RuntimeAttackChain) pageAttackChain {
 		agent = c.AgentID
 	}
 	return pageAttackChain{
+		RawStatus:     c.Status,
+		RawSeverity:   c.Severity,
 		ID:            c.AttackChainID,
 		TraceID:       c.TraceID,
 		SessionID:     c.SessionID,

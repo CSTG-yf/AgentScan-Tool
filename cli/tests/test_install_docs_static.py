@@ -23,7 +23,6 @@ BASH_INSTALL_LINES = (
 )
 
 DOC_INSTALL_COMMANDS = {
-    "README.md": BASH_INSTALL_LINES,
     "docs/QUICKSTART.md": BASH_INSTALL_LINES,
     "docs/INSTALL.md": BASH_INSTALL_LINES
     + (
@@ -58,8 +57,13 @@ INSTALLER_FILES = (
 
 
 def test_quickstart_docs_do_not_pipe_main_installer() -> None:
+    # The fork's README installs this checkout. Upstream release snippets
+    # remain pinned in the supporting DefenseClaw installation guides.
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "git clone https://github.com/CSTG-yf/AgentScan-Tool.git" in readme
+    assert "raw.githubusercontent.com/cisco-ai-defense/defenseclaw/" not in readme
     for rel, expected_lines in DOC_INSTALL_COMMANDS.items():
-        text = (ROOT / rel).read_text()
+        text = (ROOT / rel).read_text(encoding="utf-8")
         assert "raw.githubusercontent.com/cisco-ai-defense/defenseclaw/main/scripts/install.sh" not in text
         assert "raw.githubusercontent.com/cisco-ai-defense/defenseclaw/main/scripts/install.ps1" not in text
         for expected in expected_lines:
@@ -68,7 +72,7 @@ def test_quickstart_docs_do_not_pipe_main_installer() -> None:
 
 def test_installer_help_does_not_pipe_main_installer() -> None:
     for rel in INSTALLER_FILES:
-        text = (ROOT / rel).read_text()
+        text = (ROOT / rel).read_text(encoding="utf-8")
         assert "defenseclaw/main" not in text
 
 

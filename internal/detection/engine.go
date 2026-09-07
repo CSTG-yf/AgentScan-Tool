@@ -25,6 +25,7 @@
 package detection
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -83,9 +84,12 @@ type EvidenceSpec struct {
 // policy engine: every recorded detection flows into the unified
 // decision → response → attack-chain pipeline.
 type Engine struct {
-	store  *audit.Store
-	rules  []Rule
-	window time.Duration
+	store        *audit.Store
+	rules        []Rule
+	configMu     sync.Mutex
+	configSeeded bool
+	configCache  map[int64]runtimeConfigEntry
+	window       time.Duration
 	// maxWindowEvents caps the correlation window query so a noisy
 	// session cannot blow up per-event evaluation cost.
 	maxWindowEvents int
@@ -120,6 +124,9 @@ func NewEngine(store *audit.Store, rules []Rule) *Engine {
 	}
 	if e.store != nil {
 		e.policy = NewPolicyEngine(store)
+		// Materialize builtin configuration at startup. A transient failure
+		// is retried by configured(), which returns it to preview callers.
+		_, _ = e.configured(0)
 	}
 	if len(e.rules) == 0 {
 		e.rules = nil
@@ -144,23 +151,37 @@ func (e *Engine) Policy() *PolicyEngine {
 // must be cheap and failure-tolerant: detection problems never break
 // the request path.
 func (e *Engine) EvaluateEvent(eventID int64) {
-	e.evaluateEvent(eventID, "")
+	_ = e.evaluateEvent(eventID, "")
 }
 
 // EvaluateEventForJob is used by historical replay jobs. It preserves the
 // normal live-event behaviour while attaching the replay job id to every
 // detection created or refreshed by the evaluation.
-func (e *Engine) EvaluateEventForJob(eventID int64, jobID string) {
-	e.evaluateEvent(eventID, jobID)
+func (e *Engine) EvaluateEventForJob(eventID int64, jobID string) error {
+	return e.evaluateEvent(eventID, jobID)
 }
 
-func (e *Engine) evaluateEvent(eventID int64, evaluationJobID string) {
-	if e == nil || e.store == nil || eventID <= 0 || len(e.rules) == 0 {
-		return
+func (e *Engine) evaluateEvent(eventID int64, evaluationJobID string) error {
+	if e == nil || e.store == nil || eventID <= 0 {
+		return fmt.Errorf("runtime detection engine or event unavailable")
 	}
 	event, ok, err := e.store.GetRuntimeEvent(eventID)
-	if err != nil || !ok {
-		return
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("runtime event %d not found", eventID)
+	}
+	typeID, err := e.store.RuntimeAgentTypeID(event.CanonicalAgentID)
+	if err != nil {
+		return err
+	}
+	entry, err := e.configured(typeID)
+	if err != nil {
+		return err
+	}
+	if !entry.config.Enabled {
+		return nil
 	}
 	window := e.loadWindow(event)
 	ctx := &EvalContext{
@@ -169,12 +190,15 @@ func (e *Engine) evaluateEvent(eventID int64, evaluationJobID string) {
 		Now:                time.Now().UTC(),
 		MaliciousResources: e.loadMaliciousResources(),
 	}
-	for _, rule := range e.rules {
+	for _, rule := range entry.rules {
 		results := rule.Evaluate(ctx)
 		for _, res := range results {
-			e.record(event, rule, res, evaluationJobID)
+			if err := e.record(event, rule, res, evaluationJobID, entry.config.RiskPolicy); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 // loadMaliciousResources serves the static-fusion cache with a TTL so
@@ -243,9 +267,9 @@ func (e *Engine) loadWindow(ev audit.BehaviorEvent) []audit.BehaviorEvent {
 
 // record persists one rule verdict with evidence links. Sequence
 // numbers follow the evidence slice order (chain order).
-func (e *Engine) record(trigger audit.BehaviorEvent, rule Rule, res DetectionResult, evaluationJobID string) {
+func (e *Engine) record(trigger audit.BehaviorEvent, rule configuredRule, res DetectionResult, evaluationJobID string, riskPolicy audit.RuntimeRiskPolicy) error {
 	if res.DetectionType == "" {
-		return
+		return nil
 	}
 	source := "runtime_detection"
 	if len(res.Evidence) > 1 {
@@ -268,7 +292,7 @@ func (e *Engine) record(trigger audit.BehaviorEvent, rule Rule, res DetectionRes
 		Severity:        res.Severity,
 		Confidence:      res.Confidence,
 		RuleID:          rule.ID(),
-		RuleVersion:     RuleVersion,
+		RuleVersion:     rule.Version(),
 		Source:          source,
 		EvaluationJobID: evaluationJobID,
 		Title:           res.Title,
@@ -293,11 +317,12 @@ func (e *Engine) record(trigger audit.BehaviorEvent, rule Rule, res DetectionRes
 		})
 		seq++
 	}
-	d, _ := e.store.RecordRuntimeDetection(in)
-	if e.policy != nil {
+	d, err := e.store.RecordRuntimeDetection(in)
+	if err == nil && e.policy != nil {
 		// Phase 3: detection → decision → response → attack chain.
 		// ProcessDetection re-reads the merged detection + evidence
 		// so escalations see the full chain.
-		e.policy.ProcessDetection(d, nil)
+		e.policy.processDetectionWithPolicy(d, nil, riskPolicy)
 	}
+	return err
 }

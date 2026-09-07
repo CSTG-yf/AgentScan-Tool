@@ -176,7 +176,7 @@ func (w *InstallWatcher) rescanLoopForTypes(ctx context.Context, targetTypes []I
 
 	// Bootstrap a baseline immediately so already-installed targets are not
 	// blind for the first full interval after startup.
-	w.runRescanCycleForTypes(ctx, targetTypes...)
+	w.runTrackedRescan(ctx, "scheduler", targetTypes...)
 
 	timer := time.NewTimer(interval)
 	defer timer.Stop()
@@ -186,8 +186,75 @@ func (w *InstallWatcher) rescanLoopForTypes(ctx context.Context, targetTypes []I
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			w.runRescanCycleForTypes(ctx, targetTypes...)
+			w.runTrackedRescan(ctx, "scheduler", targetTypes...)
 			timer.Reset(interval)
+		}
+	}
+}
+
+// runTrackedRescan gives watcher and periodic scans the same durable job
+// lifecycle used by manual API scans. The scan itself remains owned by the
+// watcher so its debounce, content gating, and resource lineage stay intact.
+func (w *InstallWatcher) runTrackedRescan(ctx context.Context, trigger string, targetTypes ...InstallType) {
+	if w == nil {
+		return
+	}
+	if w.store == nil {
+		w.runRescanCycleForTypes(ctx, targetTypes...)
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	job := audit.ScanJob{
+		JobID: "scan_resource_scan_" + uuid.NewString()[:8], Kind: "resource_scan",
+		TaskType: "static_assets", Mode: "incremental", Trigger: trigger,
+		Scope:  map[string]any{"resource_types": installTypesLabel(targetTypes)},
+		Status: "running", Phase: "scanning", StartedAt: now, CreatedAt: now,
+	}
+	if err := w.store.CreateScanJob(job); err != nil {
+		fmt.Fprintf(os.Stderr, "[rescan] create tracked job: %v\n", err)
+		w.runRescanCycleForTypes(ctx, targetTypes...)
+		return
+	}
+	jobCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go w.watchTrackedJobCancellation(jobCtx, job.JobID, cancel, done)
+	w.runRescanCycleForTypes(jobCtx, targetTypes...)
+	close(done)
+	cancel()
+	if current, ok, err := w.store.GetScanJob(job.JobID); err == nil && ok && (current.Status == "cancelled" || current.CancelRequested) {
+		return
+	}
+	job.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := jobCtx.Err(); err != nil && ctx.Err() != nil {
+		job.Status = "cancelled"
+		job.Phase = "cancelled"
+		job.CancelRequested = true
+		job.Error = err.Error()
+	} else {
+		job.Status = "completed"
+		job.Phase = "completed"
+		job.Progress = 100
+	}
+	if err := w.store.UpdateScanJob(job); err != nil {
+		fmt.Fprintf(os.Stderr, "[rescan] update tracked job %s: %v\n", job.JobID, err)
+	}
+}
+
+func (w *InstallWatcher) watchTrackedJobCancellation(ctx context.Context, jobID string, cancel context.CancelFunc, done <-chan struct{}) {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			return
+		case <-ticker.C:
+			job, ok, err := w.store.GetScanJob(jobID)
+			if err == nil && ok && (job.Status == "cancelled" || job.CancelRequested) {
+				cancel()
+				return
+			}
 		}
 	}
 }

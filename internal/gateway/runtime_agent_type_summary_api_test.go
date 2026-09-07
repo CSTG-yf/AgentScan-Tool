@@ -120,6 +120,44 @@ func TestRuntimeAgentTypeSummaryAPIs(t *testing.T) {
 	if chainItem.StatusCounts[audit.AttackChainStatusActive] != 1 || chainItem.StatusCounts[audit.AttackChainStatusContained] != 1 {
 		t.Fatalf("chain status counts = %+v", chainItem.StatusCounts)
 	}
+	if chainItem.CoveredAgents != 1 || len(chainItem.Agents) != 1 || chainItem.Agents[0].TotalChains != 2 || chainItem.Agents[0].HighOrAbove != 1 {
+		t.Fatalf("instance summary contract = %+v", chainItem)
+	}
+	for _, status := range []string{"blocked", "mitigated", "contained"} {
+		query := "?agent_id=api-summary-agent&severity=CUSTOM-RISK&status=" + status + "&page=1&page_size=1"
+		summaryRec := httptest.NewRecorder()
+		api.handleAttackChains(summaryRec, httptest.NewRequest(http.MethodGet, "/api/v1/attack-chains/summary/agent-types"+query, nil))
+		var summary struct {
+			Items []audit.RuntimeAttackChainAgentTypeSummary `json:"items"`
+		}
+		if err := json.Unmarshal(summaryRec.Body.Bytes(), &summary); err != nil || summaryRec.Code != http.StatusOK {
+			t.Fatalf("filtered summary: %s, %v", summaryRec.Body.String(), err)
+		}
+		if len(summary.Items) != 1 || summary.Items[0].TotalChains != 1 || summary.Items[0].CoveredAgents != 1 || summary.Items[0].Agents[0].HighOrAbove != 0 {
+			t.Fatalf("filtered summary: %+v", summary)
+		}
+		listRec := httptest.NewRecorder()
+		api.handleAttackChains(listRec, httptest.NewRequest(http.MethodGet, "/api/v1/attack-chains"+query, nil))
+		var list pageAttackChainSnapshot
+		if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil || listRec.Code != http.StatusOK {
+			t.Fatalf("filtered list: %s, %v", listRec.Body.String(), err)
+		}
+		if list.Total != 1 || len(list.Chains) != 1 || list.Chains[0].AgentID != "api-summary-agent" || list.Chains[0].RawStatus != "contained" || list.Chains[0].RawSeverity != "CUSTOM-RISK" {
+			t.Fatalf("list identity/raw status contract: %+v", list)
+		}
+		detailRec := httptest.NewRecorder()
+		api.handleAttackChains(detailRec, httptest.NewRequest(http.MethodGet, "/api/v1/attack-chains/"+list.Chains[0].ID, nil))
+		var detail struct {
+			AttackChain audit.RuntimeAttackChain `json:"attack_chain"`
+			Responses   []audit.ResponseAction   `json:"responses"`
+		}
+		if err := json.Unmarshal(detailRec.Body.Bytes(), &detail); err != nil || detailRec.Code != http.StatusOK {
+			t.Fatalf("detail: %s, %v", detailRec.Body.String(), err)
+		}
+		if detail.AttackChain.Status != "contained" || len(detail.Responses) != 0 {
+			t.Fatalf("contained chain must not synthesize an execution record: %+v", detail)
+		}
+	}
 
 	filtered := httptest.NewRecorder()
 	api.handleRuntimeDetectionAgentTypeSummary(filtered, httptest.NewRequest(http.MethodGet, "/api/v1/runtime-detections/summary/agent-types?agent_type=api-summary-codex", nil))

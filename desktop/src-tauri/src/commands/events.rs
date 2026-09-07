@@ -115,6 +115,8 @@ pub struct RuntimeDetectionAgentTypeSummary {
     pub(crate) agent_type_name: String,
     #[serde(default, alias = "total_events")]
     pub(crate) total_events: usize,
+    #[serde(default, alias = "attack_events")]
+    pub(crate) attack_events: usize,
     #[serde(default, alias = "risk_counts")]
     pub(crate) risk_counts: BTreeMap<String, usize>,
     #[serde(default, alias = "blocked_events")]
@@ -155,8 +157,11 @@ struct RuntimeAgentListResponse {
 #[serde(rename_all = "camelCase")]
 struct RuntimeUnifiedAgent {
     id: String,
+    #[serde(default, alias = "name")]
     product: String,
+    #[serde(default)]
     kind: String,
+    #[serde(default, alias = "runtimeStatus")]
     status: String,
     #[serde(default)]
     runtime_detection_count: usize,
@@ -194,6 +199,8 @@ pub struct RuntimeDetectionListResponse {
     pub(crate) total: usize,
     #[serde(default)]
     pub(crate) items: Vec<RuntimeDetection>,
+    #[serde(default)]
+    pub(crate) list: Vec<RuntimeDetection>,
     #[serde(default)]
     pub(crate) detections: Vec<RuntimeDetection>,
     #[serde(default)]
@@ -325,13 +332,13 @@ fn urlencode(value: &str) -> String {
     out
 }
 
-fn push_query(query: &mut Vec<String>, key: &str, value: Option<&str>) {
+pub(super) fn push_query(query: &mut Vec<String>, key: &str, value: Option<&str>) {
     if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
         query.push(format!("{key}={}", urlencode(value)));
     }
 }
 
-fn path_with_query(path: &str, query: &[String]) -> String {
+pub(super) fn path_with_query(path: &str, query: &[String]) -> String {
     if query.is_empty() {
         path.to_owned()
     } else {
@@ -353,13 +360,115 @@ pub fn get_runtime_security_summary(
     .map_err(|error| format!("获取运行态检测总览失败：{error}"))
 }
 
+/// Shared by the paginated list and the full AgentType summary. Pagination
+/// intentionally lives outside this structure so totals cannot become page totals.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeDetectionFilters {
+    agent_id: Option<String>,
+    agent_type_id: Option<i64>,
+    agent_type: Option<String>,
+    category: Option<String>,
+    severity: Option<String>,
+    status: Option<String>,
+    source: Option<String>,
+    keyword: Option<String>,
+    trace_id: Option<String>,
+    session_id: Option<String>,
+    detection_type: Option<String>,
+    start_time: Option<String>,
+    end_time: Option<String>,
+}
+
+impl RuntimeDetectionFilters {
+    fn query(&self) -> Vec<String> {
+        let mut query = Vec::new();
+        for (key, value) in [
+            ("agent_id", &self.agent_id),
+            ("agent_type", &self.agent_type),
+            ("category", &self.category),
+            ("severity", &self.severity),
+            ("status", &self.status),
+            ("source", &self.source),
+            ("keyword", &self.keyword),
+            ("trace_id", &self.trace_id),
+            ("session_id", &self.session_id),
+            ("detection_type", &self.detection_type),
+            ("start_time", &self.start_time),
+            ("end_time", &self.end_time),
+        ] {
+            push_query(&mut query, key, value.as_deref());
+        }
+        if let Some(id) = self.agent_type_id {
+            query.push(format!("AgenttypeId={id}"));
+        }
+        query
+    }
+}
+
+#[cfg(test)]
+mod detection_filter_tests {
+    use super::*;
+
+    #[test]
+    fn current_agent_inventory_names_and_status_parse() {
+        let response: RuntimeAgentListResponse = serde_json::from_value(serde_json::json!({
+            "agents": [{ "id":"instance-1", "name":"Codex", "runtimeStatus":"running", "kind":"agent", "runtimeDetectionCount":24, "runtimeHighOrAboveCount":16 }]
+        })).unwrap();
+        let agent = &response.agents[0];
+        assert_eq!(agent.product, "Codex");
+        assert_eq!(agent.status, "running");
+        assert_eq!(agent.runtime_detection_count, 24);
+        assert_eq!(agent.runtime_high_or_above_count, 16);
+        let legacy: RuntimeUnifiedAgent = serde_json::from_value(serde_json::json!({"id":"legacy", "product":"Legacy", "status":"stopped", "kind":"agent"})).unwrap();
+        assert_eq!(legacy.product, "Legacy");
+        assert_eq!(legacy.status, "stopped");
+    }
+
+    #[test]
+    fn desktop_filters_preserve_instance_type_time_and_multivalue_risks() {
+        let filters: RuntimeDetectionFilters = serde_json::from_value(serde_json::json!({
+            "agentId": "instance/a", "agentTypeId": 42, "agentType": "类型 A",
+            "severity": "CRITICAL,HIGH", "status": "open,resolved",
+            "category": "attack", "source": "hook", "keyword": "key&value",
+            "sessionId": "session 1", "traceId": "trace?2", "detectionType": "rule_a,rule_b",
+            "startTime": "2026-09-05T00:00:00+08:00", "endTime": "2026-09-06T00:00:00Z",
+            "page": 7, "pageSize": 20, "limit": 1, "offset": 100
+        }))
+        .unwrap();
+        let query = filters.query();
+        assert_eq!(query.len(), 13);
+        for expected in [
+            "agent_id=instance%2Fa",
+            "AgenttypeId=42",
+            "severity=CRITICAL%2CHIGH",
+            "keyword=key%26value",
+            "detection_type=rule_a%2Crule_b",
+            "start_time=2026-09-05T00%3A00%3A00%2B08%3A00",
+        ] {
+            assert!(
+                query.iter().any(|value| value == expected),
+                "missing {expected}: {query:?}"
+            );
+        }
+        assert!(!query
+            .iter()
+            .any(|value| ["page=", "page_size=", "limit=", "offset="]
+                .iter()
+                .any(|prefix| value.starts_with(prefix))));
+        assert!(RuntimeDetectionFilters::default().query().is_empty());
+    }
+}
+
 #[tauri::command]
 pub fn get_runtime_detection_agent_type_summaries(
     app: tauri::AppHandle,
+    filters: Option<RuntimeDetectionFilters>,
 ) -> Result<RuntimeDetectionAgentTypeSummaryResponse, String> {
+    let query = filters.unwrap_or_default().query();
     crate::commands::gateway_api::get_json::<RuntimeDetectionAgentTypeSummaryResponse>(
         &app,
-        "/api/v1/runtime-detections/summary/agent-types",
+        &path_with_query("/api/v1/runtime-detections/summary/agent-types", &query),
     )
     .map_err(|error| format!("获取 AgentType 异常事件汇总失败：{error}"))
 }
@@ -400,6 +509,12 @@ pub fn get_runtime_security_agents(
 pub fn get_runtime_detections(
     app: tauri::AppHandle,
     agent_id: Option<String>,
+    agent_type_id: Option<i64>,
+    agent_type: Option<String>,
+    start_time: Option<String>,
+    end_time: Option<String>,
+    page: Option<usize>,
+    page_size: Option<usize>,
     category: Option<String>,
     severity: Option<String>,
     status: Option<String>,
@@ -412,19 +527,33 @@ pub fn get_runtime_detections(
     offset: Option<usize>,
     sort: Option<String>,
 ) -> Result<RuntimeDetectionListResponse, String> {
-    let mut query = Vec::new();
-    push_query(&mut query, "agent_id", agent_id.as_deref());
-    push_query(&mut query, "category", category.as_deref());
-    push_query(&mut query, "severity", severity.as_deref());
-    push_query(&mut query, "status", status.as_deref());
-    push_query(&mut query, "source", source.as_deref());
-    push_query(&mut query, "keyword", keyword.as_deref());
-    push_query(&mut query, "trace_id", trace_id.as_deref());
-    push_query(&mut query, "session_id", session_id.as_deref());
-    push_query(&mut query, "type", detection_type.as_deref());
+    let mut query = RuntimeDetectionFilters {
+        agent_id,
+        agent_type_id,
+        agent_type,
+        start_time,
+        end_time,
+        category,
+        severity,
+        status,
+        source,
+        keyword,
+        trace_id,
+        session_id,
+        detection_type,
+    }
+    .query();
     push_query(&mut query, "sort", sort.as_deref());
-    query.push(format!("limit={}", limit.unwrap_or(200).clamp(10, 1_000)));
-    query.push(format!("offset={}", offset.unwrap_or(0)));
+    if page.is_some() || page_size.is_some() {
+        query.push(format!("page={}", page.unwrap_or(1).max(1)));
+        query.push(format!(
+            "page_size={}",
+            page_size.unwrap_or(20).clamp(1, 1_000)
+        ));
+    } else {
+        query.push(format!("limit={}", limit.unwrap_or(20).clamp(1, 1_000)));
+        query.push(format!("offset={}", offset.unwrap_or(0)));
+    }
 
     let mut response = crate::commands::gateway_api::get_json::<RuntimeDetectionListResponse>(
         &app,
@@ -432,8 +561,12 @@ pub fn get_runtime_detections(
     )
     .map_err(|error| format!("获取运行态检测列表失败：{error}"))?;
 
-    if response.items.is_empty() && !response.detections.is_empty() {
-        response.items = response.detections.clone();
+    if response.items.is_empty() {
+        response.items = if response.list.is_empty() {
+            response.detections.clone()
+        } else {
+            response.list.clone()
+        };
     }
     if response.detections.is_empty() {
         response.detections = response.items.clone();

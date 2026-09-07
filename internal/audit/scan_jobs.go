@@ -21,6 +21,7 @@ type ScanJob struct {
 	// shape for older desktop builds that still deserialize the scan alias.
 	JobID           string         `json:"job_id"`
 	ScanID          string         `json:"scan_id,omitempty"`
+	TaskType        string         `json:"task_type"`
 	Kind            string         `json:"kind"`
 	Type            string         `json:"type,omitempty"`
 	Mode            string         `json:"mode,omitempty"`
@@ -60,6 +61,12 @@ func (j *ScanJob) normalizeAliases() {
 	if strings.TrimSpace(j.Type) == "" {
 		j.Type = strings.TrimSpace(j.Kind)
 	}
+	if strings.TrimSpace(j.TaskType) == "" {
+		j.TaskType = NormalizeScanTaskType(j.Kind)
+	} else {
+		j.TaskType = NormalizeScanTaskType(j.TaskType)
+	}
+	j.Trigger = NormalizeScanTrigger(j.Trigger)
 	if j.Current < 0 {
 		j.Current = 0
 	}
@@ -233,12 +240,14 @@ func (s *Store) ListScanJobs(kind, status string, limit, offset int) ([]ScanJob,
 // ScanJobFilter adds optional time bounds to the durable job history query
 // while keeping ListScanJobs backwards compatible with older callers.
 type ScanJobFilter struct {
-	Kind   string
-	Status string
-	Since  time.Time
-	Until  time.Time
-	Limit  int
-	Offset int
+	Kind     string
+	TaskType string
+	Trigger  string
+	Status   string
+	Since    time.Time
+	Until    time.Time
+	Limit    int
+	Offset   int
 }
 
 func (s *Store) ListScanJobsFiltered(f ScanJobFilter) ([]ScanJob, error) {
@@ -253,9 +262,13 @@ func (s *Store) ListScanJobsFiltered(f ScanJobFilter) ([]ScanJob, error) {
 	}
 	where := []string{`"delete" = 0`}
 	args := []any{}
-	if value := strings.TrimSpace(f.Kind); value != "" {
+	if value := strings.TrimSpace(firstNonEmptyScanJob(f.Kind, ScanJobKind(f.TaskType))); value != "" {
 		where = append(where, "kind = ?")
 		args = append(args, value)
+	}
+	if value := strings.TrimSpace(f.Trigger); value != "" {
+		where = append(where, "trigger = ?")
+		args = append(args, NormalizeScanTrigger(value))
 	}
 	if value := strings.TrimSpace(f.Status); value != "" {
 		where = append(where, "status = ?")
@@ -321,9 +334,13 @@ func (s *Store) CountScanJobsFiltered(f ScanJobFilter) (int, error) {
 	}
 	where := []string{`"delete" = 0`}
 	args := []any{}
-	if value := strings.TrimSpace(f.Kind); value != "" {
+	if value := strings.TrimSpace(firstNonEmptyScanJob(f.Kind, ScanJobKind(f.TaskType))); value != "" {
 		where = append(where, "kind = ?")
 		args = append(args, value)
+	}
+	if value := strings.TrimSpace(f.Trigger); value != "" {
+		where = append(where, "trigger = ?")
+		args = append(args, NormalizeScanTrigger(value))
 	}
 	if value := strings.TrimSpace(f.Status); value != "" {
 		where = append(where, "status = ?")
@@ -350,6 +367,15 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func firstNonEmptyScanJob(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // MarkRunningScanJobsFailed prevents a job from remaining forever in

@@ -22,6 +22,7 @@ import (
 type apiScanStatus struct {
 	JobID           string         `json:"job_id"`
 	ScanID          string         `json:"scan_id"`
+	TaskType        string         `json:"task_type"`
 	Kind            string         `json:"kind"`
 	Type            string         `json:"type"`
 	Mode            string         `json:"mode,omitempty"`
@@ -322,8 +323,8 @@ func (a *APIServer) startAPIScanWithOptions(kind, mode, agentID, resourceID, tri
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	status := apiScanStatus{
-		JobID: "scan_" + strings.ReplaceAll(kind, "-", "_") + "_" + uuid.NewString()[:8],
-		Kind:  kind, Trigger: firstNonEmpty(trigger, "manual"), Scope: scope,
+		JobID:    "scan_" + strings.ReplaceAll(kind, "-", "_") + "_" + uuid.NewString()[:8],
+		TaskType: audit.NormalizeScanTaskType(kind), Kind: kind, Trigger: audit.NormalizeScanTrigger(trigger), Scope: scope,
 		Mode: mode, AgentID: agentID, ResourceID: resourceID,
 		Status: "queued", Progress: 0, StartedAt: now, IdempotencyKey: strings.TrimSpace(idempotencyKey),
 	}
@@ -394,7 +395,7 @@ func (a *APIServer) startAPIScanWithOptions(kind, mode, agentID, resourceID, tri
 func apiScanStatusFromAuditJob(job audit.ScanJob) apiScanStatus {
 	jobID := firstNonEmpty(job.JobID, job.ScanID)
 	kind := firstNonEmpty(job.Kind, job.Type)
-	return apiScanStatus{JobID: jobID, ScanID: jobID, Kind: kind, Type: kind, Mode: job.Mode, AgentID: job.AgentID, ResourceID: job.ResourceID, Trigger: job.Trigger, Scope: job.Scope, Result: job.Result, Phase: job.Phase, Current: job.Current, Total: job.Total, CancelRequested: job.CancelRequested, IdempotencyKey: job.IdempotencyKey, RuleVersion: job.RuleVersion, Status: job.Status, Progress: job.Progress, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt, Error: job.Error}
+	return apiScanStatus{JobID: jobID, ScanID: jobID, TaskType: firstNonEmpty(job.TaskType, audit.NormalizeScanTaskType(kind)), Kind: kind, Type: kind, Mode: job.Mode, AgentID: job.AgentID, ResourceID: job.ResourceID, Trigger: job.Trigger, Scope: job.Scope, Result: job.Result, Phase: job.Phase, Current: job.Current, Total: job.Total, CancelRequested: job.CancelRequested, IdempotencyKey: job.IdempotencyKey, RuleVersion: job.RuleVersion, Status: job.Status, Progress: job.Progress, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt, Error: job.Error}
 }
 
 func (a *APIServer) storeAPIScan(status apiScanStatus) error {
@@ -410,6 +411,9 @@ func (a *APIServer) storeAPIScan(status apiScanStatus) error {
 	if status.Type == "" {
 		status.Type = status.Kind
 	}
+	if status.TaskType == "" {
+		status.TaskType = audit.NormalizeScanTaskType(status.Kind)
+	}
 	a.scanStatusMu.Lock()
 	if a.scanStatuses == nil {
 		a.scanStatuses = map[string]apiScanStatus{}
@@ -421,7 +425,7 @@ func (a *APIServer) storeAPIScan(status apiScanStatus) error {
 		return nil
 	}
 	job := audit.ScanJob{
-		JobID: status.JobID, Kind: status.Kind, Mode: status.Mode,
+		JobID: status.JobID, TaskType: status.TaskType, Kind: status.Kind, Mode: status.Mode,
 		AgentID: status.AgentID, ResourceID: status.ResourceID,
 		Trigger: status.Trigger, Scope: status.Scope, Result: status.Result, Phase: status.Phase,
 		Current: status.Current, Total: status.Total, CancelRequested: status.CancelRequested, IdempotencyKey: status.IdempotencyKey,

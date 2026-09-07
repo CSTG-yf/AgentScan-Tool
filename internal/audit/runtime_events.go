@@ -512,6 +512,7 @@ LIMIT ?`, args...)
 // same-session chain around a triggering event.
 type RuntimeEventFilter struct {
 	AgentID       string
+	AgentTypeID   int64
 	SessionID     string
 	TraceID       string
 	EventType     string
@@ -549,6 +550,10 @@ func runtimeEventWhereClause(f RuntimeEventFilter) (string, []any) {
 	if f.AgentID != "" {
 		conds = append(conds, "canonical_agent_id = ?")
 		args = append(args, f.AgentID)
+	}
+	if f.AgentTypeID > 0 {
+		conds = append(conds, `EXISTS (SELECT 1 FROM agents a WHERE a.id=behavior_events.canonical_agent_id AND a.agent_type_id=? AND a."delete"=0)`)
+		args = append(args, f.AgentTypeID)
 	}
 	if f.SessionID != "" {
 		conds = append(conds, "session_id = ?")

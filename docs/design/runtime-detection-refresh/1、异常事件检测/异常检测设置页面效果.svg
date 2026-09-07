@@ -1,0 +1,269 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1976" height="1248" viewBox="0 0 1976 1248">
+  <defs>
+    <style>
+      .bg { fill: #f3f6fb; }
+      .sidebar { fill: #061421; }
+      .sidebar-active { fill: #0f2f36; stroke: #27d3bd; stroke-width: 2; }
+      .topbar { fill: #ffffff; stroke: #e6edf6; stroke-width: 1; }
+      .card { fill: #ffffff; stroke: #e5ebf4; stroke-width: 1; }
+      .soft { fill: #f8fafc; stroke: #e5ebf4; stroke-width: 1; }
+      .soft-blue { fill: #eef6ff; stroke: #9ac7ff; stroke-width: 1.4; }
+      .dark-btn { fill: #061b32; }
+      .green-btn { fill: #19c7a5; }
+      .line { stroke: #e8eef6; stroke-width: 1; }
+      .muted { fill: #667085; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 15px; }
+      .tiny { fill: #8a97a8; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 13px; }
+      .body { fill: #253149; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 16px; }
+      .strong { fill: #14213a; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 17px; font-weight: 700; }
+      .title { fill: #14213a; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 34px; font-weight: 800; }
+      .h2 { fill: #14213a; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 23px; font-weight: 800; }
+      .h3 { fill: #14213a; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 19px; font-weight: 800; }
+      .eyebrow { fill: #2678ff; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 12px; font-weight: 800; letter-spacing: 4px; }
+      .white { fill: #ffffff; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; }
+      .nav { fill: #8aa0b6; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 15px; font-weight: 600; }
+      .nav-active { fill: #ffffff; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 15px; font-weight: 700; }
+      .num { fill: #1677ff; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 42px; font-weight: 900; }
+      .num-green { fill: #15a679; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 42px; font-weight: 900; }
+      .num-orange { fill: #f97316; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 42px; font-weight: 900; }
+      .num-red { fill: #ef4444; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 42px; font-weight: 900; }
+      .chip { fill: #eef2f7; stroke: #dce5f1; stroke-width: 1; }
+      .chip-blue { fill: #eaf3ff; stroke: #91caff; stroke-width: 1; }
+      .chip-green { fill: #eafaf3; stroke: #8ce0ba; stroke-width: 1; }
+      .chip-orange { fill: #fff7e6; stroke: #ffd591; stroke-width: 1; }
+      .chip-red { fill: #fff1f0; stroke: #ffb3ac; stroke-width: 1; }
+      .chip-text { fill: #334155; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 13px; font-weight: 700; }
+      .chip-blue-text { fill: #0958d9; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 13px; font-weight: 800; }
+      .chip-green-text { fill: #087c55; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 13px; font-weight: 800; }
+      .chip-orange-text { fill: #ad4e00; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 13px; font-weight: 800; }
+      .chip-red-text { fill: #c92a2a; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 13px; font-weight: 800; }
+      .mono { fill: #334155; font-family: "JetBrains Mono", Consolas, monospace; font-size: 13px; }
+      .table-head { fill: #fbfcfe; }
+    </style>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#0f172a" flood-opacity=".08" />
+    </filter>
+  </defs>
+
+  <rect class="bg" width="1976" height="1248" />
+  <rect class="sidebar" x="0" y="0" width="238" height="1248" />
+  <rect x="22" y="26" width="40" height="40" rx="10" fill="#51d5d0" />
+  <path d="M42 36 L52 41 L50 55 L42 60 L34 55 L32 41 Z" fill="#06344a" />
+  <text x="74" y="41" class="white" font-size="18" font-weight="800">TraceBastion</text>
+  <text x="74" y="58" class="white" font-size="9" font-weight="700" opacity=".65">AGENT SECURITY CONTROL</text>
+  <text x="74" y="70" class="white" font-size="9" font-weight="700" opacity=".65">PLANE</text>
+
+  <g transform="translate(28,124)">
+    <text class="nav" y="0">安全总览</text>
+    <text class="nav" y="42">靶场控制</text>
+    <rect class="sidebar-active" x="-12" y="72" width="196" height="40" rx="13" />
+    <text class="nav-active" y="98">Agent 治理中心</text>
+    <text class="nav" y="146">Agent 检测</text>
+    <text class="nav" y="188">静态资源检测</text>
+    <text class="nav" y="230">事件检测</text>
+    <text class="nav" y="272">攻击链</text>
+    <text class="nav" y="314">系统设置</text>
+  </g>
+
+  <rect class="topbar" x="238" y="0" width="1738" height="84" />
+  <text x="270" y="31" class="eyebrow">WINDOWS 安全工作台</text>
+  <text x="270" y="58" class="h3">异常检测设置</text>
+  <rect class="dark-btn" x="1610" y="22" width="126" height="36" rx="12" />
+  <text x="1640" y="45" class="white" font-size="14" font-weight="700">刷新配置</text>
+  <rect x="1750" y="22" width="178" height="36" rx="12" fill="#ffffff" stroke="#d8e3f1" />
+  <text x="1780" y="45" class="body" font-size="14">Observe 模式</text>
+
+  <g transform="translate(270,118)">
+    <text class="eyebrow" y="0">ANOMALY DETECTION SETTINGS</text>
+    <text class="title" y="45">异常检测设置</text>
+    <text class="muted" y="76">维护通用异常检测规则、只读风险判定规则，以及不同 AgentType 的专属规则、黑名单和风险策略。</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="card" x="270" y="214" width="395" height="116" rx="8" />
+    <text x="294" y="250" class="muted">通用规则</text>
+    <text x="294" y="300" class="num">12</text>
+    <text x="366" y="294" class="tiny">rules</text>
+
+    <rect class="card" x="682" y="214" width="395" height="116" rx="8" />
+    <text x="706" y="250" class="muted">已启用规则</text>
+    <text x="706" y="300" class="num-green">10</text>
+    <text x="778" y="294" class="tiny">enabled</text>
+
+    <rect class="card" x="1094" y="214" width="395" height="116" rx="8" />
+    <text x="1118" y="250" class="muted">AgentType 配置</text>
+    <text x="1118" y="300" class="num-orange">7</text>
+    <text x="1160" y="294" class="tiny">types</text>
+
+    <rect class="card" x="1506" y="214" width="395" height="116" rx="8" />
+    <text x="1530" y="250" class="muted">自定义风险策略</text>
+    <text x="1530" y="300" class="num-red">2</text>
+    <text x="1572" y="294" class="tiny">policies</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="card" x="270" y="356" width="1631" height="482" rx="8" />
+  </g>
+  <text x="294" y="398" class="h2">通用异常检测配置</text>
+  <text x="294" y="424" class="muted">通用检测规则可以新增、编辑、删除和启停；通用风险判定规则当前只展示。</text>
+
+  <g transform="translate(294,454)">
+    <rect class="soft" width="1008" height="350" rx="8" />
+    <text x="20" y="36" class="h3">通用异常检测规则</text>
+    <rect x="640" y="17" width="220" height="34" rx="10" fill="#ffffff" stroke="#d9e1ee" />
+    <text x="662" y="39" class="tiny">搜索规则 / 类型 / 分类</text>
+    <rect class="green-btn" x="878" y="17" width="108" height="34" rx="10" />
+    <text class="white" x="902" y="39" font-size="13" font-weight="800">新增规则</text>
+    <rect class="table-head" x="20" y="66" width="968" height="44" rx="6" />
+    <text x="38" y="94" class="tiny">规则名称</text>
+    <text x="276" y="94" class="tiny">检测类型</text>
+    <text x="476" y="94" class="tiny">分类</text>
+    <text x="606" y="94" class="tiny">严重级别</text>
+    <text x="750" y="94" class="tiny">状态</text>
+    <text x="884" y="94" class="tiny">操作</text>
+
+    <line class="line" x1="20" y1="122" x2="988" y2="122" />
+    <text x="38" y="150" class="strong">Prompt Injection</text>
+    <text x="276" y="150" class="mono">prompt_injection</text>
+    <rect class="chip-red" x="476" y="132" width="68" height="26" rx="8" />
+    <text class="chip-red-text" x="493" y="150">attack</text>
+    <rect class="chip-orange" x="606" y="132" width="64" height="26" rx="8" />
+    <text class="chip-orange-text" x="622" y="150">HIGH</text>
+    <rect class="chip-green" x="750" y="132" width="62" height="26" rx="8" />
+    <text class="chip-green-text" x="766" y="150">启用</text>
+    <text x="884" y="150" class="chip-blue-text">编辑</text>
+    <text x="928" y="150" class="chip-red-text">删除</text>
+
+    <line class="line" x1="20" y1="174" x2="988" y2="174" />
+    <text x="38" y="202" class="strong">Dangerous Command</text>
+    <text x="276" y="202" class="mono">dangerous_command</text>
+    <rect class="chip-red" x="476" y="184" width="68" height="26" rx="8" />
+    <text class="chip-red-text" x="493" y="202">attack</text>
+    <rect class="chip-red" x="606" y="184" width="88" height="26" rx="8" />
+    <text class="chip-red-text" x="622" y="202">CRITICAL</text>
+    <rect class="chip-green" x="750" y="184" width="62" height="26" rx="8" />
+    <text class="chip-green-text" x="766" y="202">启用</text>
+    <text x="884" y="202" class="chip-blue-text">编辑</text>
+    <text x="928" y="202" class="chip-red-text">删除</text>
+
+    <line class="line" x1="20" y1="226" x2="988" y2="226" />
+    <text x="38" y="254" class="strong">Tool Abuse</text>
+    <text x="276" y="254" class="mono">tool_abuse</text>
+    <rect class="chip-orange" x="476" y="236" width="92" height="26" rx="8" />
+    <text class="chip-orange-text" x="492" y="254">suspicious</text>
+    <rect class="chip-orange" x="606" y="236" width="64" height="26" rx="8" />
+    <text class="chip-orange-text" x="622" y="254">HIGH</text>
+    <rect class="chip-green" x="750" y="236" width="62" height="26" rx="8" />
+    <text class="chip-green-text" x="766" y="254">启用</text>
+    <text x="884" y="254" class="chip-blue-text">编辑</text>
+    <text x="928" y="254" class="chip-red-text">删除</text>
+
+    <line class="line" x1="20" y1="278" x2="988" y2="278" />
+    <text x="38" y="306" class="strong">Suspicious Process</text>
+    <text x="276" y="306" class="mono">suspicious_process</text>
+    <rect class="chip-orange" x="476" y="288" width="92" height="26" rx="8" />
+    <text class="chip-orange-text" x="492" y="306">suspicious</text>
+    <rect class="chip-blue" x="606" y="288" width="86" height="26" rx="8" />
+    <text class="chip-blue-text" x="622" y="306">MEDIUM</text>
+    <rect class="chip" x="750" y="288" width="62" height="26" rx="8" />
+    <text class="chip-text" x="766" y="306">停用</text>
+    <text x="884" y="306" class="chip-blue-text">编辑</text>
+    <text x="928" y="306" class="chip-red-text">删除</text>
+  </g>
+
+  <g transform="translate(1322,454)">
+    <rect class="soft" width="555" height="350" rx="8" />
+    <text x="20" y="36" class="h3">通用风险判定规则</text>
+    <rect class="chip" x="408" y="18" width="108" height="30" rx="10" />
+    <text class="chip-text" x="432" y="38">只读展示</text>
+    <text x="20" y="66" class="muted">默认分值区间与后端 runtime decision 映射。</text>
+
+    <rect class="card" x="20" y="92" width="515" height="48" rx="8" />
+    <rect class="chip-blue" x="38" y="103" width="82" height="26" rx="8" />
+    <text class="chip-blue-text" x="64" y="121">LOW</text>
+    <text x="148" y="122" class="mono">0.00 - 0.39</text>
+    <rect class="chip-green" x="404" y="103" width="84" height="26" rx="8" />
+    <text class="chip-green-text" x="424" y="121">ALLOW</text>
+
+    <rect class="card" x="20" y="150" width="515" height="48" rx="8" />
+    <rect class="chip-blue" x="38" y="161" width="98" height="26" rx="8" />
+    <text class="chip-blue-text" x="58" y="179">MEDIUM</text>
+    <text x="148" y="180" class="mono">0.40 - 0.69</text>
+    <rect class="chip-orange" x="404" y="161" width="78" height="26" rx="8" />
+    <text class="chip-orange-text" x="424" y="179">ALERT</text>
+
+    <rect class="card" x="20" y="208" width="515" height="48" rx="8" />
+    <rect class="chip-orange" x="38" y="219" width="82" height="26" rx="8" />
+    <text class="chip-orange-text" x="62" y="237">HIGH</text>
+    <text x="148" y="238" class="mono">0.70 - 0.89</text>
+    <rect class="chip-orange" x="404" y="219" width="64" height="26" rx="8" />
+    <text class="chip-orange-text" x="424" y="237">ASK</text>
+
+    <rect class="card" x="20" y="266" width="515" height="48" rx="8" />
+    <rect class="chip-red" x="38" y="277" width="98" height="26" rx="8" />
+    <text class="chip-red-text" x="56" y="295">CRITICAL</text>
+    <text x="148" y="296" class="mono">0.90 - 1.00</text>
+    <rect class="chip-red" x="404" y="277" width="78" height="26" rx="8" />
+    <text class="chip-red-text" x="424" y="295">BLOCK</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="card" x="270" y="862" width="1631" height="334" rx="8" />
+  </g>
+  <text x="294" y="904" class="h2">AgentType 专属配置列表</text>
+  <text x="294" y="930" class="muted">在通用规则基础上，为不同类型 Agent 增加专属规则、黑名单或自定义风险判定。</text>
+  <rect x="1512" y="884" width="220" height="34" rx="10" fill="#ffffff" stroke="#d9e1ee" />
+  <text x="1534" y="906" class="tiny">搜索 AgentType</text>
+  <rect class="dark-btn" x="1748" y="884" width="128" height="34" rx="10" />
+  <text class="white" x="1780" y="906" font-size="13" font-weight="800">刷新列表</text>
+
+  <rect class="table-head" x="294" y="954" width="1583" height="48" rx="6" />
+  <text x="318" y="984" class="tiny">AgentType</text>
+  <text x="560" y="984" class="tiny">继承通用检测</text>
+  <text x="782" y="984" class="tiny">专属规则数</text>
+  <text x="984" y="984" class="tiny">黑名单数</text>
+  <text x="1174" y="984" class="tiny">风险判定方式</text>
+  <text x="1390" y="984" class="tiny">状态</text>
+  <text x="1620" y="984" class="tiny">操作</text>
+
+  <line class="line" x1="294" y1="1016" x2="1877" y2="1016" />
+  <text x="318" y="1048" class="strong">CLI Agent</text>
+  <text x="318" y="1070" class="tiny">cli-agent</text>
+  <rect class="chip-green" x="560" y="1030" width="62" height="26" rx="8" />
+  <text class="chip-green-text" x="576" y="1048">是</text>
+  <text x="782" y="1048" class="strong">3</text>
+  <text x="984" y="1048" class="strong">5</text>
+  <rect class="chip" x="1174" y="1030" width="70" height="26" rx="8" />
+  <text class="chip-text" x="1196" y="1048">通用</text>
+  <rect class="chip-green" x="1390" y="1030" width="62" height="26" rx="8" />
+  <text class="chip-green-text" x="1406" y="1048">启用</text>
+  <rect class="dark-btn" x="1620" y="1026" width="74" height="30" rx="9" />
+  <text class="white" x="1644" y="1046" font-size="13" font-weight="800">详情</text>
+
+  <line class="line" x1="294" y1="1086" x2="1877" y2="1086" />
+  <text x="318" y="1118" class="strong">IDE Agent</text>
+  <text x="318" y="1140" class="tiny">ide-agent</text>
+  <rect class="chip-green" x="560" y="1100" width="62" height="26" rx="8" />
+  <text class="chip-green-text" x="576" y="1118">是</text>
+  <text x="782" y="1118" class="strong">2</text>
+  <text x="984" y="1118" class="strong">1</text>
+  <rect class="chip-blue" x="1174" y="1100" width="84" height="26" rx="8" />
+  <text class="chip-blue-text" x="1196" y="1118">自定义</text>
+  <rect class="chip-green" x="1390" y="1100" width="62" height="26" rx="8" />
+  <text class="chip-green-text" x="1406" y="1118">启用</text>
+  <rect class="dark-btn" x="1620" y="1096" width="74" height="30" rx="9" />
+  <text class="white" x="1644" y="1116" font-size="13" font-weight="800">详情</text>
+
+  <line class="line" x1="294" y1="1156" x2="1877" y2="1156" />
+  <text x="318" y="1188" class="strong">Agent Platform</text>
+  <text x="318" y="1210" class="tiny">agent-platform</text>
+  <rect class="chip" x="560" y="1170" width="62" height="26" rx="8" />
+  <text class="chip-text" x="576" y="1188">否</text>
+  <text x="782" y="1188" class="strong">6</text>
+  <text x="984" y="1188" class="strong">4</text>
+  <rect class="chip-blue" x="1174" y="1170" width="84" height="26" rx="8" />
+  <text class="chip-blue-text" x="1196" y="1188">自定义</text>
+  <rect class="chip-green" x="1390" y="1170" width="62" height="26" rx="8" />
+  <text class="chip-green-text" x="1406" y="1188">启用</text>
+  <rect class="dark-btn" x="1620" y="1166" width="74" height="30" rx="9" />
+  <text class="white" x="1644" y="1186" font-size="13" font-weight="800">详情</text>
+</svg>

@@ -225,32 +225,67 @@ export default function App() {
   useEffect(() => {
     let disposed = false;
     let inFlight = false;
+    let timer: number | undefined;
+    let consecutiveFailures = 0;
+    const refreshConfig = (() => {
+      if (!scanSettings) return undefined;
+      switch (active) {
+        case "overview": return scanSettings.environment;
+        case "agents": return scanSettings.agentDiscovery;
+        case "staticAssets": return scanSettings.staticAssets;
+        case "trace": return scanSettings.behaviorTrace;
+        case "events": return scanSettings.eventDetection;
+        case "chain": return scanSettings.processGuardAudit;
+        case "alerts": return scanSettings.gatewayAudit;
+        case "range": return scanSettings.rangeStatus;
+        default: return undefined;
+      }
+    })();
+    if (!refreshConfig?.enabled) return;
+    const baseDelay = Math.max(3, refreshConfig.intervalSec) * 1000;
+    const scheduleNext = () => {
+      if (disposed) return;
+      const delay = Math.min(60_000, baseDelay * 2 ** Math.min(consecutiveFailures, 4));
+      timer = window.setTimeout(() => void syncChanges(), delay);
+    };
     const syncChanges = async () => {
       if (disposed || inFlight) return;
+      if (document.hidden) {
+        scheduleNext();
+        return;
+      }
       inFlight = true;
       try {
-        const changes = await getChanges(changeCursorRef.current, ["agents", "static_resources", "behavior_events", "runtime_detections", "runtime_decisions", "runtime_response_actions", "runtime_attack_chains", "scan_jobs"]);
+        const changes = await getChanges(changeCursorRef.current, ["agents", "static_resources", "scan_findings", "behavior_events", "runtime_detections", "runtime_decisions", "runtime_response_actions", "runtime_attack_chains", "runtime_attack_chain_events", "scan_jobs"]);
         if (disposed) return;
+        consecutiveFailures = 0;
         changeCursorRef.current = Math.max(changeCursorRef.current, changes.next_cursor || 0);
         const domains = new Set(changes.changed_domains ?? []);
         if (domains.has("agents") && (active === "agents" || active === "overview")) await refreshTask("agentDiscovery");
-        if (domains.has("static_resources") && (active === "staticAssets" || active === "overview")) setStaticRefreshTick((tick) => tick + 1);
+        if (["static_resources", "scan_findings"].some((domain) => domains.has(domain)) && (active === "staticAssets" || active === "overview")) setStaticRefreshTick((tick) => tick + 1);
         const runtimeChanged = ["behavior_events", "runtime_detections", "runtime_decisions", "runtime_response_actions"].some((domain) => domains.has(domain));
         if (runtimeChanged && (active === "events" || active === "overview")) setEventRefreshTick((tick) => tick + 1);
-        if (domains.has("runtime_attack_chains") && (active === "chain" || active === "overview")) await refreshAttackChains();
+        if (domains.has("behavior_events") && active === "trace") await refreshTask("behaviorTrace");
+        if (["runtime_attack_chains", "runtime_attack_chain_events"].some((domain) => domains.has(domain)) && (active === "chain" || active === "overview")) await refreshAttackChains();
+        // Host-derived surfaces do not have SQLite change domains. Their own
+        // configured interval remains the source of truth for read refreshes.
+        if (active === "overview") await refreshTask("environment");
+        if (active === "alerts") await Promise.all([refreshTask("processGuardAudit"), refreshTask("gatewayAudit")]);
+        if (active === "range") await refreshTask("rangeStatus");
       } catch (error) {
+        consecutiveFailures += 1;
         console.warn("change cursor sync failed", error);
       } finally {
         inFlight = false;
+        scheduleNext();
       }
     };
     void syncChanges();
-    const timer = window.setInterval(() => void syncChanges(), 3000);
     return () => {
       disposed = true;
-      window.clearInterval(timer);
+      if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [active]);
+  }, [active, scanSettings]);
 
   useEffect(() => {
     if (active !== "range" && !replayStatus?.running) return;
@@ -435,7 +470,15 @@ export default function App() {
       case "agents":
         return <AgentsPage agents={agents} totalAgents={agentTotal} warning={agentWarning} loading={loading} onRefresh={() => refreshTask("agentDiscovery")} />;
       case "governance":
-        return <AgentGovernancePage />;
+        return <AgentGovernancePage
+          scanSettings={scanSettings}
+          staticScanSettings={staticScanSettings}
+          savingScanSettings={savingScanSettings}
+          savingStaticScanSettings={savingStaticScanSettings}
+          onScanSettingsChange={persistScanSettings}
+          onStaticScanSettingsChange={persistStaticScanSettings}
+          onRefreshData={refresh}
+        />;
       case "trace":
         return <TracePage trace={trace} events={traceEvents} fileTraceCount={fileTraceCount} />;
       case "staticAssets":

@@ -373,6 +373,7 @@ export interface RuntimeDetectionAgentTypeSummary {
   agentTypeKey?: string;
   agentTypeName?: string;
   totalEvents: number;
+  attackEvents?: number;
   riskCounts: Record<string, number>;
   blockedEvents?: number;
   openEvents?: number;
@@ -390,6 +391,8 @@ export interface RuntimeDetectionAgentTypeSummaryResponse {
 
 /** Database-backed attack-chain counts grouped by the governed Agent type. */
 export interface AttackChainAgentTypeSummary {
+  coveredAgents?: number;
+  agents?: Array<{ agentId: string; totalChains: number; highOrAbove: number }>;
   agentTypeId: number;
   agentType: string;
   agentTypeKey?: string;
@@ -444,6 +447,12 @@ export interface RuntimeDetectionListResponse {
 
 export interface RuntimeDetectionListQuery {
   agentId?: string;
+  agentTypeId?: number;
+  agentType?: string;
+  startTime?: string;
+  endTime?: string;
+  page?: number;
+  pageSize?: number;
   category?: string;
   severity?: string;
   status?: string;
@@ -550,6 +559,11 @@ export interface ChainEvidenceRow {
 }
 
 export interface AttackChain {
+  agentId?: string;
+  agentTypeId?: number;
+  agentTypeName?: string;
+  rawStatus?: string;
+  rawSeverity?: string;
   id: string;
   traceId: string;
   sessionId: string;
@@ -572,6 +586,35 @@ export interface AttackChain {
   builderVersion?: string;
   policyVersion?: string;
   evaluationJobId?: string;
+}
+
+export interface AttackChainListQuery {
+  agentId?: string;
+  agentTypeId?: number;
+  sessionId?: string;
+  traceId?: string;
+  attackType?: string;
+  severity?: string;
+  status?: string;
+  startTime?: string;
+  endTime?: string;
+  keyword?: string;
+  sort?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/** Detail preserves the backend's raw snake_case audit records. */
+export interface AttackChainDetail {
+  attack_chain: Record<string, unknown>;
+  chain: AttackChain;
+  nodes: AttackChainStep[];
+  events: Array<Record<string, unknown>>;
+  evidence: ChainEvidenceRow[];
+  detections: Array<Record<string, unknown>>;
+  decision: Record<string, unknown>;
+  responses: Array<Record<string, unknown>> | null;
+  response: Record<string, unknown>;
 }
 
 export interface AttackChainSnapshot {
@@ -698,6 +741,7 @@ export interface RuntimeEnforcementListResponse {
 }
 
 export interface RuntimeEnforcementResult {
+  plan?: { enforcement_point?: string; action_type?: string; target?: string };
   status?: string;
   id?: string;
   removed?: number;
@@ -942,6 +986,7 @@ export interface StaticResourceRelationsResponse {
 export interface StaticResourceScanAccepted {
 	job_id?: string;
 	scan_id?: string;
+	task_type?: ScanTaskType;
   resource_id?: string;
   agent_id?: string;
   status: string;
@@ -960,6 +1005,46 @@ export interface StaticResourceScanAccepted {
   started_at?: string;
   finished_at?: string;
   error?: string;
+}
+
+export type ScanTaskType = "agent_discovery" | "static_assets" | "runtime_detections" | "attack_chains" | "behavior_trace" | "environment";
+export type ScanJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type ScanJobTrigger = "manual" | "scheduler" | "watcher";
+
+export interface BackendScanSchedule {
+  task_type: ScanTaskType;
+  enabled: boolean;
+  interval_sec: number;
+  mode: "full" | "incremental" | "single" | "replay" | "rebuild";
+  scope: Record<string, unknown>;
+  updated_at?: string;
+  updated_by?: string;
+}
+
+export interface BackendScanSchedulesResponse {
+  items: BackendScanSchedule[];
+  total: number;
+  source?: string;
+}
+
+export interface ScanJob extends StaticResourceScanAccepted {
+  job_id: string;
+  task_type: ScanTaskType;
+  kind: string;
+  trigger: ScanJobTrigger;
+  status: ScanJobStatus;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ScanJobsResponse {
+  items: ScanJob[];
+  jobs?: ScanJob[];
+  count: number;
+  total: number;
+  limit: number;
+  offset: number;
+  next_offset: number;
 }
 
 export interface ChangeCursor {

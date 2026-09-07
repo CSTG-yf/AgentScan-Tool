@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/defenseclaw/defenseclaw/internal/audit"
 )
@@ -74,6 +75,163 @@ func TestJobsAPICreateRejectsUnknownKind(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("create status = %d body = %s", rec.Code, rec.Body.String())
 	}
+}
+
+func TestJobsAPICreateAndFilterByCanonicalTaskType(t *testing.T) {
+	store, err := audit.NewStore(filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := store.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	api := &APIServer{store: store}
+	rec := httptest.NewRecorder()
+	api.handleJobsAPI(rec, httptest.NewRequest(http.MethodPost, "/api/v1/jobs", strings.NewReader(`{"task_type":"agent_discovery","mode":"full","trigger":"scheduled"}`)))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("create status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var accepted apiScanStatus
+	if err := json.NewDecoder(rec.Body).Decode(&accepted); err != nil {
+		t.Fatalf("decode accepted job: %v", err)
+	}
+	if accepted.TaskType != "agent_discovery" || accepted.Kind != "agent_discovery" || accepted.Trigger != "scheduler" {
+		t.Fatalf("accepted job = %+v", accepted)
+	}
+
+	list := httptest.NewRecorder()
+	api.handleJobsAPI(list, httptest.NewRequest(http.MethodGet, "/api/v1/jobs?task_type=agent_discovery&trigger=scheduler", nil))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"task_type":"agent_discovery"`) {
+		t.Fatalf("filtered list status=%d body=%s", list.Code, list.Body.String())
+	}
+}
+
+func TestJobsAPICreateRejectsConflictingTaskAliases(t *testing.T) {
+	store, err := audit.NewStore(filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := store.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	api := &APIServer{store: store}
+	rec := httptest.NewRecorder()
+	api.handleJobsAPI(rec, httptest.NewRequest(http.MethodPost, "/api/v1/jobs", strings.NewReader(`{"task_type":"static_assets","kind":"event_replay"}`)))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "different tasks") {
+		t.Fatalf("conflict status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	api.handleJobsAPI(rec, httptest.NewRequest(http.MethodPost, "/api/v1/jobs", strings.NewReader(`{"task_type":"agent_discovery","mode":"magic"}`)))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unsupported scan mode") {
+		t.Fatalf("mode status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	api.handleJobsAPI(rec, httptest.NewRequest(http.MethodPost, "/api/v1/jobs", strings.NewReader(`{"task_type":"agent_discovery","trigger":"sometimes"}`)))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unsupported scan trigger") {
+		t.Fatalf("trigger status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	api.handleJobsAPI(rec, httptest.NewRequest(http.MethodPost, "/api/v1/jobs", strings.NewReader(`{"task_type":"agent_discovery","scope":{"agent_id":42}}`)))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "scope.agent_id") {
+		t.Fatalf("scope status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestJobsAPICreateReadsCanonicalScopeFields(t *testing.T) {
+	store, err := audit.NewStore(filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := store.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	called := make(chan string, 1)
+	api := &APIServer{store: store}
+	api.SetStaticScanTrigger(nil, func(agentID string) error { called <- agentID; return nil })
+	rec := httptest.NewRecorder()
+	api.handleJobsAPI(rec, httptest.NewRequest(http.MethodPost, "/api/v1/jobs", strings.NewReader(`{"task_type":"static_assets","scope":{"agent_id":"agent-from-scope"}}`)))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var accepted apiScanStatus
+	if err := json.NewDecoder(rec.Body).Decode(&accepted); err != nil || accepted.AgentID != "agent-from-scope" || accepted.Mode != "full" {
+		t.Fatalf("accepted=%+v err=%v", accepted, err)
+	}
+	select {
+	case agentID := <-called:
+		if agentID != "agent-from-scope" {
+			t.Fatalf("runner agent = %q", agentID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("static resource runner was not called")
+	}
+}
+
+func TestJobsAPICreateReturnsExistingRunningTask(t *testing.T) {
+	store, err := audit.NewStore(filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := store.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	api := &APIServer{store: store}
+	release := make(chan struct{})
+	first := api.startAPIScanWithOptions("attack_chain_rebuild", "rebuild", "", "", "scheduler", nil, "", func(context.Context, string) error {
+		<-release
+		return nil
+	})
+	t.Cleanup(func() { close(release) })
+
+	rec := httptest.NewRecorder()
+	api.handleJobsAPI(rec, httptest.NewRequest(http.MethodPost, "/api/v1/jobs", strings.NewReader(`{"task_type":"attack_chains","mode":"rebuild"}`)))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var got apiScanStatus
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil || got.JobID != first.JobID {
+		t.Fatalf("existing job=%+v err=%v, want %s", got, err, first.JobID)
+	}
+}
+
+func TestBackgroundSchedulerRunsEnabledTaskFromScanSchedules(t *testing.T) {
+	store, err := audit.NewStore(filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := store.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	api := &APIServer{store: store}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go api.RunBackgroundJobs(ctx)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		jobs, listErr := store.ListScanJobsFiltered(audit.ScanJobFilter{TaskType: "agent_discovery", Trigger: "scheduler", Limit: 10})
+		if listErr != nil {
+			t.Fatal(listErr)
+		}
+		if len(jobs) > 0 {
+			if jobs[0].TaskType != "agent_discovery" || jobs[0].Trigger != "scheduler" {
+				t.Fatalf("scheduled job = %+v", jobs[0])
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("enabled agent_discovery schedule did not create a job")
 }
 
 func TestChangesAPIProvidesCursorInvalidations(t *testing.T) {

@@ -1,0 +1,315 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1976" height="1248" viewBox="0 0 1976 1248">
+  <defs>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="14" stdDeviation="24" flood-color="#12345a" flood-opacity="0.10"/>
+    </filter>
+    <filter id="cardShadow" x="-10%" y="-20%" width="120%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#31527a" flood-opacity="0.08"/>
+    </filter>
+    <linearGradient id="logoGlow" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#5ee7df"/>
+      <stop offset="1" stop-color="#2fc0a8"/>
+    </linearGradient>
+    <style>
+      .bg { fill: #f3f7fb; }
+      .sidebar { fill: #071727; }
+      .side-text { fill: #87a2bd; font: 500 14px 'Microsoft YaHei', Arial, sans-serif; }
+      .side-active-text { fill: #e8fbff; font: 700 14px 'Microsoft YaHei', Arial, sans-serif; }
+      .caption { fill: #2581ff; font: 800 10px Arial, sans-serif; letter-spacing: 4px; }
+      .title { fill: #061936; font: 800 34px 'Microsoft YaHei', Arial, sans-serif; }
+      .sub { fill: #60758f; font: 500 14px 'Microsoft YaHei', Arial, sans-serif; }
+      .card { fill: #ffffff; stroke: #e2eaf4; stroke-width: 1; }
+      .small { fill: #68809b; font: 500 13px 'Microsoft YaHei', Arial, sans-serif; }
+      .label { fill: #5f738c; font: 600 13px 'Microsoft YaHei', Arial, sans-serif; }
+      .strong { fill: #08203e; font: 800 17px 'Microsoft YaHei', Arial, sans-serif; }
+      .num-blue { fill: #1769ff; font: 900 39px Arial, sans-serif; }
+      .num-purple { fill: #7b3ff2; font: 900 39px Arial, sans-serif; }
+      .num-orange { fill: #f06d19; font: 900 39px Arial, sans-serif; }
+      .num-red { fill: #ee4659; font: 900 39px Arial, sans-serif; }
+      .muted { fill: #8192a7; font: 600 12px 'Microsoft YaHei', Arial, sans-serif; }
+      .table-head { fill: #667b92; font: 700 13px 'Microsoft YaHei', Arial, sans-serif; }
+      .table-cell { fill: #122a46; font: 700 13px 'Microsoft YaHei', Arial, sans-serif; }
+      .table-muted { fill: #6d829b; font: 500 12px 'Microsoft YaHei', Arial, sans-serif; }
+      .mono { fill: #68809b; font: 600 12px Consolas, monospace; }
+      .btn-text { fill: #ffffff; font: 700 13px 'Microsoft YaHei', Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <rect width="1976" height="1248" fill="#eef4fb"/>
+  <rect x="0" y="0" width="217" height="1248" class="sidebar"/>
+  <g transform="translate(20 24)">
+    <rect x="0" y="0" width="36" height="36" rx="10" fill="url(#logoGlow)"/>
+    <path d="M18 8l11 4v8c0 7-5 11-11 14C12 31 7 27 7 20v-8l11-4z" fill="#07305b" opacity="0.22"/>
+    <path d="M18 10l8 3v7c0 5-3.5 8-8 10-4.5-2-8-5-8-10v-7l8-3z" fill="none" stroke="#063254" stroke-width="2"/>
+    <text x="49" y="15" fill="#e5f5ff" font-family="Arial, sans-serif" font-size="16" font-weight="800">TraceBastion</text>
+    <text x="49" y="30" fill="#7894ae" font-family="Arial, sans-serif" font-size="8" font-weight="800" letter-spacing="2">AGENT SECURITY CONTROL</text>
+    <text x="49" y="41" fill="#7894ae" font-family="Arial, sans-serif" font-size="8" font-weight="800" letter-spacing="2">PLANE</text>
+  </g>
+
+  <g transform="translate(28 114)">
+    <text class="side-text" x="32" y="10">安全总览</text>
+    <circle cx="8" cy="5" r="5" fill="none" stroke="#6687a6"/>
+    <text class="side-text" x="32" y="52">靶场控制</text>
+    <path d="M8 43h10l-5 12z" fill="none" stroke="#6687a6"/>
+    <text class="side-text" x="32" y="94">Agent 治理中心</text>
+    <path d="M8 84l10 5-10 5-10-5z" fill="none" stroke="#6687a6"/>
+    <text class="side-text" x="32" y="136">Agent 检测</text>
+    <circle cx="8" cy="131" r="6" fill="none" stroke="#6687a6"/>
+    <text class="side-text" x="32" y="178">静态资源检测</text>
+    <rect x="2" y="169" width="12" height="12" fill="none" stroke="#6687a6"/>
+    <text class="side-text" x="32" y="220">事件检测</text>
+    <circle cx="8" cy="215" r="6" fill="none" stroke="#6687a6"/>
+    <rect x="-18" y="249" width="190" height="39" rx="13" fill="#0b3040"/>
+    <rect x="-18" y="249" width="3" height="39" rx="1.5" fill="#38d6be"/>
+    <text class="side-active-text" x="32" y="274">攻击链</text>
+    <path d="M2 264h12M8 258v12" stroke="#9ef9ef" stroke-width="1.6"/>
+    <text class="side-text" x="32" y="316">系统设置</text>
+    <circle cx="8" cy="311" r="5" fill="none" stroke="#6687a6"/>
+    <text class="side-text" x="32" y="358">告警中心</text>
+    <rect x="3" y="349" width="10" height="11" fill="none" stroke="#6687a6"/>
+    <text class="side-text" x="32" y="400">行为追踪</text>
+    <path d="M3 396h12M3 390h12M3 402h12" stroke="#6687a6"/>
+    <text class="side-text" x="32" y="442">策略中心</text>
+    <rect x="2" y="433" width="12" height="12" rx="2" fill="none" stroke="#6687a6"/>
+    <text class="side-text" x="32" y="484">报告与证据</text>
+    <path d="M3 476h12v14H3z" fill="none" stroke="#6687a6"/>
+  </g>
+
+  <g transform="translate(14 1192)">
+    <rect x="0" y="0" width="188" height="42" rx="9" fill="#0b2035" stroke="#16344f"/>
+    <circle cx="18" cy="21" r="7" fill="none" stroke="#809bb6"/>
+    <text x="38" y="26" class="side-text">搜索</text>
+  </g>
+
+  <rect x="217" y="0" width="1759" height="84" fill="#ffffff"/>
+  <line x1="217" y1="84" x2="1976" y2="84" stroke="#dbe5f0"/>
+  <text x="248" y="32" class="caption">WINDOWS 安全工作台</text>
+  <g transform="translate(1087 21)">
+    <rect x="0" y="7" width="59" height="32" rx="9" fill="#061a31"/>
+    <circle cx="17" cy="23" r="7" fill="none" stroke="#7fa0bf"/>
+    <path d="M12 28l10-10" stroke="#7fa0bf"/>
+    <path d="M40 17h12M40 23h12M40 29h12" stroke="#7fa0bf" stroke-width="1.5"/>
+    <rect x="70" y="0" width="660" height="43" rx="11" fill="#ffffff" stroke="#d7e3ef"/>
+    <text x="85" y="27" fill="#6b7c91" font-family="'Microsoft YaHei', Arial, sans-serif" font-size="13" font-weight="700">全局防护模式</text>
+    <rect x="156" y="7" width="191" height="30" rx="10" fill="#071727"/>
+    <rect x="223" y="8" width="68" height="28" rx="8" fill="#163e68"/>
+    <text x="170" y="27" fill="#9fb5cb" font-family="Arial" font-size="13" font-weight="800">Baseline</text>
+    <text x="238" y="27" fill="#d7ecff" font-family="Arial" font-size="13" font-weight="800">Observe</text>
+    <text x="304" y="27" fill="#9fb5cb" font-family="Arial" font-size="13" font-weight="800">Action</text>
+    <rect x="359" y="10" width="64" height="24" rx="9" fill="#08233d"/>
+    <text x="374" y="27" fill="#58a8ff" font-family="Arial" font-size="12" font-weight="800">Observe</text>
+    <text x="433" y="27" fill="#6b7c91" font-family="'Microsoft YaHei', Arial, sans-serif" font-size="13" font-weight="600">观察审计，攻击链持续聚合但不自动阻断</text>
+    <rect x="746" y="7" width="104" height="32" rx="10" fill="#061a31"/>
+    <path d="M767 19a8 8 0 1 0 3 10" fill="none" stroke="#afc4da" stroke-width="2"/>
+    <text x="783" y="28" class="btn-text">刷新状态</text>
+  </g>
+
+  <rect x="217" y="84" width="1759" height="1164" class="bg"/>
+  <g transform="translate(248 116)">
+    <text class="caption" x="0" y="8">RUNTIME ATTACK CHAINS</text>
+    <text class="title" x="0" y="50">攻击链</text>
+    <text class="sub" x="0" y="75">按 Agent、AgentType、攻击类型与风险等级聚合运行时异常行为链路。</text>
+
+    <g transform="translate(1325 50)">
+      <rect x="0" y="0" width="102" height="31" rx="9" fill="#061a31"/>
+      <text x="31" y="21" class="btn-text">导出报告</text>
+      <path d="M16 9v10m-5-4l5 5 5-5M10 23h13" stroke="#cfe4f8" stroke-width="1.5" fill="none"/>
+      <rect x="113" y="0" width="140" height="31" rx="9" fill="#35c9ae"/>
+      <text x="144" y="21" class="btn-text">重建攻击链</text>
+      <path d="M128 10a8 8 0 1 0 3 13" fill="none" stroke="#ebfffb" stroke-width="1.7"/>
+      <rect x="264" y="0" width="101" height="31" rx="9" fill="#061a31"/>
+      <text x="295" y="21" class="btn-text">刷新结果</text>
+      <path d="M280 10a8 8 0 1 0 3 13" fill="none" stroke="#cfe4f8" stroke-width="1.7"/>
+    </g>
+
+    <g transform="translate(0 96)">
+      <rect x="0" y="0" width="410" height="128" rx="7" class="card" filter="url(#cardShadow)"/>
+      <text x="17" y="31" class="label">覆盖 Agent</text>
+      <text x="17" y="78" class="num-blue">7</text>
+      <text x="63" y="76" class="muted">Agents</text>
+      <text x="17" y="105" class="strong" font-size="13">来自后端攻击链聚合与 Agent 归属</text>
+    </g>
+    <g transform="translate(424 96)">
+      <rect x="0" y="0" width="410" height="128" rx="7" class="card" filter="url(#cardShadow)"/>
+      <text x="17" y="31" class="label">攻击链总数</text>
+      <text x="17" y="78" class="num-purple">186</text>
+      <text x="102" y="76" class="muted">Chains</text>
+      <text x="17" y="105" class="strong" font-size="13">按当前筛选条件返回匹配总量</text>
+    </g>
+    <g transform="translate(848 96)">
+      <rect x="0" y="0" width="410" height="128" rx="7" class="card" filter="url(#cardShadow)"/>
+      <text x="17" y="31" class="label">活跃攻击链</text>
+      <text x="17" y="78" class="num-orange">42</text>
+      <text x="80" y="76" class="muted">Active</text>
+      <text x="17" y="105" class="strong" font-size="13">需要继续观察或触发处置</text>
+    </g>
+    <g transform="translate(1272 96)">
+      <rect x="0" y="0" width="410" height="128" rx="7" class="card" filter="url(#cardShadow)"/>
+      <text x="17" y="31" class="label">高危及以上</text>
+      <text x="17" y="78" class="num-red">68</text>
+      <text x="82" y="76" class="muted">High+</text>
+      <text x="17" y="105" class="strong" font-size="13">critical / high 动态统计</text>
+    </g>
+
+    <g transform="translate(0 240)">
+      <rect x="0" y="0" width="224" height="676" rx="7" fill="#ffffff" stroke="#e2eaf4" filter="url(#softShadow)"/>
+      <text x="14" y="28" class="label">Agents</text>
+      <rect x="190" y="13" width="20" height="20" rx="5" fill="#061a31"/>
+      <text x="197" y="28" fill="#ffffff" font-family="Arial" font-size="12" font-weight="800">7</text>
+      <rect x="14" y="44" width="196" height="82" rx="7" fill="#e9f4ff" stroke="#2581ff" stroke-width="1.4"/>
+      <text x="27" y="69" class="strong" font-size="14">全部 Agent</text>
+      <text x="27" y="92" class="muted">all-agents</text>
+      <text x="27" y="115" class="muted">186 Chains</text>
+      <text x="154" y="115" fill="#e94155" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">68 High+</text>
+      <g transform="translate(14 134)">
+        <rect x="0" y="0" width="196" height="81" rx="7" fill="#f9fbfe" stroke="#e0e8f2"/>
+        <text x="13" y="25" class="strong" font-size="14">AgentRange / OpsPilot</text>
+        <text x="13" y="47" class="muted">agentrange-opspilot</text>
+        <text x="13" y="70" class="muted">74 Chains</text>
+        <text x="151" y="70" fill="#e94155" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">19 Active</text>
+      </g>
+      <g transform="translate(14 224)">
+        <rect x="0" y="0" width="196" height="81" rx="7" fill="#f9fbfe" stroke="#e0e8f2"/>
+        <text x="13" y="25" class="strong" font-size="14">OpenClaw</text>
+        <text x="13" y="47" class="muted">openclaw</text>
+        <text x="13" y="70" class="muted">38 Chains</text>
+        <text x="151" y="70" fill="#e94155" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">8 Active</text>
+      </g>
+      <g transform="translate(14 314)">
+        <rect x="0" y="0" width="196" height="81" rx="7" fill="#f9fbfe" stroke="#e0e8f2"/>
+        <text x="13" y="25" class="strong" font-size="14">Claude Code</text>
+        <text x="13" y="47" class="muted">claude-code</text>
+        <text x="13" y="70" class="muted">31 Chains</text>
+        <text x="154" y="70" fill="#e94155" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">6 Active</text>
+      </g>
+      <g transform="translate(14 404)">
+        <rect x="0" y="0" width="196" height="81" rx="7" fill="#f9fbfe" stroke="#e0e8f2"/>
+        <text x="13" y="25" class="strong" font-size="14">System Environment</text>
+        <text x="13" y="47" class="muted">未归属Agent类型</text>
+        <text x="13" y="70" class="muted">21 Chains</text>
+        <text x="154" y="70" fill="#e94155" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">4 Active</text>
+      </g>
+      <g transform="translate(14 494)">
+        <rect x="0" y="0" width="196" height="81" rx="7" fill="#f9fbfe" stroke="#e0e8f2"/>
+        <text x="13" y="25" class="strong" font-size="14">Cline</text>
+        <text x="13" y="47" class="muted">cline</text>
+        <text x="13" y="70" class="muted">14 Chains</text>
+        <text x="154" y="70" fill="#e94155" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">3 Active</text>
+      </g>
+      <g transform="translate(14 584)">
+        <rect x="0" y="0" width="196" height="73" rx="7" fill="#f9fbfe" stroke="#e0e8f2"/>
+        <text x="13" y="25" class="strong" font-size="14">unknown</text>
+        <text x="13" y="47" class="muted">缺失 AgentType</text>
+        <text x="13" y="68" class="muted">8 Chains</text>
+      </g>
+    </g>
+
+    <g transform="translate(240 240)">
+      <rect x="0" y="0" width="1442" height="88" rx="7" fill="#ffffff" stroke="#e2eaf4"/>
+      <text x="20" y="39" class="title" font-size="25">全部 Agent / 攻击链</text>
+      <text x="20" y="66" class="sub">186 Chains · 42 Active · 144 Contained · 68 High+</text>
+      <text x="1295" y="29" class="mono">runtime-attack-chains</text>
+      <text x="1257" y="61" class="muted">最新结束 2026/09/05 11:27:08</text>
+    </g>
+
+    <g transform="translate(240 356)">
+      <rect x="0" y="0" width="1442" height="560" rx="7" fill="#ffffff" stroke="#e2eaf4" filter="url(#softShadow)"/>
+      <rect x="14" y="16" width="832" height="30" rx="10" fill="#ffffff" stroke="#dbe6f1"/>
+      <circle cx="31" cy="31" r="5" fill="none" stroke="#7e93aa" stroke-width="2"/>
+      <path d="M35 35l6 6" stroke="#7e93aa" stroke-width="2"/>
+      <text x="49" y="36" class="small">搜索攻击链 ID、Agent、会话、trace、攻击类型、检测/决策 ID</text>
+      <rect x="858" y="16" width="137" height="30" rx="10" fill="#061a31"/>
+      <text x="891" y="36" class="btn-text">全部攻击类型</text>
+      <path d="M974 27l6 7 6-7" fill="none" stroke="#708cab" stroke-width="1.5"/>
+      <rect x="1008" y="16" width="137" height="30" rx="10" fill="#061a31"/>
+      <text x="1047" y="36" class="btn-text">全部风险</text>
+      <path d="M1124 27l6 7 6-7" fill="none" stroke="#708cab" stroke-width="1.5"/>
+      <rect x="1158" y="16" width="137" height="30" rx="10" fill="#061a31"/>
+      <text x="1197" y="36" class="btn-text">全部状态</text>
+      <path d="M1274 27l6 7 6-7" fill="none" stroke="#708cab" stroke-width="1.5"/>
+      <rect x="1308" y="16" width="119" height="30" rx="10" fill="#061a31"/>
+      <text x="1341" y="36" class="btn-text">时间倒序</text>
+      <path d="M1406 27l6 7 6-7" fill="none" stroke="#708cab" stroke-width="1.5"/>
+
+      <text x="15" y="76" class="strong" font-size="13">全部攻击链</text>
+      <rect x="88" y="59" width="102" height="23" rx="5" fill="#061a31"/>
+      <text x="111" y="75" class="btn-text" font-size="12">重建当前视图</text>
+      <text x="1354" y="76" class="small">186 条链路</text>
+
+      <line x1="15" y1="105" x2="1426" y2="105" stroke="#dfe8f2"/>
+      <text x="30" y="85" class="table-head" transform="translate(0 42)">攻击链</text>
+      <text x="273" y="85" class="table-head" transform="translate(0 42)">Agent</text>
+      <text x="452" y="85" class="table-head" transform="translate(0 42)">攻击类型</text>
+      <text x="635" y="85" class="table-head" transform="translate(0 42)">风险</text>
+      <text x="747" y="85" class="table-head" transform="translate(0 42)">状态</text>
+      <text x="858" y="85" class="table-head" transform="translate(0 42)">步骤/证据</text>
+      <text x="1006" y="85" class="table-head" transform="translate(0 42)">Trace / Session</text>
+      <text x="1278" y="85" class="table-head" transform="translate(0 42)">结束时间</text>
+
+      <g transform="translate(15 128)">
+        <line x1="0" y1="63" x2="1411" y2="63" stroke="#e7eef6"/>
+        <text x="15" y="22" class="table-cell">提示词注入到工具滥用链</text>
+        <text x="15" y="43" class="table-muted">AC-9f32b1 · detection det-demo-001</text>
+        <text x="258" y="22" class="table-cell">AgentRange / OpsPilot</text>
+        <text x="258" y="43" class="table-muted">type: Codex Agent</text>
+        <rect x="437" y="10" width="113" height="24" rx="5" fill="#f0f5ff"/>
+        <text x="449" y="27" fill="#225dc3" font-family="Consolas, monospace" font-size="12" font-weight="800">prompt_injection</text>
+        <rect x="620" y="10" width="44" height="24" rx="5" fill="#3b0a13"/>
+        <text x="630" y="27" fill="#ff6679" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">高危</text>
+        <rect x="732" y="10" width="45" height="24" rx="5" fill="#40230b"/>
+        <text x="741" y="27" fill="#ffb34d" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">活跃</text>
+        <text x="843" y="22" class="table-cell">4 / 6</text>
+        <text x="991" y="22" class="mono">trace-84ae · sess-1021</text>
+        <text x="1263" y="22" class="table-muted">2026/09/05 11:27:08</text>
+      </g>
+      <g transform="translate(15 195)">
+        <line x1="0" y1="63" x2="1411" y2="63" stroke="#e7eef6"/>
+        <text x="15" y="22" class="table-cell">凭证访问与异常外联链</text>
+        <text x="15" y="43" class="table-muted">AC-72c41a · decision dec-81b7</text>
+        <text x="258" y="22" class="table-cell">Build Assistant</text>
+        <text x="258" y="43" class="table-muted">type: OpenClaw</text>
+        <rect x="437" y="10" width="113" height="24" rx="5" fill="#fff3f0"/>
+        <text x="449" y="27" fill="#b6371a" font-family="Consolas, monospace" font-size="12" font-weight="800">credential_access</text>
+        <rect x="620" y="10" width="44" height="24" rx="5" fill="#3b0a13"/>
+        <text x="630" y="27" fill="#ff6679" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">严重</text>
+        <rect x="732" y="10" width="45" height="24" rx="5" fill="#0c3d2a"/>
+        <text x="741" y="27" fill="#58dda8" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">已控</text>
+        <text x="843" y="22" class="table-cell">5 / 9</text>
+        <text x="991" y="22" class="mono">trace-771c · sess-771c</text>
+        <text x="1263" y="22" class="table-muted">2026/09/05 10:54:44</text>
+      </g>
+      <g transform="translate(15 262)">
+        <line x1="0" y1="63" x2="1411" y2="63" stroke="#e7eef6"/>
+        <text x="15" y="22" class="table-cell">MCP 工具异常调用链</text>
+        <text x="15" y="43" class="table-muted">AC-18e2aa · detection det-7ef1</text>
+        <text x="258" y="22" class="table-cell">OpenClaw</text>
+        <text x="258" y="43" class="table-muted">type: Claude Code</text>
+        <rect x="437" y="10" width="92" height="24" rx="5" fill="#f0f8ff"/>
+        <text x="449" y="27" fill="#1769a8" font-family="Consolas, monospace" font-size="12" font-weight="800">tool_abuse</text>
+        <rect x="620" y="10" width="44" height="24" rx="5" fill="#042d57"/>
+        <text x="630" y="27" fill="#65b6ff" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">中危</text>
+        <rect x="732" y="10" width="45" height="24" rx="5" fill="#40230b"/>
+        <text x="741" y="27" fill="#ffb34d" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">活跃</text>
+        <text x="843" y="22" class="table-cell">3 / 4</text>
+        <text x="991" y="22" class="mono">trace-902e · sess-4490</text>
+        <text x="1263" y="22" class="table-muted">2026/09/05 10:11:27</text>
+      </g>
+      <g transform="translate(15 329)">
+        <line x1="0" y1="63" x2="1411" y2="63" stroke="#e7eef6"/>
+        <text x="15" y="22" class="table-cell">敏感路径枚举与执行链</text>
+        <text x="15" y="43" class="table-muted">AC-883e10 · decision dec-a90d</text>
+        <text x="258" y="22" class="table-cell">System Environment</text>
+        <text x="258" y="43" class="table-muted">type: unknown</text>
+        <rect x="437" y="10" width="106" height="24" rx="5" fill="#f8f2ff"/>
+        <text x="449" y="27" fill="#7246bb" font-family="Consolas, monospace" font-size="12" font-weight="800">process_chain</text>
+        <rect x="620" y="10" width="44" height="24" rx="5" fill="#4a3200"/>
+        <text x="630" y="27" fill="#ffc85a" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">低危</text>
+        <rect x="732" y="10" width="45" height="24" rx="5" fill="#0c3d2a"/>
+        <text x="741" y="27" fill="#58dda8" font-family="'Microsoft YaHei', Arial" font-size="12" font-weight="800">已控</text>
+        <text x="843" y="22" class="table-cell">6 / 10</text>
+        <text x="991" y="22" class="mono">trace-518b · sess-e418</text>
+        <text x="1263" y="22" class="table-muted">2026/09/04 18:01:45</text>
+      </g>
+    </g>
+  </g>
+</svg>

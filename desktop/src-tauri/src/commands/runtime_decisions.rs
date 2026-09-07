@@ -184,13 +184,15 @@ fn urlencode(value: &str) -> String {
 pub fn get_runtime_decisions(
     app: tauri::AppHandle,
     limit: Option<usize>,
+    detection_id: Option<String>,
 ) -> Result<RuntimeDecisionListResponse, String> {
     let limit = limit.unwrap_or(200).clamp(10, 1_000);
-    crate::commands::gateway_api::get_json::<RuntimeDecisionListResponse>(
-        &app,
-        &format!("/api/v1/runtime-decisions?limit={limit}"),
-    )
-    .map_err(|error| format!("Go Gateway 暂不可用，运行时决策只能由 Go 后端提供：{error}"))
+    let mut path = format!("/api/v1/runtime-decisions?limit={limit}");
+    if let Some(id) = detection_id.filter(|id| !id.trim().is_empty()) {
+        path.push_str(&format!("&detection_id={}", urlencode(id.trim())));
+    }
+    crate::commands::gateway_api::get_json::<RuntimeDecisionListResponse>(&app, &path)
+        .map_err(|error| format!("Go Gateway 暂不可用，运行时决策只能由 Go 后端提供：{error}"))
 }
 
 #[tauri::command]

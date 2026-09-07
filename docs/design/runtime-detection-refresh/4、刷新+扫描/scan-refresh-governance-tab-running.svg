@@ -1,0 +1,214 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1976" height="1248" viewBox="0 0 1976 1248">
+  <defs>
+    <style>
+      .bg { fill: #f3f6fb; }
+      .sidebar { fill: #061421; }
+      .sidebar-active { fill: #0f2f36; stroke: #27d3bd; stroke-width: 2; }
+      .topbar { fill: #ffffff; stroke: #e6edf6; stroke-width: 1; }
+      .card { fill: #ffffff; stroke: #e5ebf4; stroke-width: 1; }
+      .soft { fill: #f8fafc; stroke: #e5ebf4; stroke-width: 1; }
+      .soft-blue { fill: #eef6ff; stroke: #9ac7ff; stroke-width: 1.5; }
+      .soft-green { fill: #eefaf5; stroke: #8ce0ba; stroke-width: 1.5; }
+      .dark-btn { fill: #061b32; }
+      .disabled-btn { fill: #d9e1ee; }
+      .primary-btn { fill: #15c4a3; }
+      .line { stroke: #e8eef6; stroke-width: 1; }
+      .muted { fill: #667085; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 15px; }
+      .tiny { fill: #8a97a8; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 13px; }
+      .body { fill: #253149; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 16px; }
+      .strong { fill: #14213a; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 17px; font-weight: 700; }
+      .title { fill: #14213a; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 32px; font-weight: 800; }
+      .h2 { fill: #14213a; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 22px; font-weight: 800; }
+      .h3 { fill: #14213a; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 19px; font-weight: 800; }
+      .eyebrow { fill: #2678ff; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 12px; font-weight: 800; letter-spacing: 4px; }
+      .white { fill: #ffffff; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; }
+      .nav { fill: #8aa0b6; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 15px; font-weight: 600; }
+      .nav-active { fill: #ffffff; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 15px; font-weight: 700; }
+      .num { fill: #1677ff; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 42px; font-weight: 900; }
+      .num-green { fill: #15a679; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 42px; font-weight: 900; }
+      .num-orange { fill: #f97316; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 42px; font-weight: 900; }
+      .num-purple { fill: #7c3aed; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 42px; font-weight: 900; }
+      .chip { fill: #eef2f7; stroke: #dce5f1; stroke-width: 1; }
+      .chip-blue { fill: #eaf3ff; stroke: #91caff; stroke-width: 1; }
+      .chip-green { fill: #eafaf3; stroke: #8ce0ba; stroke-width: 1; }
+      .chip-orange { fill: #fff7e6; stroke: #ffd591; stroke-width: 1; }
+      .chip-text { fill: #334155; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 13px; font-weight: 700; }
+      .chip-blue-text { fill: #0958d9; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 13px; font-weight: 800; }
+      .chip-green-text { fill: #087c55; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 13px; font-weight: 800; }
+      .chip-orange-text { fill: #ad4e00; font-family: Inter, "Microsoft YaHei", Arial, sans-serif; font-size: 13px; font-weight: 800; }
+      .mono { fill: #334155; font-family: "JetBrains Mono", Consolas, monospace; font-size: 13px; }
+    </style>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#0f172a" flood-opacity=".08" />
+    </filter>
+  </defs>
+
+  <rect class="bg" width="1976" height="1248" />
+  <rect class="sidebar" x="0" y="0" width="238" height="1248" />
+  <rect x="22" y="26" width="40" height="40" rx="10" fill="#51d5d0" />
+  <path d="M42 36 L52 41 L50 55 L42 60 L34 55 L32 41 Z" fill="#06344a" />
+  <text x="74" y="41" class="white" font-size="18" font-weight="800">TraceBastion</text>
+  <text x="74" y="58" class="white" font-size="9" font-weight="700" opacity=".65">AGENT SECURITY CONTROL</text>
+  <text x="74" y="70" class="white" font-size="9" font-weight="700" opacity=".65">PLANE</text>
+
+  <g transform="translate(28,124)">
+    <text class="nav" y="0">安全总览</text>
+    <text class="nav" y="42">靶场控制</text>
+    <rect class="sidebar-active" x="-12" y="72" width="196" height="40" rx="13" />
+    <text class="nav-active" y="98">Agent 治理中心</text>
+    <text class="nav" y="146">Agent 检测</text>
+    <text class="nav" y="188">静态资源检测</text>
+    <text class="nav" y="230">事件检测</text>
+    <text class="nav" y="272">攻击链</text>
+    <text class="nav" y="314">系统设置</text>
+  </g>
+
+  <rect class="topbar" x="238" y="0" width="1738" height="84" />
+  <text x="270" y="31" class="eyebrow">WINDOWS 安全工作台</text>
+  <text x="270" y="58" class="h3">Agent 治理中心</text>
+  <rect class="dark-btn" x="1602" y="22" width="128" height="36" rx="12" />
+  <text x="1634" y="45" class="white" font-size="14" font-weight="700">刷新状态</text>
+  <rect x="1744" y="22" width="184" height="36" rx="12" fill="#ffffff" stroke="#d8e3f1" />
+  <text x="1776" y="45" class="body" font-size="14">Observe 模式</text>
+
+  <g transform="translate(270,118)">
+    <text class="eyebrow" y="0">AGENT GOVERNANCE</text>
+    <text class="title" y="43">Agent 治理中心</text>
+    <text class="muted" y="72">扫描触发与页面刷新在同一个治理页面内配置，但语义保持分离。</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="card" x="270" y="214" width="395" height="116" rx="8" />
+    <text x="294" y="250" class="muted">后端扫描策略</text>
+    <text x="294" y="300" class="num">4</text>
+    <rect class="chip-blue" x="356" y="274" width="86" height="26" rx="8" />
+    <text class="chip-blue-text" x="372" y="292">scan jobs</text>
+
+    <rect class="card" x="682" y="214" width="395" height="116" rx="8" />
+    <text x="706" y="250" class="muted">自动扫描触发</text>
+    <text x="706" y="300" class="num-green">2</text>
+    <rect class="chip-green" x="764" y="274" width="130" height="26" rx="8" />
+    <text class="chip-green-text" x="780" y="292">watcher / scheduler</text>
+
+    <rect class="card" x="1094" y="214" width="395" height="116" rx="8" />
+    <text x="1118" y="250" class="muted">自动刷新页面</text>
+    <text x="1118" y="300" class="num-purple">8</text>
+    <rect class="chip-blue" x="1174" y="274" width="76" height="26" rx="8" />
+    <text class="chip-blue-text" x="1190" y="292">pages</text>
+
+    <rect class="card" x="1506" y="214" width="395" height="116" rx="8" />
+    <text x="1530" y="250" class="muted">最近扫描任务</text>
+    <text x="1530" y="300" class="num-orange">64%</text>
+    <rect class="chip-orange" x="1644" y="274" width="84" height="26" rx="8" />
+    <text class="chip-orange-text" x="1662" y="292">running</text>
+  </g>
+
+  <g transform="translate(270,360)">
+    <text class="muted" x="0" y="0">Agent 类型管理</text>
+    <text class="muted" x="132" y="0">Agent 发现规则</text>
+    <text class="muted" x="276" y="0">资源发现规则</text>
+    <text class="muted" x="420" y="0">扫描方案</text>
+    <rect x="520" y="-24" width="146" height="36" rx="10" fill="#eaf3ff" stroke="#7db7ff" />
+    <text class="chip-blue-text" x="536" y="0">扫描与刷新策略</text>
+    <text class="muted" x="692" y="0">决策与动作</text>
+    <text class="muted" x="800" y="0">风险解释</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="card" x="270" y="390" width="1631" height="806" rx="8" />
+  </g>
+
+  <rect class="soft-green" x="294" y="414" width="1583" height="66" rx="8" />
+  <text x="318" y="444" class="strong">静态资源扫描正在执行，完成后自动刷新相关页面数据</text>
+  <text x="318" y="466" class="muted">当前 Job 写入 static_resources / scan_findings；前端只在 Job 进度或 changes 提示后读取数据库。</text>
+
+  <g transform="translate(294,506)">
+    <rect class="card" width="760" height="398" rx="8" />
+    <text x="20" y="36" class="h2">手动扫描任务</text>
+    <rect class="dark-btn" x="604" y="18" width="132" height="30" rx="10" />
+    <text x="632" y="38" class="white" font-size="13" font-weight="700">只刷新数据</text>
+    <line class="line" x1="20" y1="58" x2="740" y2="58" />
+
+    <rect class="soft" x="20" y="78" width="720" height="72" rx="8" />
+    <text x="38" y="106" class="strong">Agent 发现</text>
+    <text x="38" y="128" class="tiny">POST /api/v1/jobs 或现有 Agent scan bridge</text>
+    <rect class="disabled-btn" x="618" y="98" width="100" height="32" rx="10" />
+    <text x="641" y="119" class="muted" font-size="13" font-weight="700">开始扫描</text>
+
+    <rect x="20" y="162" width="720" height="96" rx="8" fill="#eef6ff" stroke="#91caff" stroke-width="1.5" />
+    <text x="38" y="190" class="strong">静态资源扫描</text>
+    <text x="38" y="212" class="tiny">正在扫描配置、Skill、Plugin、MCP、Prompt、Credential。</text>
+    <rect class="chip-orange" x="38" y="224" width="68" height="24" rx="8" />
+    <text class="chip-orange-text" x="54" y="241">running</text>
+    <rect class="primary-btn" x="618" y="194" width="100" height="32" rx="10" />
+    <text x="641" y="215" class="white" font-size="13" font-weight="700">扫描中</text>
+
+    <rect class="soft" x="20" y="270" width="720" height="72" rx="8" />
+    <text x="38" y="298" class="strong">事件检测重放</text>
+    <text x="38" y="320" class="tiny">POST /api/v1/jobs kind=event_replay</text>
+    <rect class="disabled-btn" x="618" y="290" width="100" height="32" rx="10" />
+    <text x="641" y="311" class="muted" font-size="13" font-weight="700">开始扫描</text>
+  </g>
+
+  <g transform="translate(1078,506)">
+    <rect class="card" width="799" height="398" rx="8" />
+    <text x="20" y="36" class="h2">最近 Job 状态</text>
+    <rect class="chip-orange" x="672" y="18" width="92" height="30" rx="10" />
+    <text class="chip-orange-text" x="694" y="38">running</text>
+    <line class="line" x1="20" y1="58" x2="779" y2="58" />
+
+    <text x="24" y="94" class="muted">任务类型</text>
+    <text x="146" y="94" class="strong">static_assets</text>
+    <text x="24" y="128" class="muted">触发来源</text>
+    <text x="146" y="128" class="strong">manual</text>
+    <text x="24" y="162" class="muted">扫描模式</text>
+    <text x="146" y="162" class="strong">full</text>
+    <text x="24" y="196" class="muted">影响数据域</text>
+    <text x="146" y="196" class="mono">static_resources, scan_findings, scan_jobs</text>
+
+    <rect class="soft" x="24" y="222" width="751" height="104" rx="8" />
+    <text x="44" y="252" class="strong">扫描进度 64%</text>
+    <rect x="44" y="272" width="694" height="14" rx="7" fill="#e5ecf6" />
+    <rect x="44" y="272" width="444" height="14" rx="7" fill="#1677ff" />
+    <text x="44" y="312" class="mono">job_id: job-static-assets-20260905-001</text>
+
+    <rect class="soft-blue" x="24" y="342" width="751" height="36" rx="8" />
+    <text x="44" y="365" class="body">完成后：刷新静态资源页、总览卡片和扫描任务状态，不触发新的扫描。</text>
+  </g>
+
+  <g transform="translate(294,930)">
+    <rect class="card" width="1583" height="236" rx="8" />
+    <text x="20" y="36" class="h2">前端刷新策略</text>
+    <rect class="chip-blue" x="1390" y="18" width="154" height="30" rx="10" />
+    <text class="chip-blue-text" x="1412" y="38">按页面独立间隔</text>
+    <line class="line" x1="20" y1="58" x2="1563" y2="58" />
+
+    <rect class="soft" x="20" y="78" width="374" height="122" rx="8" />
+    <text x="40" y="108" class="strong">静态资源检测页</text>
+    <text x="40" y="134" class="tiny">自动刷新：10 秒</text>
+    <text x="40" y="158" class="mono">GET /api/v1/static-resources</text>
+    <rect class="chip-orange" x="278" y="102" width="82" height="26" rx="8" />
+    <text class="chip-orange-text" x="294" y="120">waiting</text>
+
+    <rect class="soft" x="414" y="78" width="374" height="122" rx="8" />
+    <text x="434" y="108" class="strong">事件检测页</text>
+    <text x="434" y="134" class="tiny">自动刷新：8 秒</text>
+    <text x="434" y="158" class="mono">GET /api/v1/runtime-detections</text>
+    <rect class="chip" x="672" y="102" width="82" height="26" rx="8" />
+    <text class="chip-text" x="694" y="120">idle</text>
+
+    <rect class="soft" x="808" y="78" width="374" height="122" rx="8" />
+    <text x="828" y="108" class="strong">攻击链页</text>
+    <text x="828" y="134" class="tiny">自动刷新：10 秒</text>
+    <text x="828" y="158" class="mono">GET /api/v1/attack-chains</text>
+    <rect class="chip" x="1066" y="102" width="82" height="26" rx="8" />
+    <text class="chip-text" x="1088" y="120">idle</text>
+
+    <rect class="soft" x="1202" y="78" width="341" height="122" rx="8" />
+    <text x="1222" y="108" class="strong">Agent 检测页</text>
+    <text x="1222" y="134" class="tiny">自动刷新：15 秒</text>
+    <text x="1222" y="158" class="mono">GET /api/v1/agents</text>
+    <rect class="chip" x="1434" y="102" width="82" height="26" rx="8" />
+    <text class="chip-text" x="1456" y="120">idle</text>
+  </g>
+</svg>

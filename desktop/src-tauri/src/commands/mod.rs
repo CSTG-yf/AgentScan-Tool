@@ -12,6 +12,7 @@ pub(crate) mod lifecycle;
 pub(crate) mod policy;
 pub(crate) mod range;
 pub(crate) mod runtime_decisions;
+pub(crate) mod runtime_detection_settings;
 pub(crate) mod settings;
 pub(crate) mod static_assets;
 pub(crate) mod static_scan;

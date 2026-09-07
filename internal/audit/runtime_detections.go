@@ -171,11 +171,12 @@ func (s *Store) RecordRuntimeDetection(in RuntimeDetectionInput) (RuntimeDetecti
 SELECT detection_id, first_seen_at, last_seen_at, severity, confidence, status, event_count
 FROM runtime_detections
 WHERE rule_id = ? AND agent_id = ? AND detection_type = ? AND "delete" = 0
+	AND COALESCE(rule_version,'') = ?
   AND ((? IS NULL AND session_id IS NULL) OR session_id = ?)
   AND status != ? AND last_seen_at >= ?
 ORDER BY last_seen_at DESC
 LIMIT 1`,
-		in.RuleID, in.AgentID, in.DetectionType,
+		in.RuleID, in.AgentID, in.DetectionType, in.RuleVersion,
 		sessionKey, sessionKey,
 		RuntimeDetectionStatusResolved, cutoff,
 	).Scan(&existingID, &firstSeen, &lastSeen, &severity, &confidence, &status, &eventCount)
@@ -390,18 +391,12 @@ WHERE agent_type_filter.id = runtime_detections.agent_id
 		}
 	}
 	if values := runtimeDetectionFilterValues(f.Source, strings.ToLower); len(values) > 0 {
-		// New rows persist source directly. The JSON fallback keeps filters
-		// useful for rows written before the source column was introduced.
-		placeholders := runtimeDetectionPlaceholders(len(values))
-		correlationFallback := "(COALESCE(source, '') = '' AND (event_count > 1 OR LOWER(detection_type) LIKE '%exfiltration%' OR LOWER(detection_type) LIKE '%exploit%') AND 'correlation_engine' IN (" + placeholders + "))"
-		runtimeFallback := "(COALESCE(source, '') = '' AND event_count <= 1 AND 'runtime_detection' IN (" + placeholders + "))"
-		conds = append(conds, "(LOWER(COALESCE(source, '')) IN ("+placeholders+") OR "+correlationFallback+" OR "+runtimeFallback+")")
-		for _, value := range values {
-			args = append(args, value)
-		}
-		for _, value := range values {
-			args = append(args, value)
-		}
+		// Match the displayed source for legacy records before pagination, using
+		// the same precedence as the API: column, attributes, correlation, default.
+		conds = append(conds, `LOWER(COALESCE(NULLIF(TRIM(source), ''),
+NULLIF(TRIM(CASE WHEN json_valid(attributes_json) THEN CASE WHEN json_type(attributes_json, '$.source') = 'text' THEN json_extract(attributes_json, '$.source') END END), ''),
+CASE WHEN event_count > 1 OR LOWER(rule_id) LIKE '%exfiltration%' OR LOWER(detection_type) LIKE '%exfiltration%' OR LOWER(detection_type) LIKE '%exploit%'
+THEN 'correlation_engine' ELSE 'runtime_detection' END)) IN (`+runtimeDetectionPlaceholders(len(values))+`)`)
 		for _, value := range values {
 			args = append(args, value)
 		}

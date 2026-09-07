@@ -10,6 +10,8 @@ DefenseClaw is the governance layer for OpenClaw and agentic AI runtimes. It sca
 |-------|-------------|
 | [Install](INSTALL.md) | DGX Spark, macOS, Linux, existing OpenClaw installs, and source builds |
 | [Quick Start](QUICKSTART.md) | First successful setup, scan, guardrail, and dashboard flow |
+| [TraceBastion](../README.md) | Current project overview, Windows desktop, source installation, and code navigation |
+| [AgentRange](AGENTRANGE.md) | Compose adapter setup, runtime replay prerequisites, evidence, and reports |
 | [Architecture](ARCHITECTURE.md) | System diagram, data flow, and component responsibilities |
 | [CLI Reference](CLI.md) | Python CLI commands and flags |
 | [API Reference](API.md) | Go sidecar REST API endpoints |
@@ -38,7 +40,7 @@ DefenseClaw is the governance layer for OpenClaw and agentic AI runtimes. It sca
 | [OpenTelemetry](OTEL.md) | OTEL signal specification and Splunk mapping |
 | [OTEL Implementation Status](OTEL-IMPLEMENTATION-STATUS.md) | Implementation tracking notes |
 | [Splunk App](SPLUNK_APP.md) | Local Splunk app purpose, dashboards, signals, and investigation flow |
-| [TUI](TUI.md) | Dashboard usage, keybindings, and navigation |
+| [TUI](../docs-site/content/docs/tui.mdx) | Dashboard usage, keybindings, and navigation |
 | [E2E](E2E.md) | End-to-end test harnesses and local validation |
 
 ## Development

@@ -184,7 +184,8 @@ type ActionEntry struct {
 }
 
 type Store struct {
-	db *sql.DB
+	db                      *sql.DB
+	runtimeSettingsRevision atomic.Uint64
 }
 
 // auditPragmas is the pragma set applied to every connection in the
@@ -2704,6 +2705,14 @@ WHERE id = ?`,
 			return nil
 		},
 	},
+	{
+		description: "runtime detection settings: scoped rules, blacklists and risk policies",
+		apply:       migrateRuntimeDetectionSettings,
+	},
+	{
+		description: "scan schedules: independent backend task scheduling",
+		apply:       migrateScanSchedules,
+	},
 }
 
 type agentDiscoverySeed struct {
@@ -3310,6 +3319,7 @@ var knownTables = map[string]bool{
 	"behavior_events":       true,
 	"app_settings":          true,
 	"scan_jobs":             true,
+	"scan_schedules":        true,
 	// v7 additions
 	"scan_findings":   true,
 	"activity_events": true,

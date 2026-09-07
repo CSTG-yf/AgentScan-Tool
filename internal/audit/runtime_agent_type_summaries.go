@@ -21,6 +21,7 @@ type RuntimeDetectionAgentTypeSummary struct {
 	AgentTypeKey  string         `json:"agent_type_key,omitempty"`
 	AgentTypeName string         `json:"agent_type_name,omitempty"`
 	TotalEvents   int            `json:"total_events"`
+	AttackEvents  int            `json:"attack_events"`
 	RiskCounts    map[string]int `json:"risk_counts"`
 	BlockedEvents int            `json:"blocked_events,omitempty"`
 	OpenEvents    int            `json:"open_events,omitempty"`
@@ -30,17 +31,27 @@ type RuntimeDetectionAgentTypeSummary struct {
 // RuntimeAttackChainAgentTypeSummary is the per-AgentType aggregate used by
 // the attack-chain page. StatusCounts and SeverityCounts are dynamic maps so
 // new backend status/severity values remain visible without a frontend enum.
+// RuntimeAttackChainAgentSummary counts matching chains for one persisted identity.
+// It is independent of list pagination and keeps same-name instances separate.
+type RuntimeAttackChainAgentSummary struct {
+	AgentID     string `json:"agent_id"`
+	TotalChains int    `json:"total_chains"`
+	HighOrAbove int    `json:"high_or_above"`
+}
+
 type RuntimeAttackChainAgentTypeSummary struct {
-	AgentTypeID     int64          `json:"agent_type_id"`
-	AgentType       string         `json:"agent_type"`
-	AgentTypeKey    string         `json:"agent_type_key,omitempty"`
-	AgentTypeName   string         `json:"agent_type_name,omitempty"`
-	TotalChains     int            `json:"total_chains"`
-	StatusCounts    map[string]int `json:"status_counts"`
-	SeverityCounts  map[string]int `json:"severity_counts"`
-	ActiveChains    int            `json:"active_chains,omitempty"`
-	ContainedChains int            `json:"contained_chains,omitempty"`
-	LatestAt        string         `json:"latest_at,omitempty"`
+	CoveredAgents   int                              `json:"covered_agents"`
+	Agents          []RuntimeAttackChainAgentSummary `json:"agents"`
+	AgentTypeID     int64                            `json:"agent_type_id"`
+	AgentType       string                           `json:"agent_type"`
+	AgentTypeKey    string                           `json:"agent_type_key,omitempty"`
+	AgentTypeName   string                           `json:"agent_type_name,omitempty"`
+	TotalChains     int                              `json:"total_chains"`
+	StatusCounts    map[string]int                   `json:"status_counts"`
+	SeverityCounts  map[string]int                   `json:"severity_counts"`
+	ActiveChains    int                              `json:"active_chains,omitempty"`
+	ContainedChains int                              `json:"contained_chains,omitempty"`
+	LatestAt        string                           `json:"latest_at,omitempty"`
 }
 
 type runtimeAgentTypeSummaryKey struct {
@@ -68,11 +79,12 @@ SELECT
        COALESCE(TRIM(t.name), ''),
        COALESCE(NULLIF(LOWER(TRIM(d.severity)), ''), 'unknown'),
        COUNT(*),
+       COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(d.category, ''))) = 'attack' THEN 1 ELSE 0 END), 0),
        COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(d.status, ''))) IN ('blocked', 'mitigated') THEN 1 ELSE 0 END), 0),
        COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(d.status, ''))) = 'open' THEN 1 ELSE 0 END), 0),
        COALESCE(MAX(d.last_seen_at), '')
 FROM (
-       SELECT agent_id, severity, status, last_seen_at
+       SELECT agent_id, category, severity, status, last_seen_at
        FROM runtime_detections
        `+where+`
 ) d
@@ -95,14 +107,14 @@ ORDER BY 2 ASC, 1 ASC, 5 ASC`, args...)
 	byType := make(map[runtimeAgentTypeSummaryKey]*RuntimeDetectionAgentTypeSummary)
 	for rows.Next() {
 		var (
-			key                  runtimeAgentTypeSummaryKey
-			risk                 string
-			count, blocked, open int
-			latest               string
+			key                          runtimeAgentTypeSummaryKey
+			risk                         string
+			count, attack, blocked, open int
+			latest                       string
 		)
 		if err := rows.Scan(
 			&key.ID, &key.Type, &key.Key, &key.Name, &risk,
-			&count, &blocked, &open, &latest,
+			&count, &attack, &blocked, &open, &latest,
 		); err != nil {
 			return nil, err
 		}
@@ -122,6 +134,7 @@ ORDER BY 2 ASC, 1 ASC, 5 ASC`, args...)
 		// COUNT(*) is repeated for each risk-level row. Add the per-risk
 		// count instead of adding the repeated total.
 		item.TotalEvents += count
+		item.AttackEvents += attack
 		item.RiskCounts[risk] += count
 		item.BlockedEvents += blocked
 		item.OpenEvents += open
@@ -166,7 +179,8 @@ SELECT
        COALESCE(NULLIF(LOWER(TRIM(d.status)), ''), 'unknown'),
        COALESCE(NULLIF(LOWER(TRIM(d.severity)), ''), 'unknown'),
        COUNT(*),
-       COALESCE(MAX(d.end_time), '')
+       COALESCE(MAX(d.end_time), ''),
+       COALESCE(d.agent_id, '')
 FROM (
        SELECT agent_id, status, severity, end_time
        FROM runtime_attack_chains
@@ -182,7 +196,8 @@ GROUP BY
        COALESCE(TRIM(t.type_key), ''),
        COALESCE(TRIM(t.name), ''),
        COALESCE(NULLIF(LOWER(TRIM(d.status)), ''), 'unknown'),
-       COALESCE(NULLIF(LOWER(TRIM(d.severity)), ''), 'unknown')
+       COALESCE(NULLIF(LOWER(TRIM(d.severity)), ''), 'unknown'),
+       COALESCE(d.agent_id, '')
 ORDER BY 2 ASC, 1 ASC, 5 ASC, 6 ASC`, args...)
 	if err != nil {
 		return nil, err
@@ -190,16 +205,17 @@ ORDER BY 2 ASC, 1 ASC, 5 ASC, 6 ASC`, args...)
 	defer rows.Close()
 
 	byType := make(map[runtimeAgentTypeSummaryKey]*RuntimeAttackChainAgentTypeSummary)
+	byAgent := make(map[runtimeAgentTypeSummaryKey]map[string]*RuntimeAttackChainAgentSummary)
 	for rows.Next() {
 		var (
-			key          runtimeAgentTypeSummaryKey
-			status, risk string
-			count        int
-			latest       string
+			key             runtimeAgentTypeSummaryKey
+			status, risk    string
+			count           int
+			latest, agentID string
 		)
 		if err := rows.Scan(
 			&key.ID, &key.Type, &key.Key, &key.Name,
-			&status, &risk, &count, &latest,
+			&status, &risk, &count, &latest, &agentID,
 		); err != nil {
 			return nil, err
 		}
@@ -217,6 +233,18 @@ ORDER BY 2 ASC, 1 ASC, 5 ASC, 6 ASC`, args...)
 				SeverityCounts: map[string]int{},
 			}
 			byType[key] = item
+			byAgent[key] = make(map[string]*RuntimeAttackChainAgentSummary)
+		}
+		if strings.TrimSpace(agentID) != "" {
+			agent := byAgent[key][agentID]
+			if agent == nil {
+				agent = &RuntimeAttackChainAgentSummary{AgentID: agentID}
+				byAgent[key][agentID] = agent
+			}
+			agent.TotalChains += count
+			if risk == "high" || risk == "critical" {
+				agent.HighOrAbove += count
+			}
 		}
 		item.TotalChains += count
 		item.StatusCounts[status] += count
@@ -236,7 +264,13 @@ ORDER BY 2 ASC, 1 ASC, 5 ASC, 6 ASC`, args...)
 	}
 
 	out := make([]RuntimeAttackChainAgentTypeSummary, 0, len(byType))
-	for _, item := range byType {
+	for key, item := range byType {
+		item.Agents = make([]RuntimeAttackChainAgentSummary, 0, len(byAgent[key]))
+		for _, agent := range byAgent[key] {
+			item.Agents = append(item.Agents, *agent)
+		}
+		sort.Slice(item.Agents, func(i, j int) bool { return item.Agents[i].AgentID < item.Agents[j].AgentID })
+		item.CoveredAgents = len(item.Agents)
 		out = append(out, *item)
 	}
 	sort.Slice(out, func(i, j int) bool {

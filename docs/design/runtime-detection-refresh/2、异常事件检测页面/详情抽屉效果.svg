@@ -1,0 +1,275 @@
+<svg width="1976" height="1248" viewBox="0 0 1976 1248" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="softShadow" x="-20%" y="-30%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <filter id="drawerShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="-12" dy="0" stdDeviation="26" flood-color="#0b1220" flood-opacity="0.22"/>
+    </filter>
+    <filter id="navGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#43d8d0" flood-opacity="0.38"/>
+    </filter>
+  </defs>
+  <style>
+    .font { font-family: "Inter", "Microsoft YaHei", "PingFang SC", Arial, sans-serif; }
+    .sidebar { fill: #071421; }
+    .topbar { fill: #ffffff; stroke: #e5ebf4; stroke-width: 1; }
+    .canvas { fill: #f3f7fb; }
+    .card { fill: #ffffff; stroke: #e6edf6; stroke-width: 1; rx: 8; filter: url(#softShadow); }
+    .subcard { fill: #f8fafc; stroke: #e1e8f2; stroke-width: 1; rx: 8; }
+    .subcardActive { fill: #eaf4ff; stroke: #2f8cff; stroke-width: 1.6; rx: 8; }
+    .input { fill: #ffffff; stroke: #d8e1ee; stroke-width: 1; rx: 8; }
+    .selectDark { fill: #071c35; stroke: #113b66; stroke-width: 1; rx: 8; }
+    .navActive { fill: #0b2b34; stroke: #36d4c6; stroke-width: 1.6; rx: 14; }
+    .tableHead { fill: #fbfcfe; stroke: #e8eef6; stroke-width: 1; }
+    .tableRow { fill: #ffffff; stroke: #edf2f7; stroke-width: 1; }
+    .tableRowHover { fill: #f6f9ff; stroke: #bfd9ff; stroke-width: 1; }
+    .drawer { fill: #103e70; filter: url(#drawerShadow); }
+    .drawerPanel { fill: #0a2f58; stroke: #2d6293; stroke-width: 1; rx: 7; }
+    .drawerSoft { fill: #0c3562; stroke: #2d6293; stroke-width: 1; rx: 7; }
+    .drawerButton { fill: #08294c; stroke: #6da4d8; stroke-width: 1; rx: 8; }
+    .drawerButtonPrimary { fill: #0b2a4f; stroke: #79b5f0; stroke-width: 1.2; rx: 8; }
+    .drawerLine { stroke: #2d6293; stroke-width: 1; }
+    .tagBlue { fill: #174f84; stroke: #72b7f8; rx: 5; }
+    .tagRed { fill: #7f1d1d; stroke: #fca5a5; rx: 5; }
+    .tagOrange { fill: #7c2d12; stroke: #fdba74; rx: 5; }
+    .tagGreen { fill: #14532d; stroke: #86efac; rx: 5; }
+    .title { fill: #0f1f35; font-size: 31px; font-weight: 800; }
+    .h2 { fill: #14213a; font-size: 22px; font-weight: 780; }
+    .strong { fill: #14213a; font-size: 15px; font-weight: 760; }
+    .body { fill: #334155; font-size: 14px; }
+    .muted { fill: #718096; font-size: 13px; }
+    .small { fill: #8a99ad; font-size: 12px; }
+    .eyebrow { fill: #1d6fff; font-size: 11px; font-weight: 800; letter-spacing: 4px; }
+    .navText { fill: #8aa0b8; font-size: 14px; }
+    .navTextActive { fill: #ecfeff; font-size: 14px; font-weight: 700; }
+    .logo { fill: #d9f7f7; font-size: 15px; font-weight: 800; }
+    .logoSub { fill: #7e94ad; font-size: 8px; font-weight: 800; letter-spacing: 2px; }
+    .dTitle { fill: #ffffff; font-size: 16px; font-weight: 800; }
+    .dStrong { fill: #ffffff; font-size: 13px; font-weight: 760; }
+    .dText { fill: #d9ebff; font-size: 13px; font-weight: 620; }
+    .dMuted { fill: #9fc0e5; font-size: 13px; }
+    .dSmall { fill: #9fc0e5; font-size: 12px; }
+    .mono { font-family: "Cascadia Code", Consolas, monospace; }
+  </style>
+
+  <rect width="1976" height="1248" class="canvas"/>
+  <rect width="218" height="1248" class="sidebar"/>
+
+  <g class="font">
+    <g transform="translate(20 25)">
+      <rect width="36" height="36" rx="10" fill="#55d9d6" filter="url(#navGlow)"/>
+      <path d="M18 9 L27 13 L27 23 C27 27 23 30 18 32 C13 30 9 27 9 23 L9 13 Z" fill="none" stroke="#064052" stroke-width="2"/>
+      <path d="M14 19 L17 22 L23 15" fill="none" stroke="#064052" stroke-width="2" stroke-linecap="round"/>
+      <text x="48" y="15" class="logo">TraceBastion</text>
+      <text x="48" y="27" class="logoSub">AGENT SECURITY CONTROL</text>
+      <text x="48" y="38" class="logoSub">PLANE</text>
+    </g>
+    <g transform="translate(30 115)">
+      <text y="0" class="navText">⌁  安全总览</text>
+      <text y="42" class="navText">♜  靶场控制</text>
+      <text y="84" class="navText">◇  Agent 治理中心</text>
+      <text y="126" class="navText">◎  Agent 检测</text>
+      <text y="168" class="navText">▦  静态资源检测</text>
+      <g transform="translate(-20 188)">
+        <rect width="190" height="38" class="navActive"/>
+        <text x="22" y="25" class="navTextActive">▤  事件检测</text>
+      </g>
+      <text y="258" class="navText">▧  攻击链</text>
+      <text y="300" class="navText">⚙  系统设置</text>
+      <text y="342" class="navText">⌘  告警中心</text>
+      <text y="384" class="navText">▣  行为追踪</text>
+      <text y="426" class="navText">▥  策略中心</text>
+    </g>
+
+    <rect x="218" y="0" width="1758" height="84" class="topbar"/>
+    <text x="248" y="31" class="eyebrow">WINDOWS 安全工作台</text>
+    <g transform="translate(1088 22)">
+      <rect width="58" height="36" rx="10" fill="#071c35"/>
+      <text x="17" y="24" fill="#9fb6cf" font-size="14">◉</text>
+      <text x="39" y="24" fill="#9fb6cf" font-size="14">☰</text>
+      <rect x="70" width="664" height="42" rx="10" fill="#ffffff" stroke="#d6e2f1"/>
+      <text x="86" y="26" class="muted">全局防护模式</text>
+      <rect x="154" y="7" width="194" height="28" rx="8" fill="#071c35"/>
+      <text x="170" y="26" fill="#aebdd0" font-size="13">Baseline</text>
+      <rect x="222" y="7" width="70" height="28" rx="7" fill="#123b63"/>
+      <text x="242" y="26" fill="#eaf4ff" font-size="13">Observe</text>
+      <text x="306" y="26" fill="#aebdd0" font-size="13">Action</text>
+      <rect x="362" y="10" width="72" height="22" rx="7" fill="#0b3359"/>
+      <text x="382" y="26" fill="#7fc2ff" font-size="12">Observe</text>
+      <text x="444" y="26" class="muted">观察审计，检测本机 Agent 和靶场流量但不阻断</text>
+      <rect x="748" y="6" width="100" height="30" rx="10" fill="#071c35"/>
+      <text x="773" y="26" fill="#ffffff" font-size="13">刷新状态</text>
+    </g>
+
+    <g transform="translate(248 118)">
+      <text class="eyebrow">RUNTIME DETECTION</text>
+      <text y="42" class="title">事件检测</text>
+      <text y="69" class="body">基于 Agent 运行时事件识别提示词注入、工具滥用、异常外联、凭证访问等异常行为。</text>
+    </g>
+    <g transform="translate(248 213)">
+      <rect width="410" height="128" class="card"/>
+      <text x="18" y="31" class="muted">覆盖 Agent</text>
+      <text x="18" y="81" fill="#1d6fff" font-size="38" font-weight="800">7</text>
+      <text x="70" y="80" class="muted" font-weight="700">Agents</text>
+      <rect x="424" width="410" height="128" class="card"/>
+      <text x="442" y="31" class="muted">异常事件总数</text>
+      <text x="442" y="81" fill="#7c3aed" font-size="38" font-weight="800">1,284</text>
+      <rect x="848" width="410" height="128" class="card"/>
+      <text x="866" y="31" class="muted">攻击事件数量</text>
+      <text x="866" y="81" fill="#f97316" font-size="38" font-weight="800">342</text>
+    </g>
+    <g transform="translate(248 356)">
+      <rect width="224" height="675" class="card"/>
+      <text x="14" y="28" class="muted" font-weight="700">Agents</text>
+      <g transform="translate(14 44)">
+        <rect width="196" height="82" class="subcardActive"/>
+        <text x="12" y="27" class="strong">全部 Agent</text>
+        <text x="12" y="71" class="muted">1,284 Events</text>
+      </g>
+      <g transform="translate(14 134)">
+        <rect width="196" height="82" class="subcard"/>
+        <text x="12" y="27" class="strong">AgentRange / OpsPilot</text>
+        <text x="12" y="71" fill="#ff4d4f" font-size="12" font-weight="700">42 High+</text>
+      </g>
+    </g>
+    <g transform="translate(488 356)">
+      <rect width="1010" height="86" class="card"/>
+      <text x="18" y="40" class="h2">全部 Agent / 异常事件</text>
+      <text x="18" y="65" class="body">1,284 Events · 342 Attacks · 168 Open · 64 Mitigated</text>
+    </g>
+    <g transform="translate(488 458)">
+      <rect width="154" height="94" class="subcardActive"/>
+      <text x="15" y="31" class="strong">全部检测</text>
+      <text x="15" y="63" class="strong">1,284 Events</text>
+      <rect x="164" width="154" height="94" class="subcard"/>
+      <text x="179" y="31" class="strong">Codex Agent</text>
+      <text x="179" y="63" class="strong">428 Events</text>
+      <rect x="328" width="154" height="94" class="subcard"/>
+      <text x="343" y="31" class="strong">Claude Code</text>
+      <text x="343" y="63" class="strong">311 Events</text>
+      <rect x="492" width="154" height="94" class="subcard"/>
+      <text x="507" y="31" class="strong">Cursor</text>
+      <text x="507" y="63" class="strong">194 Events</text>
+    </g>
+    <g transform="translate(488 576)">
+      <rect width="1010" height="455" class="card"/>
+      <rect x="16" y="16" width="620" height="30" class="input"/>
+      <text x="30" y="36" class="muted">⌕  搜索 Detection、Agent、Session、Trace、规则或说明</text>
+      <rect x="650" y="16" width="116" height="30" class="selectDark"/>
+      <text x="681" y="36" fill="#ffffff" font-size="13">全部类别</text>
+      <rect x="778" y="16" width="116" height="30" class="selectDark"/>
+      <text x="809" y="36" fill="#ffffff" font-size="13">全部风险</text>
+      <rect x="16" y="92" width="978" height="42" class="tableHead"/>
+      <text x="32" y="119" class="strong">时间</text>
+      <text x="194" y="119" class="strong">异常事件</text>
+      <text x="544" y="119" class="strong">Agent</text>
+      <text x="768" y="119" class="strong">风险</text>
+      <text x="878" y="119" class="strong">状态</text>
+      <rect x="16" y="134" width="978" height="70" class="tableRowHover"/>
+      <text x="32" y="164" class="body">2026/09/05 15:22:31</text>
+      <text x="194" y="160" class="strong">疑似提示词注入</text>
+      <text x="194" y="183" class="muted">prompt_injection / rule-prompt-001</text>
+      <text x="544" y="160" class="strong">AgentRange / OpsPilot</text>
+      <text x="544" y="183" class="small mono">agentrange-opspilot</text>
+      <rect x="768" y="153" width="52" height="24" class="tagRed"/>
+      <text x="781" y="170" fill="#ffb4ab" font-size="12" font-weight="700">高风险</text>
+      <rect x="878" y="153" width="52" height="24" class="tagOrange"/>
+      <text x="891" y="170" fill="#ffd591" font-size="12" font-weight="700">待处理</text>
+      <rect x="16" y="204" width="978" height="70" class="tableRow"/>
+      <text x="32" y="234" class="body">2026/09/05 15:19:04</text>
+      <text x="194" y="230" class="strong">敏感工具链调用</text>
+      <text x="194" y="253" class="muted">tool_abuse / rule-tool-027</text>
+    </g>
+  </g>
+
+  <rect x="218" y="0" width="1286" height="1248" fill="#000000" opacity="0.38"/>
+
+  <g class="font">
+    <rect x="1504" y="0" width="472" height="1248" class="drawer"/>
+    <g transform="translate(1526 22)">
+      <text x="0" y="22" fill="#9fc0e5" font-size="24">×</text>
+      <text x="32" y="22" class="dTitle">疑似提示词注入</text>
+      <rect x="32" y="40" width="54" height="22" class="tagBlue"/>
+      <text x="43" y="56" fill="#dff0ff" font-size="12" font-weight="700">Attack</text>
+      <rect x="94" y="40" width="54" height="22" class="tagRed"/>
+      <text x="106" y="56" fill="#ffd4d4" font-size="12" font-weight="700">高风险</text>
+    </g>
+    <line x1="1504" y1="82" x2="1976" y2="82" class="drawerLine"/>
+
+    <g transform="translate(1526 120)">
+      <text class="dStrong">概览</text>
+      <text x="58" class="dText">证据</text>
+      <text x="116" class="dText">上下文</text>
+      <text x="188" class="dText">处置</text>
+      <rect x="0" y="18" width="36" height="3" rx="2" fill="#35e0c8"/>
+      <line x1="0" y1="26" x2="428" y2="26" class="drawerLine"/>
+    </g>
+
+    <g transform="translate(1526 166)">
+      <text x="0" y="0" class="dMuted">Detection ID:</text>
+      <text x="116" y="0" class="dStrong mono">det-demo-001</text>
+      <text x="0" y="32" class="dMuted">Agent:</text>
+      <text x="116" y="32" class="dStrong">AgentRange / OpsPilot</text>
+      <text x="0" y="64" class="dMuted">Agent 类型:</text>
+      <text x="116" y="64" class="dStrong">Codex Agent / ID 1</text>
+      <text x="0" y="96" class="dMuted">检测类型:</text>
+      <text x="116" y="96" class="dStrong">prompt_injection</text>
+      <text x="0" y="128" class="dMuted">状态:</text>
+      <rect x="116" y="-17" width="1" height="1" fill="none"/>
+      <rect x="116" y="111" width="52" height="22" class="tagOrange"/>
+      <text x="129" y="127" fill="#ffd591" font-size="12" font-weight="700">待处理</text>
+      <text x="0" y="160" class="dMuted">置信度:</text>
+      <text x="116" y="160" class="dStrong">95%</text>
+      <text x="0" y="192" class="dMuted">首次发现:</text>
+      <text x="116" y="192" class="dStrong">2026/09/05 15:21:08</text>
+      <text x="0" y="224" class="dMuted">最后发现:</text>
+      <text x="116" y="224" class="dStrong">2026/09/05 15:22:31</text>
+      <text x="0" y="256" class="dMuted">Rule:</text>
+      <text x="116" y="256" class="dStrong mono">rule-prompt-001</text>
+      <text x="0" y="288" class="dMuted">Session:</text>
+      <text x="116" y="288" class="dStrong mono">sess-47a9</text>
+      <text x="0" y="320" class="dMuted">Trace:</text>
+      <text x="116" y="320" class="dStrong mono">trace-b103</text>
+    </g>
+
+    <g transform="translate(1526 520)">
+      <text class="dStrong">检测说明</text>
+      <rect x="0" y="20" width="428" height="74" class="drawerPanel"/>
+      <text x="14" y="48" class="dText">用户输入命中了提示词注入规则，包含忽略系统策略、</text>
+      <text x="14" y="72" class="dText">读取敏感上下文和调用外部工具的组合特征。</text>
+    </g>
+
+    <g transform="translate(1526 636)">
+      <text class="dStrong">证据摘要</text>
+      <rect x="0" y="20" width="428" height="66" class="drawerPanel"/>
+      <text x="14" y="48" class="dText">共 2 个原始行为事件，切换到“证据”标签查看完整字段。</text>
+      <rect x="0" y="98" width="428" height="92" class="drawerSoft"/>
+      <text x="14" y="126" class="dStrong">#1 prompt / user_input</text>
+      <text x="14" y="152" class="dSmall">role: trigger · detail: 命中 prompt_injection</text>
+      <text x="14" y="176" class="dSmall mono">event_id: 817240 · trace-b103</text>
+      <rect x="0" y="202" width="428" height="92" class="drawerSoft"/>
+      <text x="14" y="230" class="dStrong">#2 tool_call / file_search</text>
+      <text x="14" y="256" class="dSmall">role: supporting · target: workspace secrets</text>
+      <text x="14" y="280" class="dSmall mono">event_id: 817241 · outcome: blocked</text>
+    </g>
+
+    <g transform="translate(1526 964)">
+      <text class="dStrong">处置建议</text>
+      <rect x="0" y="20" width="428" height="58" class="drawerPanel"/>
+      <text x="14" y="54" class="dText">先预览阻断动作，再确认执行并刷新详情与列表。</text>
+    </g>
+
+    <line x1="1504" y1="1168" x2="1976" y2="1168" class="drawerLine"/>
+    <g transform="translate(1538 1176)">
+      <rect width="102" height="36" class="drawerButtonPrimary"/>
+      <text x="26" y="24" fill="#ffffff" font-size="13">预览阻断</text>
+      <rect x="112" width="92" height="36" class="drawerButton"/>
+      <text x="139" y="24" fill="#ffffff" font-size="13">查看证据</text>
+      <rect x="214" width="92" height="36" class="drawerButton"/>
+      <text x="241" y="24" fill="#ffffff" font-size="13">复制 ID</text>
+      <rect x="316" width="112" height="36" class="drawerButton"/>
+      <text x="342" y="24" fill="#ffffff" font-size="13">定位链路</text>
+    </g>
+  </g>
+</svg>

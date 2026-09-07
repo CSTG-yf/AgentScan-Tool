@@ -13,7 +13,7 @@ import (
 var changeDomains = []string{
 	"agents", "static_resources", "scan_results", "scan_findings", "behavior_events", "runtime_detections",
 	"runtime_decisions", "runtime_response_actions", "runtime_attack_chains",
-	"runtime_attack_chain_events", "scan_jobs",
+	"runtime_attack_chain_events", "scan_jobs", "runtime_detection_settings",
 }
 
 // handleChangesAPI is an invalidation endpoint for active desktop pages. It

@@ -12,7 +12,7 @@ struct StaticResourceScanSettingsResponse {
 pub fn get_scan_schedule_settings(app: tauri::AppHandle) -> Result<ScanScheduleSettings, String> {
     crate::commands::gateway_api::get_json::<ScanScheduleSettings>(
         &app,
-        "/api/v1/desktop-scan-schedule",
+        "/api/v1/page-refresh-settings",
     )
     .map(|settings| settings.normalize())
     .map_err(|error| format!("Go Gateway 暂不可用，扫描任务设置由 Go 后端保存：{error}"))
@@ -26,7 +26,7 @@ pub fn save_scan_schedule_settings(
     let settings = settings.normalize();
     crate::commands::gateway_api::put_json::<ScanScheduleSettings, _>(
         &app,
-        "/api/v1/desktop-scan-schedule",
+        "/api/v1/page-refresh-settings",
         &settings,
     )
     .map(|settings| settings.normalize())

@@ -7,6 +7,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 // endpoints remain compatibility aliases, while new UI actions use this
 // explicit task contract so a read never masquerades as a scan.
 type jobCreateRequest struct {
+	TaskType       string         `json:"task_type,omitempty"`
 	Kind           string         `json:"kind"`
 	Mode           string         `json:"mode,omitempty"`
 	Trigger        string         `json:"trigger,omitempty"`
@@ -82,8 +84,10 @@ func (a *APIServer) handleJobsList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	kind := r.URL.Query().Get("kind")
+	taskType := r.URL.Query().Get("task_type")
 	status := r.URL.Query().Get("status")
-	filter := audit.ScanJobFilter{Kind: kind, Status: status, Since: parseAPITime(r.URL.Query().Get("start_time")), Until: parseAPITime(r.URL.Query().Get("end_time")), Limit: limit, Offset: offset}
+	trigger := r.URL.Query().Get("trigger")
+	filter := audit.ScanJobFilter{Kind: kind, TaskType: taskType, Trigger: trigger, Status: status, Since: parseAPITime(r.URL.Query().Get("start_time")), Until: parseAPITime(r.URL.Query().Get("end_time")), Limit: limit, Offset: offset}
 	jobs, err := a.store.ListScanJobsFiltered(filter)
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -170,17 +174,48 @@ func (a *APIServer) handleJobCancel(w http.ResponseWriter, jobID string) {
 func (a *APIServer) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 	var req jobCreateRequest
 	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&req); err != nil {
 			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 			return
 		}
 	}
-	kind := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(req.Kind), "-", "_"))
-	if kind == "" {
-		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kind is required"})
+	taskType := audit.NormalizeScanTaskType(firstNonEmpty(req.TaskType, req.Kind))
+	if taskType == "" {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task_type or kind is required"})
 		return
 	}
-	mode := strings.TrimSpace(req.Mode)
+	if strings.TrimSpace(req.TaskType) != "" && strings.TrimSpace(req.Kind) != "" && audit.NormalizeScanTaskType(req.TaskType) != audit.NormalizeScanTaskType(req.Kind) {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task_type and kind refer to different tasks"})
+		return
+	}
+	if req.Scope == nil {
+		req.Scope = map[string]any{}
+	}
+	for key, target := range map[string]*string{
+		"agent_id": &req.AgentID, "resource_id": &req.ResourceID, "session_id": &req.SessionID,
+		"trace_id": &req.TraceID, "start_time": &req.StartTime, "end_time": &req.EndTime,
+	} {
+		if *target != "" || req.Scope[key] == nil {
+			continue
+		}
+		value, ok := req.Scope[key].(string)
+		if !ok {
+			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope." + key + " must be a string"})
+			return
+		}
+		*target = strings.TrimSpace(value)
+	}
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if mode == "" || mode == "scheduled" {
+		mode = map[string]string{"agent_discovery": "full", "static_assets": "full", "runtime_detections": "replay", "attack_chains": "rebuild"}[taskType]
+	}
+	if !map[string]bool{"full": true, "incremental": true, "single": true, "replay": true, "rebuild": true}[mode] {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported scan mode"})
+		return
+	}
+	req.Mode = mode
 	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
 	if headerKey := strings.TrimSpace(r.Header.Get("Idempotency-Key")); headerKey != "" {
 		idempotencyKey = headerKey
@@ -189,12 +224,24 @@ func (a *APIServer) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Idempotency-Key must be at most 200 characters"})
 		return
 	}
-	trigger := strings.TrimSpace(req.Trigger)
-	if trigger == "" {
-		trigger = "manual"
+	rawTrigger := strings.ToLower(strings.TrimSpace(req.Trigger))
+	if !map[string]bool{"": true, "manual": true, "schedule": true, "scheduled": true, "scheduler": true, "watcher": true}[rawTrigger] {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported scan trigger"})
+		return
 	}
-	switch kind {
-	case "agent_discovery", "agents":
+	trigger := audit.NormalizeScanTrigger(req.Trigger)
+	a.scanStartMu.Lock()
+	defer a.scanStartMu.Unlock()
+	if status, ok := a.existingScanStatusForKey(idempotencyKey); ok {
+		a.writeJSON(w, http.StatusAccepted, status)
+		return
+	}
+	if status, ok := a.runningScanStatusForKind(audit.ScanJobKind(taskType)); ok {
+		a.writeJSON(w, http.StatusAccepted, status)
+		return
+	}
+	switch taskType {
+	case "agent_discovery":
 		status := a.startAPIScanWithOptions("agent_discovery", firstNonEmpty(mode, "full"), "", "", trigger, req.Scope, idempotencyKey, func(ctx context.Context, _ string) error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -203,11 +250,11 @@ func (a *APIServer) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 			return err
 		})
 		a.writeJSON(w, http.StatusAccepted, status)
-	case "resource_scan", "static_resources":
+	case "static_assets":
 		a.startResourceJob(w, req, mode, trigger, idempotencyKey)
-	case "event_replay", "detection_replay":
+	case "runtime_detections":
 		a.startEventReplayJob(w, req, trigger, idempotencyKey)
-	case "attack_chain_rebuild", "chain_rebuild":
+	case "attack_chains":
 		if status, ok := a.existingScanStatusForKey(idempotencyKey); ok {
 			a.writeJSON(w, http.StatusAccepted, status)
 			return
@@ -227,6 +274,30 @@ func (a *APIServer) handleJobCreate(w http.ResponseWriter, r *http.Request) {
 	default:
 		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported job kind"})
 	}
+}
+
+func (a *APIServer) runningScanStatusForKind(kind string) (apiScanStatus, bool) {
+	a.scanStatusMu.RLock()
+	for _, status := range a.scanStatuses {
+		if audit.NormalizeScanTaskType(status.Kind) == audit.NormalizeScanTaskType(kind) && (status.Status == "queued" || status.Status == "running") {
+			a.scanStatusMu.RUnlock()
+			return status, true
+		}
+	}
+	a.scanStatusMu.RUnlock()
+	if a.store == nil {
+		return apiScanStatus{}, false
+	}
+	jobs, err := a.store.ListScanJobsFiltered(audit.ScanJobFilter{Kind: kind, Limit: 20})
+	if err != nil {
+		return apiScanStatus{}, false
+	}
+	for _, job := range jobs {
+		if job.Status == "queued" || job.Status == "running" {
+			return apiScanStatusFromAuditJob(job), true
+		}
+	}
+	return apiScanStatus{}, false
 }
 
 // existingScanStatusForKey resolves a previously accepted durable scan before
@@ -293,6 +364,24 @@ func (a *APIServer) startEventReplayJob(w http.ResponseWriter, req jobCreateRequ
 		a.writeJSON(w, http.StatusAccepted, status)
 		return
 	}
+	typeID := int64(0)
+	if raw, supplied := req.Scope["agent_type_id"]; supplied {
+		encoded, err := json.Marshal(raw)
+		if err == nil {
+			typeID, err = strconv.ParseInt(string(encoded), 10, 64)
+		}
+		if err != nil || typeID <= 0 {
+			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope.agent_type_id must be a positive integer"})
+			return
+		}
+		if _, ok, err := a.store.GetGovernanceAgentType(typeID); err != nil {
+			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		} else if !ok {
+			a.writeJSON(w, http.StatusNotFound, map[string]string{"error": "AgentType not found"})
+			return
+		}
+	}
 	engine := activeDetectionEngine()
 	if engine == nil {
 		a.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "detection engine unavailable"})
@@ -304,7 +393,7 @@ func (a *APIServer) startEventReplayJob(w http.ResponseWriter, req jobCreateRequ
 			limit = 50000
 		}
 		events, err := a.store.ListRuntimeEvents(audit.RuntimeEventFilter{
-			AgentID: req.AgentID, SessionID: req.SessionID, TraceID: req.TraceID,
+			AgentID: req.AgentID, AgentTypeID: typeID, SessionID: req.SessionID, TraceID: req.TraceID,
 			Since: parseAPITime(req.StartTime), Until: parseAPITime(req.EndTime),
 			IncludeDesktop: true, Limit: limit,
 		})
@@ -316,7 +405,9 @@ func (a *APIServer) startEventReplayJob(w http.ResponseWriter, req jobCreateRequ
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			engine.EvaluateEventForJob(event.ID, jobID)
+			if err := engine.EvaluateEventForJob(event.ID, jobID); err != nil {
+				return err
+			}
 			a.updateAPIScanProgress(jobID, i+1, len(events), "evaluating", map[string]any{"events": len(events)})
 		}
 		return nil
@@ -328,81 +419,134 @@ func nowRFC3339() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
-// RunBackgroundJobs keeps the durable Agent discovery job alive when the
-// desktop window is closed. Static resource periodic rescans are owned by the
-// watcher; runtime detection is event-driven and does not need a polling scan.
+// RunBackgroundJobs executes enabled durable scan schedules even when the
+// desktop window is closed. Event-driven tasks remain owned by their native
+// producers and therefore cannot be enabled as polling schedules.
 func (a *APIServer) RunBackgroundJobs(ctx context.Context) {
 	if a == nil || a.store == nil {
 		return
 	}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	lastDiscovery := time.Time{}
+	lastRun := map[string]time.Time{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			settings := defaultPageScanScheduleSettings()
-			if ok, err := a.store.LoadJSONSetting(desktopScanScheduleSettingKey, &settings); err != nil || !ok {
-				settings = defaultPageScanScheduleSettings()
-			}
-			settings = settings.normalize()
-			settings = settings.normalize()
-			if !settings.AgentDiscovery.Enabled {
+			schedules, err := a.store.ListScanSchedules()
+			if err != nil {
 				continue
 			}
-			interval := time.Duration(settings.AgentDiscovery.IntervalSec) * time.Second
-			if lastDiscovery.IsZero() {
-				if jobs, err := a.store.ListScanJobsFiltered(audit.ScanJobFilter{Kind: "agent_discovery", Limit: 1}); err == nil && len(jobs) > 0 {
-					lastDiscovery = parseTimeOrNow(jobs[0].CreatedAt)
+			for _, schedule := range schedules {
+				if !schedule.Enabled {
+					continue
 				}
-			}
-			if !lastDiscovery.IsZero() && now.Sub(lastDiscovery) < interval {
-				continue
-			}
-			if a.hasRunningScanKind("agent_discovery") {
-				continue
-			}
-			a.startAPIScanWithOptions("agent_discovery", "scheduled", "", "", "schedule", map[string]any{"interval_sec": settings.AgentDiscovery.IntervalSec}, "agent-discovery:"+now.UTC().Truncate(interval).Format(time.RFC3339), func(ctx context.Context, _ string) error {
-				if err := ctx.Err(); err != nil {
-					return err
+				kind := audit.ScanJobKind(schedule.TaskType)
+				interval := time.Duration(schedule.IntervalSec) * time.Second
+				last := lastRun[schedule.TaskType]
+				if last.IsZero() {
+					if jobs, listErr := a.store.ListScanJobsFiltered(audit.ScanJobFilter{TaskType: schedule.TaskType, Trigger: "scheduler", Limit: 1}); listErr == nil && len(jobs) > 0 {
+						last = parseTimeOrNow(jobs[0].CreatedAt)
+						lastRun[schedule.TaskType] = last
+					}
 				}
-				_, err := a.buildPageAgentInventory(2000)
-				return err
-			})
-			lastDiscovery = now
+				if !last.IsZero() && now.Sub(last) < interval {
+					continue
+				}
+				a.scanStartMu.Lock()
+				if a.hasRunningScanKind(kind) {
+					a.scanStartMu.Unlock()
+					continue
+				}
+				runner, ready := a.scheduledTaskRunner(schedule, kind)
+				if !ready {
+					a.scanStartMu.Unlock()
+					continue
+				}
+				scope := schedule.Scope
+				if scope == nil {
+					scope = map[string]any{}
+				}
+				scope["interval_sec"] = schedule.IntervalSec
+				key := "scheduler:" + schedule.TaskType + ":" + now.UTC().Truncate(interval).Format(time.RFC3339)
+				a.startAPIScanWithOptions(kind, schedule.Mode, "", "", "scheduler", scope, key, runner)
+				a.scanStartMu.Unlock()
+				lastRun[schedule.TaskType] = now
+			}
 		}
 	}
 }
 
-func (a *APIServer) hasRunningScanKind(kind string) bool {
-	a.scanStatusMu.RLock()
-	for _, status := range a.scanStatuses {
-		matchesKind := status.Type == kind
-		if kind == "agent_discovery" && status.Type == "agents" {
-			matchesKind = true
-		}
-		if kind == "resource_scan" && status.Type == "static-resources" {
-			matchesKind = true
-		}
-		if matchesKind && (status.Status == "running" || status.Status == "queued") {
-			a.scanStatusMu.RUnlock()
-			return true
-		}
-	}
-	a.scanStatusMu.RUnlock()
-	if a.store != nil {
-		jobs, err := a.store.ListScanJobsFiltered(audit.ScanJobFilter{Kind: kind, Limit: 20})
-		if err == nil {
-			for _, job := range jobs {
-				if job.Status == "running" || job.Status == "queued" {
-					return true
-				}
+func (a *APIServer) scheduledTaskRunner(schedule audit.ScanSchedule, kind string) (func(context.Context, string) error, bool) {
+	switch schedule.TaskType {
+	case "agent_discovery":
+		return func(ctx context.Context, _ string) error {
+			if err := ctx.Err(); err != nil {
+				return err
 			}
+			_, err := a.buildPageAgentInventory(2000)
+			return err
+		}, true
+	case "static_assets":
+		_, rescan := a.staticScanTriggers()
+		if rescan == nil {
+			return nil, false
 		}
+		agentID, _ := schedule.Scope["agent_id"].(string)
+		return func(ctx context.Context, _ string) error {
+			if !staticScanInFlight.CompareAndSwap(false, true) {
+				return fmt.Errorf("another static resource scan is already running")
+			}
+			defer staticScanInFlight.Store(false)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return rescan(agentID)
+		}, true
+	case "runtime_detections":
+		engine := activeDetectionEngine()
+		if engine == nil {
+			return nil, false
+		}
+		return func(ctx context.Context, jobID string) error {
+			events, err := a.store.ListRuntimeEvents(audit.RuntimeEventFilter{IncludeDesktop: true, Limit: 50000})
+			if err != nil {
+				return err
+			}
+			a.updateAPIScanProgress(jobID, 0, len(events), "loaded", map[string]any{"events": len(events)})
+			for index, event := range events {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if err := engine.EvaluateEventForJob(event.ID, jobID); err != nil {
+					return err
+				}
+				a.updateAPIScanProgress(jobID, index+1, len(events), "evaluating", map[string]any{"events": len(events)})
+			}
+			return nil
+		}, true
+	case "attack_chains":
+		engine := activeDetectionEngine()
+		if engine == nil || engine.Policy() == nil {
+			return nil, false
+		}
+		return func(ctx context.Context, jobID string) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return engine.Policy().RebuildAttackChainsForJob(50000, jobID)
+		}, true
+	default:
+		// Behavior trace is event-driven and environment collection is owned
+		// by the native desktop host; neither is represented as a fake scan.
+		return nil, false
 	}
-	return false
+}
+
+func (a *APIServer) hasRunningScanKind(kind string) bool {
+	_, ok := a.runningScanStatusForKind(kind)
+	return ok
 }
 
 func parseTimeOrNow(value string) time.Time {

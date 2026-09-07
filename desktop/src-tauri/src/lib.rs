@@ -22,6 +22,7 @@ pub fn run() {
             commands::agent_governance::agent_governance_patch,
             commands::agent_governance::agent_governance_put,
             commands::agent_governance::agent_governance_delete,
+            commands::runtime_detection_settings::runtime_detection_settings_request,
             commands::knowledge::get_agent_runtime_catalog,
             commands::audit::get_process_guard_audit,
             commands::trace::get_agent_trace,
@@ -34,6 +35,7 @@ pub fn run() {
             commands::events::get_runtime_detection_events,
             commands::events::get_runtime_events_timeline,
             commands::attack_chains::get_attack_chains,
+            commands::attack_chains::get_attack_chain_detail,
             commands::attack_chains::get_attack_chain_agent_type_summaries,
             commands::runtime_decisions::get_runtime_decisions,
             commands::runtime_decisions::get_runtime_decision_detail,
@@ -81,6 +83,12 @@ pub fn run() {
             commands::static_scan::get_static_scan,
             commands::jobs::create_event_replay_job,
             commands::jobs::create_attack_chain_rebuild_job,
+            commands::jobs::get_scan_schedules,
+            commands::jobs::update_scan_schedule,
+            commands::jobs::create_scan_job,
+            commands::jobs::get_scan_jobs,
+            commands::jobs::get_scan_job,
+            commands::jobs::cancel_scan_job,
             commands::jobs::get_changes,
         ])
         .run(tauri::generate_context!())

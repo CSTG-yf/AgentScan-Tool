@@ -227,7 +227,7 @@ impl ScanScheduleSettings {
     }
 
     fn default_environment() -> ScanTaskSchedule {
-        ScanTaskSchedule::new(true, 30)
+        ScanTaskSchedule::new(true, 10)
     }
 
     fn default_agent_discovery() -> ScanTaskSchedule {
@@ -235,15 +235,15 @@ impl ScanScheduleSettings {
     }
 
     fn default_static_assets() -> ScanTaskSchedule {
-        ScanTaskSchedule::new(true, 300)
+        ScanTaskSchedule::new(true, 10)
     }
 
     fn default_behavior_trace() -> ScanTaskSchedule {
-        ScanTaskSchedule::new(true, 5)
+        ScanTaskSchedule::new(true, 15)
     }
 
     fn default_event_detection() -> ScanTaskSchedule {
-        ScanTaskSchedule::new(true, 15)
+        ScanTaskSchedule::new(true, 8)
     }
 
     fn default_process_guard_audit() -> ScanTaskSchedule {
@@ -260,11 +260,11 @@ impl ScanScheduleSettings {
 
     pub fn normalize(mut self) -> Self {
         self.version = 1;
-        self.environment = self.environment.normalize(30);
+        self.environment = self.environment.normalize(10);
         self.agent_discovery = self.agent_discovery.normalize(15);
-        self.static_assets = self.static_assets.normalize(300);
-        self.behavior_trace = self.behavior_trace.normalize(5);
-        self.event_detection = self.event_detection.normalize(15);
+        self.static_assets = self.static_assets.normalize(10);
+        self.behavior_trace = self.behavior_trace.normalize(15);
+        self.event_detection = self.event_detection.normalize(8);
         self.process_guard_audit = self.process_guard_audit.normalize(10);
         self.gateway_audit = self.gateway_audit.normalize(10);
         self.range_status = self.range_status.normalize(30);

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { RuntimeDetectionSettingsPage } from "../runtime-detection/SettingsPage";
+import { ScanRefreshSettingsPage, type ScanRefreshSettingsPageProps } from "./ScanRefreshSettingsPage";
 import {
   DeleteOutlined,
   EditOutlined,
@@ -238,7 +240,10 @@ function defaultPostScanRuleValues(): GovernancePostScanRuleInput {
   };
 }
 
-export function AgentGovernancePage() {
+export type AgentGovernancePageProps = ScanRefreshSettingsPageProps;
+
+export function AgentGovernancePage(props: AgentGovernancePageProps) {
+  const [activeGovernanceTab, setActiveGovernanceTab] = useState("types");
   const [referenceLoading, setReferenceLoading] = useState(false);
   const [agentLoading, setAgentLoading] = useState(false);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
@@ -1547,6 +1552,11 @@ export function AgentGovernancePage() {
       ),
     },
     {
+      key: "scan-refresh-settings",
+      label: "扫描与刷新策略",
+      children: <ScanRefreshSettingsPage {...props} />,
+    },
+    {
       key: "decisions",
       label: "决策与动作",
       children: (
@@ -1780,15 +1790,18 @@ export function AgentGovernancePage() {
           <Title level={2}>Agent 治理中心</Title>
           <Text type="secondary">统一维护 Agent 类型、发现规则、资源规则、扫描方案和动作策略。</Text>
         </div>
-        <Button icon={<ReloadOutlined />} onClick={() => void refreshAll()} loading={loading}>刷新</Button>
+        {activeGovernanceTab !== "scan-refresh-settings" && <Button icon={<ReloadOutlined />} onClick={() => void refreshAll()} loading={loading}>刷新</Button>}
       </div>
-      <div className="metric-grid">
+      {activeGovernanceTab !== "runtime-detection-settings" && activeGovernanceTab !== "scan-refresh-settings" && <div className="metric-grid">
         <div className="metric-card"><SafetyCertificateOutlined /><Text>Agent Type</Text><Title level={3}>{agentPage.total}</Title></div>
         <div className="metric-card"><SafetyCertificateOutlined /><Text>发现规则</Text><Title level={3}>{discoveryPage.total}</Title></div>
         <div className="metric-card"><SafetyCertificateOutlined /><Text>资源规则</Text><Title level={3}>{resourcePage.total}</Title></div>
         <div className="metric-card"><SafetyCertificateOutlined /><Text>扫描方案</Text><Title level={3}>{scanProfiles.length}</Title></div>
-      </div>
-      <Tabs items={tabs} />
+      </div>}
+      <Tabs items={[
+        ...tabs,
+        { key: "runtime-detection-settings", label: "异常检测设置", children: <RuntimeDetectionSettingsPage /> },
+      ]} activeKey={activeGovernanceTab} onChange={setActiveGovernanceTab} />
 
       <Modal title={editingAgentType ? "编辑 Agent Type" : "新增 Agent Type"} open={agentModalOpen} onCancel={() => setAgentModalOpen(false)} onOk={() => void saveAgentType()} destroyOnHidden>
         <Form form={agentForm} layout="vertical">

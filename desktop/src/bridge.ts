@@ -6,6 +6,10 @@ import type {
   AgentTraceSnapshot,
   AttackChainAgentTypeSummaryResponse,
   AttackChainSnapshot,
+  AttackChainListQuery,
+  AttackChainDetail,
+  BackendScanSchedule,
+  BackendScanSchedulesResponse,
   ChangeCursor,
   EnvironmentSnapshot,
   GatewayAuditSnapshot,
@@ -61,6 +65,9 @@ import type {
   RuntimeSecurityMode,
   RuntimeSecuritySummary,
   ScanScheduleSettings,
+  ScanJob,
+  ScanJobsResponse,
+  ScanTaskType,
   StaticResourceAgentsResponse,
   StaticResourceContentResponse,
   StaticResourceDetailResponse,
@@ -78,11 +85,11 @@ const inTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
 const defaultScanScheduleSettings = (): ScanScheduleSettings => ({
   version: 1,
-  environment: { enabled: true, intervalSec: 30 },
+  environment: { enabled: true, intervalSec: 10 },
   agentDiscovery: { enabled: true, intervalSec: 15 },
-  staticAssets: { enabled: true, intervalSec: 300 },
-  behaviorTrace: { enabled: true, intervalSec: 5 },
-  eventDetection: { enabled: true, intervalSec: 15 },
+  staticAssets: { enabled: true, intervalSec: 10 },
+  behaviorTrace: { enabled: true, intervalSec: 15 },
+  eventDetection: { enabled: true, intervalSec: 8 },
   processGuardAudit: { enabled: true, intervalSec: 10 },
   gatewayAudit: { enabled: true, intervalSec: 10 },
   rangeStatus: { enabled: true, intervalSec: 30 },
@@ -110,33 +117,7 @@ const defaultRuntimeSecuritySummary = (): RuntimeSecuritySummary => ({
   coveredAgents: 0,
 });
 
-const defaultRuntimeDetectionAgentTypeSummaries = (): RuntimeDetectionAgentTypeSummaryResponse => ({
-  items: [],
-  list: [],
-  total: 0,
-  count: 0,
-  capturedAt: new Date().toISOString(),
-  source: "desktop preview",
-});
 
-const defaultAttackChainAgentTypeSummaries = (): AttackChainAgentTypeSummaryResponse => ({
-  items: [],
-  list: [],
-  total: 0,
-  count: 0,
-  capturedAt: new Date().toISOString(),
-  source: "desktop preview",
-});
-
-const defaultRuntimeDetectionList = (): RuntimeDetectionListResponse => ({
-  total: 0,
-  items: [],
-  detections: [],
-  count: 0,
-  limit: 200,
-  offset: 0,
-  summary: { total: 0, attack: 0, blocked: 0, critical: 0, high: 0, open: 0 },
-});
 
 const defaultRuntimeTimeline = (): RuntimeEventsTimelineResponse => ({ buckets: [] });
 
@@ -243,12 +224,13 @@ export async function triggerStaticResourceRescan(agentId?: string, idempotencyK
 }
 
 export async function getScanStatus(scanId: string): Promise<StaticResourceScanAccepted> {
-  if (!inTauri()) return { scan_id: scanId, status: "preview", progress: 0 };
+  if (!inTauri()) throw new Error("请在桌面应用中连接网关后查询任务状态");
   const status = await invoke<StaticResourceScanAccepted>("get_scan_status", { scanId });
   return { ...status, scan_id: status.scan_id ?? status.job_id, job_id: status.job_id ?? status.scan_id, type: status.type ?? status.kind };
 }
 
 export interface RuntimeEventReplayScope {
+  agentTypeId?: number;
   agentId?: string;
   sessionId?: string;
   traceId?: string;
@@ -257,8 +239,9 @@ export interface RuntimeEventReplayScope {
 }
 
 export async function createRuntimeEventReplay(scope: RuntimeEventReplayScope = {}): Promise<StaticResourceScanAccepted> {
-  if (!inTauri()) return { status: "preview", progress: 0 };
+  if (!inTauri()) throw new Error("请在桌面应用中连接网关后创建重放任务");
   const status = await invoke<StaticResourceScanAccepted>("create_event_replay_job", {
+    agentTypeId: scope.agentTypeId,
     agentId: scope.agentId,
     sessionId: scope.sessionId,
     traceId: scope.traceId,
@@ -269,9 +252,68 @@ export async function createRuntimeEventReplay(scope: RuntimeEventReplayScope = 
 }
 
 export async function createAttackChainRebuildJob(limit = 5000): Promise<StaticResourceScanAccepted> {
-  if (!inTauri()) return { status: "preview", progress: 0 };
+  if (!inTauri()) throw new Error("攻击链重建需要连接桌面网关。");
   const status = await invoke<StaticResourceScanAccepted>("create_attack_chain_rebuild_job", { limit });
   return { ...status, scan_id: status.scan_id ?? status.job_id, job_id: status.job_id ?? status.scan_id, type: status.type ?? status.kind };
+}
+
+const defaultBackendScanSchedules = (): BackendScanSchedulesResponse => ({
+  total: 6,
+  source: "preview",
+  items: [
+    { task_type: "agent_discovery", enabled: true, interval_sec: 900, mode: "incremental", scope: {} },
+    { task_type: "static_assets", enabled: false, interval_sec: 3600, mode: "incremental", scope: {} },
+    { task_type: "runtime_detections", enabled: false, interval_sec: 3600, mode: "replay", scope: {} },
+    { task_type: "attack_chains", enabled: false, interval_sec: 3600, mode: "rebuild", scope: {} },
+    { task_type: "behavior_trace", enabled: false, interval_sec: 900, mode: "incremental", scope: {} },
+    { task_type: "environment", enabled: false, interval_sec: 300, mode: "incremental", scope: {} },
+  ],
+});
+
+export async function getBackendScanSchedules(): Promise<BackendScanSchedulesResponse> {
+  return inTauri() ? invoke<BackendScanSchedulesResponse>("get_scan_schedules") : defaultBackendScanSchedules();
+}
+
+export async function updateBackendScanSchedule(schedule: BackendScanSchedule): Promise<BackendScanSchedule> {
+  if (!inTauri()) throw new Error("请在桌面应用中连接网关后保存扫描策略");
+  return invoke<BackendScanSchedule>("update_scan_schedule", {
+    taskType: schedule.task_type,
+    enabled: schedule.enabled,
+    intervalSec: schedule.interval_sec,
+    mode: schedule.mode,
+    scope: schedule.scope,
+  });
+}
+
+export async function createScanJob(taskType: ScanTaskType, mode?: string, scope: Record<string, unknown> = {}): Promise<ScanJob> {
+  if (!inTauri()) throw new Error("请在桌面应用中连接网关后创建扫描任务");
+  return invoke<ScanJob>("create_scan_job", {
+    taskType,
+    mode,
+    scope,
+    idempotencyKey: `manual:${taskType}:${Date.now()}`,
+  });
+}
+
+export async function getScanJobs(query: { taskType?: ScanTaskType; status?: string; trigger?: string; limit?: number; offset?: number } = {}): Promise<ScanJobsResponse> {
+  if (!inTauri()) return { items: [], jobs: [], count: 0, total: 0, limit: query.limit ?? 20, offset: query.offset ?? 0, next_offset: 0 };
+  return invoke<ScanJobsResponse>("get_scan_jobs", {
+    taskType: query.taskType,
+    status: query.status,
+    trigger: query.trigger,
+    limit: query.limit,
+    offset: query.offset,
+  });
+}
+
+export async function getScanJob(jobId: string): Promise<ScanJob> {
+  if (!inTauri()) throw new Error("请在桌面应用中连接网关后查询扫描任务");
+  return invoke<ScanJob>("get_scan_job", { jobId });
+}
+
+export async function cancelScanJob(jobId: string): Promise<ScanJob> {
+  if (!inTauri()) throw new Error("请在桌面应用中连接网关后取消扫描任务");
+  return invoke<ScanJob>("cancel_scan_job", { jobId });
 }
 
 export async function getChanges(cursor = 0, domains?: string[]): Promise<ChangeCursor> {
@@ -656,9 +698,10 @@ export async function getRuntimeSecuritySummary(agentId?: string): Promise<Runti
   return invoke<RuntimeSecuritySummary>("get_runtime_security_summary", { agentId: agentId ?? null });
 }
 
-export async function getRuntimeDetectionAgentTypeSummaries(): Promise<RuntimeDetectionAgentTypeSummaryResponse> {
-  if (!inTauri()) return defaultRuntimeDetectionAgentTypeSummaries();
-  const response = await invoke<RuntimeDetectionAgentTypeSummaryResponse>("get_runtime_detection_agent_type_summaries");
+export async function getRuntimeDetectionAgentTypeSummaries(query: RuntimeDetectionListQuery = {}): Promise<RuntimeDetectionAgentTypeSummaryResponse> {
+  if (!inTauri()) throw new Error("异常事件汇总需要连接桌面网关。");
+  const { page: _page, pageSize: _pageSize, limit: _limit, offset: _offset, sort: _sort, ...filters } = query;
+  const response = await invoke<RuntimeDetectionAgentTypeSummaryResponse>("get_runtime_detection_agent_type_summaries", { filters });
   const items = response.items?.length ? response.items : response.list ?? [];
   return {
     ...response,
@@ -675,9 +718,15 @@ export async function getRuntimeSecurityAgents(limit = 200): Promise<RuntimeSecu
 }
 
 export async function getRuntimeDetections(query: RuntimeDetectionListQuery = {}): Promise<RuntimeDetectionListResponse> {
-  if (!inTauri()) return defaultRuntimeDetectionList();
+  if (!inTauri()) throw new Error("异常事件列表需要连接桌面网关。");
   return invoke<RuntimeDetectionListResponse>("get_runtime_detections", {
     agentId: query.agentId,
+    agentTypeId: query.agentTypeId,
+    agentType: query.agentType,
+    startTime: query.startTime,
+    endTime: query.endTime,
+    page: query.page,
+    pageSize: query.pageSize,
     category: query.category,
     severity: query.severity,
     status: query.status,
@@ -726,29 +775,31 @@ export async function getRuntimeEventsTimeline(query: RuntimeEventsTimelineQuery
   });
 }
 
-export async function getAttackChains(limit = 500): Promise<AttackChainSnapshot> {
-  return inTauri() ? invoke<AttackChainSnapshot>("get_attack_chains", { limit }) : defaultAttackChainSnapshot();
+export async function getAttackChains(query: AttackChainListQuery | number = {}): Promise<AttackChainSnapshot> {
+  if (!inTauri()) throw new Error("攻击链需要连接桌面网关。");
+  const { page = 1, pageSize = 20, sort, ...filters } = typeof query === "number" ? { pageSize: query } : query;
+  return invoke<AttackChainSnapshot>("get_attack_chains", { filters, page, pageSize, sort });
 }
 
-export async function getAttackChainAgentTypeSummaries(): Promise<AttackChainAgentTypeSummaryResponse> {
-  if (!inTauri()) return defaultAttackChainAgentTypeSummaries();
-  const response = await invoke<AttackChainAgentTypeSummaryResponse>("get_attack_chain_agent_type_summaries");
+export async function getAttackChainAgentTypeSummaries(query: AttackChainListQuery = {}): Promise<AttackChainAgentTypeSummaryResponse> {
+  if (!inTauri()) throw new Error("攻击链汇总需要连接桌面网关。");
+  const { page: _page, pageSize: _pageSize, sort: _sort, ...filters } = query;
+  const response = await invoke<AttackChainAgentTypeSummaryResponse>("get_attack_chain_agent_type_summaries", { filters });
   const items = response.items?.length ? response.items : response.list ?? [];
-  return {
-    ...response,
-    items,
-    list: response.list?.length ? response.list : items,
-    total: response.total ?? items.length,
-    count: response.count ?? items.length,
-  };
+  return { ...response, items, list: response.list?.length ? response.list : items };
+}
+
+export async function getAttackChainDetail(chainId: string): Promise<AttackChainDetail> {
+  if (!inTauri()) throw new Error("攻击链详情需要连接桌面网关。");
+  return invoke<AttackChainDetail>("get_attack_chain_detail", { chainId });
 }
 
 /** Phase-3 runtime decisions: list, detail, and security mode. */
-export async function getRuntimeDecisions(limit = 200): Promise<RuntimeDecisionListResponse> {
+export async function getRuntimeDecisions(limit = 200, detectionId?: string): Promise<RuntimeDecisionListResponse> {
   if (!inTauri()) {
-    return { decisions: [], summary: { total: 0, block: 0, confirm: 0, alert: 0, audit: 0, allow: 0, wouldBlock: 0 }, count: 0 };
+    throw new Error("运行时决策需要连接桌面网关。");
   }
-  const response = await invoke<RuntimeDecisionListResponse>("get_runtime_decisions", { limit });
+  const response = await invoke<RuntimeDecisionListResponse>("get_runtime_decisions", { limit, detectionId });
   // Rust's RuntimeDecisionRow uses serde(flatten), while the TS model keeps
   // the decision nested for page ergonomics. Normalize both shapes here so
   // older sidecars and the current Tauri command remain compatible.
@@ -766,12 +817,12 @@ export async function getRuntimeDecisionDetail(decisionId: string): Promise<Runt
 }
 
 export async function getRuntimeSecurityMode(): Promise<RuntimeSecurityMode> {
-  if (!inTauri()) return "observe";
+  if (!inTauri()) throw new Error("运行模式需要连接桌面网关。");
   return invoke<RuntimeSecurityMode>("get_runtime_security_mode");
 }
 
 export async function setRuntimeSecurityMode(mode: RuntimeSecurityMode): Promise<RuntimeSecurityMode> {
-  if (!inTauri()) return mode;
+  if (!inTauri()) throw new Error("未连接桌面网关，运行模式未保存。");
   return invoke<RuntimeSecurityMode>("set_runtime_security_mode", { mode });
 }
 
@@ -781,7 +832,7 @@ export interface RuntimeEnforcementOptions {
 }
 
 export async function blockRuntimeDetection(detectionId: string, actionType?: string, reason = "manual_operator_action", options: RuntimeEnforcementOptions = {}): Promise<RuntimeEnforcementResult> {
-  if (!inTauri()) return { status: "preview" };
+  if (!inTauri()) throw new Error("未连接桌面网关，无法预览或执行阻断。");
   return invoke<RuntimeEnforcementResult>("block_runtime_detection", { detectionId, actionType, reason, preview: options.preview, idempotencyKey: options.idempotencyKey });
 }
 

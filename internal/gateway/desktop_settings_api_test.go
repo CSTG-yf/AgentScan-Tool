@@ -43,6 +43,63 @@ func TestDesktopScanSchedulePersistsInAuditStore(t *testing.T) {
 	}
 }
 
+func TestPageRefreshSettingsAreIndependentFromBackendScanSchedules(t *testing.T) {
+	store, logger := testStoreAndLogger(t)
+	api := NewAPIServer("127.0.0.1:0", NewSidecarHealth(), nil, store, logger, config.DefaultConfig())
+
+	put := httptest.NewRequest(http.MethodPut, "/api/v1/page-refresh-settings", bytes.NewBufferString(`{"version":1,"environment":{"enabled":true,"intervalSec":44},"agentDiscovery":{"enabled":false,"intervalSec":15},"staticAssets":{"enabled":true,"intervalSec":10},"behaviorTrace":{"enabled":true,"intervalSec":15},"eventDetection":{"enabled":true,"intervalSec":8},"processGuardAudit":{"enabled":true,"intervalSec":10},"gatewayAudit":{"enabled":true,"intervalSec":10},"rangeStatus":{"enabled":true,"intervalSec":30}}`))
+	rec := httptest.NewRecorder()
+	api.handlePageRefreshSettings(rec, put)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT page refresh status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	schedules, err := store.ListScanSchedules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, schedule := range schedules {
+		if schedule.TaskType == "agent_discovery" && schedule.IntervalSec != 900 {
+			t.Fatalf("page refresh update changed backend schedule: %+v", schedule)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/scan-schedules/agent_discovery", bytes.NewBufferString(`{"enabled":true,"interval_sec":61,"mode":"incremental","scope":{}}`))
+	rec = httptest.NewRecorder()
+	api.handleScanSchedules(rec, request)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT scan schedule status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	get := httptest.NewRecorder()
+	api.handlePageRefreshSettings(get, httptest.NewRequest(http.MethodGet, "/api/v1/page-refresh-settings", nil))
+	var settings pageScanScheduleSettings
+	if err := json.Unmarshal(get.Body.Bytes(), &settings); err != nil || settings.Environment.IntervalSec != 44 {
+		t.Fatalf("backend schedule update changed page refresh: %s, err=%v", get.Body.String(), err)
+	}
+}
+
+func TestScanSchedulesAPIListsAllTasksAndRejectsNativeOwnedSchedule(t *testing.T) {
+	store, logger := testStoreAndLogger(t)
+	api := NewAPIServer("127.0.0.1:0", NewSidecarHealth(), nil, store, logger, config.DefaultConfig())
+
+	list := httptest.NewRecorder()
+	api.handleScanSchedules(list, httptest.NewRequest(http.MethodGet, "/api/v1/scan-schedules", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("GET status=%d body=%s", list.Code, list.Body.String())
+	}
+	var response struct {
+		Total int `json:"total"`
+	}
+	if err := json.NewDecoder(list.Body).Decode(&response); err != nil || response.Total != 6 {
+		t.Fatalf("GET response=%s err=%v", list.Body.String(), err)
+	}
+
+	put := httptest.NewRecorder()
+	api.handleScanSchedules(put, httptest.NewRequest(http.MethodPut, "/api/v1/scan-schedules/behavior_trace", strings.NewReader(`{"enabled":true,"interval_sec":15,"mode":"incremental","scope":{}}`)))
+	if put.Code != http.StatusBadRequest || !strings.Contains(put.Body.String(), "event-driven") {
+		t.Fatalf("PUT native-owned status=%d body=%s", put.Code, put.Body.String())
+	}
+}
+
 func TestStaticResourceScanSettingsPatchesGoConfig(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.DataDir = t.TempDir()

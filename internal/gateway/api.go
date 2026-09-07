@@ -89,6 +89,7 @@ type APIServer struct {
 	staticScanMu  sync.RWMutex
 	staticScanOne func(resourceID string) error
 	staticRescan  func(agentID string) error
+	scanStartMu   sync.Mutex
 	scanStatusMu  sync.RWMutex
 	scanStatuses  map[string]apiScanStatus
 	scanCancelMu  sync.Mutex
@@ -821,6 +822,8 @@ func (a *APIServer) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/jobs/", a.handleJobsAPI)
 	mux.HandleFunc("/api/v1/changes", a.handleChangesAPI)
 	mux.HandleFunc("/api/v1/detection-rules", a.handleDetectionRules)
+	mux.HandleFunc(runtimeSettingsPrefix, a.handleRuntimeDetectionSettingsAPI)
+	mux.HandleFunc(runtimeSettingsPrefix+"/", a.handleRuntimeDetectionSettingsAPI)
 	mux.HandleFunc("/api/v1/agent-governance", a.handleAgentGovernanceAPI)
 	mux.HandleFunc("/api/v1/agent-governance/", a.handleAgentGovernanceAPI)
 	mux.HandleFunc("/api/v1/scans/agents", a.handleAgentScan)
@@ -862,6 +865,9 @@ func (a *APIServer) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/enforcements/", a.handleRuntimeEnforcements)
 	mux.HandleFunc("/api/v1/process-guard-audit", a.handleProcessGuardAudit)
 	mux.HandleFunc("/api/v1/desktop-scan-schedule", a.handleDesktopScanSchedule)
+	mux.HandleFunc("/api/v1/page-refresh-settings", a.handlePageRefreshSettings)
+	mux.HandleFunc("/api/v1/scan-schedules", a.handleScanSchedules)
+	mux.HandleFunc("/api/v1/scan-schedules/", a.handleScanSchedules)
 	mux.HandleFunc("/api/v1/static-resource-scan-settings", a.handleStaticResourceScanSettings)
 	mux.HandleFunc("/api/v1/gateway-audit", a.handleGatewayAuditInventory)
 	mux.HandleFunc("/api/v1/ai-usage", a.handleAIUsage)

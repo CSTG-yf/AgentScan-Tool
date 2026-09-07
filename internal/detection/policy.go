@@ -157,47 +157,12 @@ func (p *PolicyEngine) reloadMode() {
 	}
 }
 
-// Decide derives the verdict from severity, category and confidence.
-//
-//	CRITICAL attack, confidence ≥ 0.85 → BLOCK
-//	CRITICAL attack                     → CONFIRM (high stakes, low purity)
-//	HIGH attack, confidence ≥ 0.90      → BLOCK
-//	HIGH attack                         → CONFIRM
-//	MEDIUM attack                       → ALERT
-//	LOW attack                          → AUDIT
-//	CRITICAL suspicious                 → CONFIRM
-//	HIGH suspicious                     → ALERT
-//	MEDIUM suspicious                   → AUDIT
-//	LOW suspicious / hygiene            → ALLOW
+// Decide evaluates the immutable default risk map. Live detections use the
+// resolved AgentType policy through processDetectionWithPolicy.
 func Decide(severity, category string, confidence float64) string {
-	sev := strings.ToUpper(strings.TrimSpace(severity))
-	cat := strings.ToLower(strings.TrimSpace(category))
-	isAttack := cat == "attack"
-	switch sev {
-	case "CRITICAL":
-		if isAttack && confidence >= 0.85 {
-			return audit.RuntimeDecisionBlock
-		}
-		return audit.RuntimeDecisionConfirm
-	case "HIGH":
-		if isAttack && confidence >= 0.90 {
-			return audit.RuntimeDecisionBlock
-		}
-		if isAttack {
-			return audit.RuntimeDecisionConfirm
-		}
-		return audit.RuntimeDecisionAlert
-	case "MEDIUM":
-		if isAttack {
-			return audit.RuntimeDecisionAlert
-		}
-		return audit.RuntimeDecisionAudit
-	default: // LOW / unknown
-		if isAttack {
-			return audit.RuntimeDecisionAudit
-		}
-		return audit.RuntimeDecisionAllow
-	}
+	policy := audit.RuntimeRiskPolicy{Rules: audit.DefaultRuntimeRiskPolicyRules()}
+	_, decision, _ := policy.Evaluate(RiskScore(severity, category, confidence))
+	return decision
 }
 
 // RiskScore blends severity, category and confidence into one 0..1
@@ -259,15 +224,42 @@ func (p *PolicyEngine) ProcessDetection(d audit.RuntimeDetection, evidence []aud
 	if p == nil || p.store == nil || d.DetectionID == "" {
 		return
 	}
+	typeID, err := p.store.RuntimeAgentTypeID(d.AgentID)
+	if err != nil {
+		return
+	}
+	config, err := p.store.EffectiveRuntimeDetectionConfig(typeID)
+	if err != nil || !config.Enabled {
+		return
+	}
+	p.processDetectionWithPolicy(d, evidence, config.RiskPolicy)
+}
+
+// Live detection passes its configuration snapshot so a concurrent settings
+// save cannot combine rules from one revision with another revision's policy.
+func (p *PolicyEngine) processDetectionWithPolicy(d audit.RuntimeDetection, evidence []audit.DetectionEvidence, policy audit.RuntimeRiskPolicy) {
 	if evidence == nil {
 		if _, ev, err := p.store.GetRuntimeDetectionDetail(d.DetectionID); err == nil {
 			evidence = ev
 		}
 	}
 	mode := p.Mode()
-	decision := Decide(d.Severity, d.Category, d.Confidence)
-	risk := RiskScore(d.Severity, d.Category, d.Confidence)
+	_, decision, risk := policy.Evaluate(RiskScore(d.Severity, d.Category, d.Confidence))
 	point, actionType := EnforcementPlan(d.DetectionType)
+	if kind, ok := d.Attributes["blacklist_target_type"].(string); ok {
+		switch kind {
+		case "command", "tool":
+			point, actionType = audit.EnforcementPointAgentHook, "TOOL_BLOCK"
+		case "path":
+			point, actionType = audit.EnforcementPointFile, "FILE_BLOCK"
+		case "mcp":
+			point, actionType = audit.EnforcementPointMCP, "MCP_BLOCK"
+		case "process":
+			point, actionType = audit.EnforcementPointProcess, "PROCESS_CONTAIN"
+		case "domain", "url":
+			point, actionType = audit.EnforcementPointProxy, "BLOCK_NETWORK"
+		}
+	}
 
 	reason := decideReason(decision, d, evidence)
 	recorded, isNew, err := p.store.RecordRuntimeDecision(audit.RuntimeDecisionInput{
@@ -279,7 +271,7 @@ func (p *PolicyEngine) ProcessDetection(d audit.RuntimeDetection, evidence []aud
 		Decision:         decision,
 		RiskScore:        risk,
 		Confidence:       d.Confidence,
-		PolicyID:         "runtime-risk-policy-v1",
+		PolicyID:         policy.PolicyKey + ":v" + strconv.Itoa(policy.Version),
 		Reason:           reason,
 		EnforcementPoint: point,
 		Mode:             mode,

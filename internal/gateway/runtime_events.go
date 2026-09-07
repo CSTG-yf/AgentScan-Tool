@@ -1192,7 +1192,6 @@ func (a *APIServer) handleRuntimeDetectionEvents(w http.ResponseWriter, r *http.
 
 func (a *APIServer) handleRuntimeDetectionsList(w http.ResponseWriter, r *http.Request) {
 	filter := runtimeDetectionFilterFromQuery(r, 200, 1000)
-	sourceFilter := strings.TrimSpace(r.URL.Query().Get("source"))
 	detections, err := a.store.ListRuntimeDetections(filter)
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -1206,37 +1205,7 @@ func (a *APIServer) handleRuntimeDetectionsList(w http.ResponseWriter, r *http.R
 	items := make([]runtimeDetectionListItem, 0, len(detections))
 	for _, d := range detections {
 		item := runtimeDetectionListItemFromAudit(d)
-		if sourceFilter != "" && !runtimeDetectionSourceMatches(item.Source, sourceFilter) {
-			continue
-		}
 		items = append(items, item)
-	}
-	if sourceFilter != "" && !strings.EqualFold(sourceFilter, "all") {
-		allFilter := filter
-		allFilter.Limit = 5000
-		allFilter.Offset = 0
-		all, err := a.store.ListRuntimeDetections(allFilter)
-		if err != nil {
-			a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		allItems := make([]runtimeDetectionListItem, 0, len(all))
-		for _, d := range all {
-			item := runtimeDetectionListItemFromAudit(d)
-			if runtimeDetectionSourceMatches(item.Source, sourceFilter) {
-				allItems = append(allItems, item)
-			}
-		}
-		total = len(allItems)
-		start := filter.Offset
-		if start > len(allItems) {
-			start = len(allItems)
-		}
-		end := start + filter.Limit
-		if end > len(allItems) {
-			end = len(allItems)
-		}
-		items = allItems[start:end]
 	}
 	summary := map[string]int{
 		"total": total, "attack": 0, "blocked": 0, "critical": 0, "high": 0, "open": 0,
