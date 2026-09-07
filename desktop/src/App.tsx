@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EyeInvisibleOutlined, EyeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, ReloadOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { Badge, Button, Layout, Menu, message, Modal, Segmented, Space, Tag, Tooltip, Typography } from "antd";
+import { Badge, Button, Layout, Menu, message, Modal, Result, Segmented, Space, Tag, Tooltip, Typography } from "antd";
 import {
   applyProcessGuardPolicy,
+  ensureGatewayReady,
   getAgents,
   getChanges,
   getAgentTrace,
@@ -75,6 +76,8 @@ export default function App() {
   const [replayBusy, setReplayBusy] = useState(false);
   const [staticRefreshTick, setStaticRefreshTick] = useState(0);
   const [eventRefreshTick, setEventRefreshTick] = useState(0);
+  const [gatewayBootState, setGatewayBootState] = useState<"starting" | "ready" | "failed">("starting");
+  const [gatewayBootError, setGatewayBootError] = useState("");
 
   const persistPolicy = async (next: GuardPolicy) => {
     setSavingPolicy(true);
@@ -202,21 +205,28 @@ export default function App() {
     setLoading(false);
   };
 
-  useEffect(() => {
-    const bootstrap = async () => {
+  const bootstrap = async () => {
+      setGatewayBootState("starting");
+      setGatewayBootError("");
       try {
-        setScanSettings(await getScanScheduleSettings());
+        const result = await ensureGatewayReady();
+        if (!result.success) throw new Error(result.message || "内置 Go Gateway 启动失败");
+        setGatewayBootState("ready");
       } catch (error) {
-        message.error(`读取扫描任务刷新间隔失败：${String(error)}`);
+        const detail = String(error);
+        setGatewayBootState("failed");
+        setGatewayBootError(detail);
+        message.error({ key: "gateway-bootstrap", content: `本地安全服务启动失败：${detail}`, duration: 6 });
+        return;
       }
-      try {
-        setStaticScanSettings(await getStaticResourceScanSettings());
-      } catch (error) {
-        message.error(`读取后端静态资源扫描配置失败：${String(error)}`);
-      }
-      await refresh();
-    };
 
+      const settings = await Promise.allSettled([getScanScheduleSettings(), getStaticResourceScanSettings()]);
+      if (settings[0].status === "fulfilled") setScanSettings(settings[0].value);
+      if (settings[1].status === "fulfilled") setStaticScanSettings(settings[1].value);
+      await refresh();
+  };
+
+  useEffect(() => {
     void bootstrap();
   }, []);
 
@@ -443,6 +453,18 @@ export default function App() {
   const replayPercent = replayTotal > 0 ? Math.min(100, Math.round((replayCompleted / replayTotal) * 100)) : 0;
 
   const renderPage = () => {
+    if (gatewayBootState !== "ready") {
+      const starting = gatewayBootState === "starting";
+      return (
+        <Result
+          status={starting ? "info" : "error"}
+          icon={starting ? <ReloadOutlined spin /> : undefined}
+          title={starting ? "正在启动本地安全服务" : "本地安全服务启动失败"}
+          subTitle={starting ? "Go Gateway 已集成在桌面应用中，正在等待服务就绪。" : gatewayBootError}
+          extra={!starting ? <Button type="primary" onClick={() => void bootstrap()}>重新启动</Button> : undefined}
+        />
+      );
+    }
     switch (active) {
       case "range":
         return (
@@ -570,7 +592,7 @@ export default function App() {
               <Tag color={defenseModeColors[defenseMode]}>{defenseModeLabels[defenseMode]}</Tag>
               <Text type="secondary" className="global-mode-detail">{defenseModeDescriptions[defenseMode]}</Text>
             </div>
-            <Tooltip title="自动刷新间隔可在系统设置中按任务配置"><Button icon={<ReloadOutlined spin={loading} />} onClick={() => void refresh()}>刷新状态</Button></Tooltip>
+            <Tooltip title="自动刷新间隔可在系统设置中按任务配置"><Button icon={<ReloadOutlined spin={loading || gatewayBootState === "starting"} />} disabled={gatewayBootState !== "ready"} onClick={() => void refresh()}>刷新状态</Button></Tooltip>
           </div>
         </Header>
         <Content className="content">{renderPage()}</Content>

@@ -973,6 +973,13 @@ export interface LifecycleResult {
   message: string;
 }
 
+export async function ensureGatewayReady(): Promise<LifecycleResult> {
+  if (!inTauri()) {
+    return { action: "start", success: true, message: "浏览器预览不启动本地 Gateway" };
+  }
+  return invoke<LifecycleResult>("ensure_gateway_ready");
+}
+
 export async function setGatewayRunning(running: boolean): Promise<LifecycleResult> {
   if (!inTauri()) throw new Error("仅桌面应用可以控制网关");
   return invoke<LifecycleResult>(running ? "start_gateway" : "stop_gateway");

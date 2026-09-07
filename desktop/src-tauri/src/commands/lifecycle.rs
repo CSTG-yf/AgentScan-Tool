@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
@@ -418,9 +420,66 @@ pub(crate) fn run_gateway_action(
     run_gateway_action_for_mode(app, action, "observe")
 }
 
+fn wait_for_gateway(app: &tauri::AppHandle, timeout: Duration) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    let mut last_error =
+        match crate::commands::gateway_api::get_json::<serde_json::Value>(app, "/health") {
+            Ok(_) => return Ok(()),
+            Err(error) => error,
+        };
+    while Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(150));
+        match crate::commands::gateway_api::get_json::<serde_json::Value>(app, "/health") {
+            Ok(_) => return Ok(()),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
+}
+
+fn ensure_gateway_ready_inner(app: &tauri::AppHandle) -> Result<LifecycleResult, String> {
+    // Reuse an already healthy daemon. This keeps desktop restarts quick and
+    // avoids interrupting hooks that continue to use the bundled gateway.
+    if wait_for_gateway(app, Duration::from_millis(50)).is_ok() {
+        return Ok(LifecycleResult {
+            action: "start",
+            success: true,
+            message: "内置 Go Gateway 已就绪".to_owned(),
+        });
+    }
+
+    let started = run_gateway_action(app, "start")?;
+    if !started.success {
+        return Ok(started);
+    }
+    match wait_for_gateway(app, Duration::from_secs(12)) {
+        Ok(()) => Ok(LifecycleResult {
+            action: "start",
+            success: true,
+            message: "内置 Go Gateway 已启动".to_owned(),
+        }),
+        Err(error) => {
+            let home = desktop_defenseclaw_home(app)?;
+            Ok(LifecycleResult {
+                action: "start",
+                success: false,
+                message: format!(
+                    "内置 Go Gateway 启动后未就绪：{error}。请查看 {}",
+                    home.join("gateway.log").display()
+                ),
+            })
+        }
+    }
+}
+
+#[tauri::command]
+pub fn ensure_gateway_ready(app: tauri::AppHandle) -> Result<LifecycleResult, String> {
+    ensure_gateway_ready_inner(&app)
+}
+
 #[tauri::command]
 pub fn start_gateway(app: tauri::AppHandle) -> Result<LifecycleResult, String> {
-    run_gateway_action(&app, "start")
+    ensure_gateway_ready_inner(&app)
 }
 
 #[tauri::command]

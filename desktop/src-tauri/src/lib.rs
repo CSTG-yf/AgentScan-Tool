@@ -70,6 +70,7 @@ pub fn run() {
             commands::guard_service::install_process_guard,
             commands::guard_service::apply_process_guard_policy,
             commands::guard_service::uninstall_process_guard,
+            commands::lifecycle::ensure_gateway_ready,
             commands::lifecycle::start_gateway,
             commands::lifecycle::stop_gateway,
             commands::range::get_range_status,
