@@ -191,7 +191,7 @@ export interface FileBlacklistRule {
   path: string;
   matchKind: "exact" | "subtree";
   access: Array<"read" | "write" | "create" | "delete" | "any">;
-  action: "terminateAgentTree";
+  action: "returnEmptyContent";
   description?: string;
 }
 

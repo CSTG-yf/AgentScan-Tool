@@ -60,7 +60,10 @@
                 "items": { "enum": ["read", "write", "create", "delete", "any"] },
                 "uniqueItems": true
               },
-              "action": { "const": "terminateAgentTree" },
+              "action": {
+                "enum": ["returnEmptyContent", "terminateAgentTree"],
+                "description": "returnEmptyContent is the current action. terminateAgentTree is accepted only to migrate saved v2 policies and is normalized on load."
+              },
               "description": { "type": "string", "maxLength": 240 }
             },
             "additionalProperties": false

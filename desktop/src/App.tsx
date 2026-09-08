@@ -335,7 +335,7 @@ export default function App() {
       ...policy,
       fileGuard: {
         ...policy.fileGuard,
-        blacklist: [...policy.fileGuard.blacklist, { id: `file.custom.${suffix}`, enabled: false, path: "C:\\Users\\Public", matchKind: "exact", access: ["any"], action: "terminateAgentTree", description: "自定义敏感文件规则" }],
+        blacklist: [...policy.fileGuard.blacklist, { id: `file.custom.${suffix}`, enabled: false, path: "C:\\Users\\Public", matchKind: "exact", access: ["any"], action: "returnEmptyContent", description: "自定义敏感文件规则" }],
       },
     });
   };

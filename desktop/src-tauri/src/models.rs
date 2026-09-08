@@ -165,6 +165,11 @@ pub struct GuardPolicy {
 impl GuardPolicy {
     pub fn normalize(mut self) -> Self {
         self.version = 2;
+        for rule in &mut self.file_guard.blacklist {
+            if rule.action == "terminateAgentTree" {
+                rule.action = "returnEmptyContent".to_owned();
+            }
+        }
         self
     }
 }

@@ -44,19 +44,22 @@ a success-audit SACL to each configured path. The LocalSystem service consumes
 Security events 4663 (an access right was actually used) and 4660 (deletion),
 then attributes the PID to a known Agent process tree.
 
-On a blacklist match the service writes SQLite Trace and JSONL evidence first,
-then verifies PID identity and terminates the Agent tree in `enforce` mode.
-`observe` mode records the same signal without terminating. Trace is stored in
-the protected machine-wide data directory; it includes Agent launches, child
-commands, file reads, writes, creates, deletes, and blacklist outcomes.
+On a blacklist match the service writes SQLite Trace and JSONL evidence and
+leaves the Agent process running. Saved v2 file rules using the former
+`terminateAgentTree` action are migrated to `returnEmptyContent` when loaded.
+Trace is stored in the protected machine-wide data directory; it includes Agent
+launches, child commands, file reads, writes, creates, deletes, and blacklist
+outcomes.
 Default retention is 30 days with a 256 MB database cap. Operators configure
 the feature in Policy Center and query it from the Activity Trace page.
 
-Windows object access auditing reports after access occurred. It can stop
-subsequent Agent activity immediately, but it cannot undo the first read. A
-signed Windows file-system Minifilter is required for guaranteed pre-access
-denial. Directory-change APIs are not used to infer reads because they do not
-reliably identify the process that accessed a file.
+Windows object access auditing reports after access occurred, so this backend
+cannot replace content already returned by a direct filesystem read. Returning
+empty content before an Agent sees it requires interception in the Agent's read
+tool or a signed Windows file-system Minifilter. The audit backend records this
+capability boundary and never terminates the Agent for a file blacklist match.
+Directory-change APIs are not used to infer reads because they do not reliably
+identify the process that accessed a file.
 
 ## Agent runtime knowledge base
 
@@ -136,8 +139,9 @@ tree, and restores the previous machine policy and service state in `finally`.
 
 The file guard has a separate end-to-end acceptance test. It backs up and
 restores the machine audit policy, applies a temporary SACL and blacklist,
-starts a fixture Agent that reads the sensitive file, verifies termination and
-evidence, and removes the temporary service and files:
+starts a fixture Agent that reads the sensitive file, verifies that the Agent
+keeps running and evidence is recorded, and removes the temporary service and
+files:
 
 ```powershell
 .\scripts\test-file-guard.ps1

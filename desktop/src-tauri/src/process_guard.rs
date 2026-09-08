@@ -296,7 +296,10 @@ fn validate_file_rule(rule: &FileBlacklistRule) -> bool {
                 "read" | "write" | "create" | "delete" | "any"
             )
         })
-        && rule.action == "terminateAgentTree"
+        && matches!(
+            rule.action.as_str(),
+            "returnEmptyContent" | "terminateAgentTree"
+        )
 }
 
 pub fn validate_policy(policy: &GuardPolicy) -> Result<(), String> {
@@ -575,7 +578,9 @@ pub fn handle_process_start(
 mod tests {
     use std::collections::HashSet;
 
-    use crate::models::{FileGuardPolicy, GuardPolicy, GuardRule, TerminationPolicy, TracePolicy};
+    use crate::models::{
+        FileBlacklistRule, FileGuardPolicy, GuardPolicy, GuardRule, TerminationPolicy, TracePolicy,
+    };
     use crate::windows_process::ProcessInfo;
 
     use super::{canonical_executable, evaluate, evaluate_start, validate_policy};
@@ -668,6 +673,26 @@ mod tests {
         assert!(old.trace.enabled);
         assert!(validate_policy(&old).is_ok());
         assert_eq!(old.normalize().version, 2);
+    }
+
+    #[test]
+    fn migrates_legacy_file_termination_action() {
+        let mut old = policy();
+        old.file_guard.blacklist.push(FileBlacklistRule {
+            id: "file.legacy".to_owned(),
+            enabled: true,
+            path: r"C:\Users\Public\sensitive.txt".to_owned(),
+            match_kind: "exact".to_owned(),
+            access: vec!["read".to_owned()],
+            action: "terminateAgentTree".to_owned(),
+            description: String::new(),
+        });
+
+        assert!(validate_policy(&old).is_ok());
+        assert_eq!(
+            old.normalize().file_guard.blacklist[0].action,
+            "returnEmptyContent"
+        );
     }
 
     #[test]

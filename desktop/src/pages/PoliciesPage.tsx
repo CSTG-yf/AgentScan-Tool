@@ -53,7 +53,7 @@ export function PoliciesPage({ policy, guardComponent, enabledRules, savingPolic
           <Input.TextArea rows={3} value={(policy?.fileGuard.auditRoots ?? []).join("\n")} placeholder={"C:\\Projects\\AgentWorkspace\nC:\\Users\\Public\\Documents"} onChange={(event) => policy && onSetPolicy({ ...policy, fileGuard: { ...policy.fileGuard, auditRoots: event.target.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean) } })} onBlur={() => policy && onPersistPolicy(policy)} />
         </Space>
       </Card>
-      <Card bordered={false} className="workspace-table-card" title={<Space><span>敏感文件黑名单</span><Tag color="red">命中后终止 Agent 树</Tag></Space>} extra={<Space><Switch checkedChildren="启用" unCheckedChildren="关闭" checked={policy?.fileGuard.enabled} disabled={!policy} loading={savingPolicy} onChange={(enabled) => policy && onPersistPolicy({ ...policy, fileGuard: { ...policy.fileGuard, enabled } })} /><Button onClick={onAddBlacklistRule}>新增规则</Button></Space>}>
+      <Card bordered={false} className="workspace-table-card" title={<Space><span>敏感文件黑名单</span><Tag color="blue">返回空内容</Tag></Space>} extra={<Space><Switch checkedChildren="启用" unCheckedChildren="关闭" checked={policy?.fileGuard.enabled} disabled={!policy} loading={savingPolicy} onChange={(enabled) => policy && onPersistPolicy({ ...policy, fileGuard: { ...policy.fileGuard, enabled } })} /><Button onClick={onAddBlacklistRule}>新增规则</Button></Space>}>
         <Table rowKey="id" pagination={false} dataSource={policy?.fileGuard.blacklist ?? []} locale={{ emptyText: "尚未配置敏感文件" }} columns={[
           { title: "启用", width: 96, dataIndex: "enabled", render: (value: boolean, rule) => <Switch checkedChildren="启用" unCheckedChildren="关闭" checked={value} loading={savingPolicy} onChange={(enabled) => onUpdateBlacklist(rule.id, { enabled }, true)} /> },
           { title: "文件或目录", dataIndex: "path", render: (value: string, rule) => <Input value={value} className="mono" onChange={(event) => onUpdateBlacklist(rule.id, { path: event.target.value })} onBlur={() => policy && onPersistPolicy(policy)} /> },
@@ -61,7 +61,7 @@ export function PoliciesPage({ policy, guardComponent, enabledRules, savingPolic
           { title: "访问类型", width: 110, render: () => <Tag color="volcano">全部访问</Tag> },
           { title: "操作", width: 90, render: (_, rule) => <Button danger type="link" onClick={() => policy && onPersistPolicy({ ...policy, fileGuard: { ...policy.fileGuard, blacklist: policy.fileGuard.blacklist.filter((item) => item.id !== rule.id) } })}>删除</Button> },
         ]} />
-        <div className="inline-warning">用户态审计在访问发生后通知服务，可以立刻终止后续行为，但不能撤回第一次读取。读取前硬阻断需要签名的 Windows Minifilter 驱动。</div>
+        <div className="inline-warning">文件黑名单不再终止 Agent。当前 Windows 审计在访问完成后才通知服务，因此只能记录直接文件访问，不能替换已经返回的内容；真正返回空内容需要读取工具拦截或签名的 Windows Minifilter 驱动。</div>
       </Card>
     </section>
   );

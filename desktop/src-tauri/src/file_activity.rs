@@ -332,45 +332,30 @@ where
                 .then(|| matching_blacklist(&policy, &event.object_name, event_type))
                 .flatten();
             if let Some(rule) = blacklist {
+                // Windows Security object-access events are delivered after the
+                // access has happened. They can attribute and audit the read,
+                // but cannot replace bytes already returned to the caller. File
+                // blacklist matches therefore never terminate the Agent tree.
                 append_activity(
                     "blacklistFileAccess",
                     &event,
                     &attribution,
-                    Some("terminateAgentTree"),
-                    "terminationPending",
+                    Some("returnEmptyContent"),
+                    "accessObserved",
                     &format!(
-                        "blacklist rule {} matched {}",
+                        "blacklist rule {} matched {}; Windows audit events arrive after access and cannot substitute empty content",
                         rule.id,
                         operation_name(event_type)
                     ),
                 )?;
                 crate::process_guard::audit_service_event(
                     audit_path,
-                    "fileTerminationPending",
+                    "fileAccessObserved",
                     &format!(
-                        "rule={} agentPid={} actorPid={} path={}",
+                        "rule={} action=returnEmptyContent agentPid={} actorPid={} path={} detail=post-access audit cannot replace content",
                         rule.id, agent.pid, actor.pid, event.object_name
                     ),
                 )?;
-                let result = if policy.mode == "enforce" {
-                    crate::process_guard::terminate_agent_tree(&agent)
-                } else {
-                    Ok("observe mode; termination not executed".to_owned())
-                };
-                let (outcome, detail) = match result {
-                    Ok(detail) if policy.mode == "enforce" => ("terminated", detail),
-                    Ok(detail) => ("observed", detail),
-                    Err(detail) => ("terminationFailed", detail),
-                };
-                let _ = append_activity(
-                    "blacklistFileAccess",
-                    &event,
-                    &attribution,
-                    Some("terminateAgentTree"),
-                    outcome,
-                    &detail,
-                );
-                let _ = crate::process_guard::audit_service_event(audit_path, outcome, &detail);
             } else if should_capture(&policy, event_type) {
                 let _ = append_activity(
                     event_type,

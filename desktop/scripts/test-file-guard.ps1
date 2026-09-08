@@ -60,7 +60,7 @@ try {
                     path = $blacklistedFile
                     matchKind = "exact"
                     access = @("read")
-                    action = "terminateAgentTree"
+                    action = "returnEmptyContent"
                     description = "Acceptance-test sensitive file"
                 }
             )
@@ -101,21 +101,27 @@ try {
 
     $startedAt = [DateTimeOffset]::UtcNow
     $fixture = Start-Process -FilePath $fixtureExe -ArgumentList @("--read-file", $blacklistedFile) -PassThru -WindowStyle Hidden
-    if (-not $fixture.WaitForExit(15000)) {
-        throw "File guard did not terminate the fixture Agent within 15 seconds."
+    $evidence = $null
+    for ($attempt = 0; $attempt -lt 60; $attempt++) {
+        if ($fixture.HasExited) {
+            throw "File blacklist unexpectedly terminated the fixture Agent."
+        }
+        if (Test-Path -LiteralPath $auditPath) {
+            $evidence = Get-Content -LiteralPath $auditPath -Encoding UTF8 |
+                ForEach-Object { $_ | ConvertFrom-Json } |
+                Where-Object {
+                    $_.eventType -eq "process-guard-service" -and
+                    $_.outcome -eq "fileAccessObserved" -and
+                    $_.detail -like "*e2e.file.sensitive*" -and
+                    $_.detail -like "*$blacklistedFile*" -and
+                    [DateTimeOffset]::Parse($_.timestamp) -ge $startedAt
+                } |
+                Select-Object -Last 1
+        }
+        if ($null -ne $evidence) { break }
+        Start-Sleep -Milliseconds 250
     }
-
-    $pending = Get-Content -LiteralPath $auditPath -Encoding UTF8 |
-        ForEach-Object { $_ | ConvertFrom-Json } |
-        Where-Object {
-            $_.eventType -eq "process-guard-service" -and
-            $_.outcome -eq "fileTerminationPending" -and
-            $_.detail -like "*e2e.file.sensitive*" -and
-            $_.detail -like "*$blacklistedFile*" -and
-            [DateTimeOffset]::Parse($_.timestamp) -ge $startedAt
-        } |
-        Select-Object -Last 1
-    if ($null -eq $pending) {
+    if ($null -eq $evidence) {
         throw "No blacklist file-access evidence was recorded for the fixture Agent."
     }
     if (-not (Test-Path -LiteralPath $tracePath)) {
@@ -128,7 +134,8 @@ try {
         Rule = "e2e.file.sensitive"
         File = $blacklistedFile
         TraceDatabase = $tracePath
-        Evidence = $pending.detail
+        AgentStillRunning = -not $fixture.HasExited
+        Evidence = $evidence.detail
     }
 }
 finally {
