@@ -392,6 +392,13 @@ pub(crate) fn run_gateway_action_for_mode(
     command.arg(action);
     command.env("DEFENSECLAW_HOME", &home);
     command.env("DEFENSECLAW_CONFIG", home.join("config.yaml"));
+    command.env(
+        "DEFENSECLAW_FILE_GUARD_POLICY",
+        app.path()
+            .app_config_dir()
+            .map_err(|error| format!("resolve file guard policy: {error}"))?
+            .join("process-guard.json"),
+    );
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
     let output = command

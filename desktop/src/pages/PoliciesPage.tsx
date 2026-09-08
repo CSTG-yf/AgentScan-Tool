@@ -61,7 +61,7 @@ export function PoliciesPage({ policy, guardComponent, enabledRules, savingPolic
           { title: "访问类型", width: 110, render: () => <Tag color="volcano">全部访问</Tag> },
           { title: "操作", width: 90, render: (_, rule) => <Button danger type="link" onClick={() => policy && onPersistPolicy({ ...policy, fileGuard: { ...policy.fileGuard, blacklist: policy.fileGuard.blacklist.filter((item) => item.id !== rule.id) } })}>删除</Button> },
         ]} />
-        <div className="inline-warning">文件黑名单不再终止 Agent。当前 Windows 审计在访问完成后才通知服务，因此只能记录直接文件访问，不能替换已经返回的内容；真正返回空内容需要读取工具拦截或签名的 Windows Minifilter 驱动。</div>
+        <div className="inline-warning">已接入 Hook 的 Claude Code 和 Codex 可将受支持的文件读取重定向为空文件，原文件保持不变。需同时启用文件黑名单、强制模式及连接器 Action 模式；Codex 要求 0.153.4 或更新版本并重新发现版本。首批支持 Read/read_file 与简单 cat/Get-Content 命令；复杂脚本及直接系统文件访问仍仅审计，不终止 Agent。</div>
       </Card>
     </section>
   );

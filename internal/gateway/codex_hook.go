@@ -44,6 +44,7 @@ import (
 const runGitListMaxBytes = 8 * 1024 * 1024
 
 type codexHookRequest struct {
+	fileReadRewritten    bool
 	HookEventName        string                 `json:"hook_event_name"`
 	SessionID            string                 `json:"session_id,omitempty"`
 	TurnID               string                 `json:"turn_id,omitempty"`
@@ -140,6 +141,24 @@ func (a *APIServer) evaluateCodexHook(ctx context.Context, req codexHookRequest)
 	mode := a.codexMode()
 	if a.scannerCfg != nil && !a.codexEnabled() {
 		return codexResponseFor(req.HookEventName, "allow", "allow", "NONE", "", nil, mode, false)
+	}
+	if !req.fileReadRewritten {
+		if updated, rule, err := a.rewriteFileRead("codex", req.HookEventName, mode, codexToolName(req), req.CWD, req.ToolInput); err != nil {
+			resp := codexResponseFor(req.HookEventName, "block", "block", "HIGH", "", nil, mode, false)
+			// These fixed diagnostics contain no file paths or user content.
+			resp.Reason = err.Error()
+			resp.CodexOutput = codexOutput(req.HookEventName, "block", "block", err.Error(), "")
+			return resp
+		} else if updated != nil {
+			req.fileReadRewritten = true
+			req.ToolInput = updated
+			resp := a.evaluateCodexHook(ctx, req)
+			if resp.Action == "allow" || resp.Action == "alert" {
+				resp.CodexOutput = emptyReadHookOutput(updated)
+				a.auditEmptyRead(ctx, "codex", rule)
+			}
+			return resp
+		}
 	}
 	t0 := time.Now()
 

@@ -53,11 +53,44 @@ outcomes.
 Default retention is 30 days with a 256 MB database cap. Operators configure
 the feature in Policy Center and query it from the Activity Trace page.
 
+Claude Code and Codex synchronous `PreToolUse` hooks now redirect supported
+blacklisted reads to an empty substitute file. The original file is never
+truncated or overwritten. The Gateway checks the rewritten tool input through
+the existing inspection pipeline before returning `updatedInput` with an allow
+decision; other policy denials still take precedence. `file_read_empty` audit
+events record that a rewrite was issued, not a claim that the Agent executed it.
+
+Enable the policy, file blacklist, and `enforce` mode in Policy Center, and
+enable the connector's hooks in `action` mode. Desktop-launched Gateways receive
+the UI policy path through `DEFENSECLAW_FILE_GUARD_POLICY`; policy edits are read
+on each supported request. Standalone Gateways can set that environment variable
+explicitly; Windows otherwise uses `%ProgramData%\DefenseClaw\process-guard.json`.
+Restart an already-running Gateway after upgrading to receive the new path.
+
+Supported inputs are `Read`/`read_file` with `file_path` or `path`, and a single
+literal `cat PATH` or `Get-Content [-LiteralPath|-Path] PATH` through
+`Bash`/`shell`/`shell_command`/`exec_command`. Quoted paths and relative paths
+resolved against the hook working directory are supported. Shell commands read
+the substitute normally, producing zero content bytes; native Read may display
+its standard empty-file notice. Pipelines, command arrays, multiple files,
+shell expansions, arbitrary scripts, MCP tools, remote/WSL agents, and direct
+system calls are outside this first adapter's coverage. Use a local Gateway
+running as the same user as the Agent so the substitute is accessible.
+
+Codex requires **0.153.4 or newer** (the verified rewrite-capable release), with
+its version refreshed by connector discovery/setup in `agent_discovery.json`.
+An older or unknown version receives a denied individual read and an upgrade
+diagnostic; the Agent process is not terminated. A policy parse failure or an
+invalid substitute likewise denies the read rather than returning real content.
+Do not configure multiple hooks to rewrite the same input: the Agent's hook
+protocol uses the last completed rewrite. See the
+[Claude Code hook contract](https://code.claude.com/docs/en/hooks#pretooluse-decision-control)
+and [Codex 0.153.4 implementation](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/hooks/src/events/pre_tool_use.rs).
+
 Windows object access auditing reports after access occurred, so this backend
-cannot replace content already returned by a direct filesystem read. Returning
-empty content before an Agent sees it requires interception in the Agent's read
-tool or a signed Windows file-system Minifilter. The audit backend records this
-capability boundary and never terminates the Agent for a file blacklist match.
+cannot replace content already returned by a direct filesystem read. The audit
+backend records this capability boundary and never terminates the Agent for a
+file blacklist match. Full filesystem coverage requires a signed Minifilter.
 Directory-change APIs are not used to infer reads because they do not reliably
 identify the process that accessed a file.
 

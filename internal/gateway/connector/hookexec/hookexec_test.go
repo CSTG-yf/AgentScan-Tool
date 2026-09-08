@@ -145,6 +145,20 @@ func TestDecisionGolden(t *testing.T) {
 		wantCode   int
 	}{
 		{
+			name:       "claudecode empty read rewrite",
+			connector:  "claudecode",
+			respBody:   `{"action":"allow","claude_code_output":{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"file_path":"C:/cache/empty.txt"}}}}`,
+			wantStdout: `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"file_path":"C:/cache/empty.txt"}}}` + "\n",
+			wantCode:   0,
+		},
+		{
+			name:       "codex empty read rewrite",
+			connector:  "codex",
+			respBody:   `{"action":"allow","codex_output":{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"command":"cat '/cache/empty.txt'"}}}}`,
+			wantStdout: `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"command":"cat '/cache/empty.txt'"}}}` + "\n",
+			wantCode:   0,
+		},
+		{
 			name:      "claudecode allow",
 			connector: "claudecode",
 			respBody:  `{"action":"allow"}`,

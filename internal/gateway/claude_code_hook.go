@@ -31,6 +31,7 @@ import (
 )
 
 type claudeCodeHookRequest struct {
+	fileReadRewritten    bool
 	HookEventName        string                 `json:"hook_event_name"`
 	SessionID            string                 `json:"session_id,omitempty"`
 	TurnID               string                 `json:"turn_id,omitempty"`
@@ -108,6 +109,23 @@ func (a *APIServer) evaluateClaudeCodeHook(ctx context.Context, req claudeCodeHo
 	mode := a.claudeCodeMode()
 	if a.scannerCfg != nil && !a.claudeCodeEnabled() {
 		return claudeCodeResponseFor(req, "allow", "allow", "NONE", "", nil, mode, false)
+	}
+	if !req.fileReadRewritten {
+		if updated, rule, err := a.rewriteFileRead("claudecode", req.HookEventName, mode, req.ToolName, req.CWD, req.ToolInput); err != nil {
+			resp := claudeCodeResponseFor(req, "block", "block", "HIGH", "", nil, mode, false)
+			resp.Reason = err.Error()
+			resp.ClaudeCodeOutput = claudeCodeOutput(req, "block", "block", err.Error(), "")
+			return resp
+		} else if updated != nil {
+			req.fileReadRewritten = true
+			req.ToolInput = updated
+			resp := a.evaluateClaudeCodeHook(ctx, req)
+			if resp.Action == "allow" || resp.Action == "alert" {
+				resp.ClaudeCodeOutput = emptyReadHookOutput(updated)
+				a.auditEmptyRead(ctx, "claudecode", rule)
+			}
+			return resp
+		}
 	}
 	t0 := time.Now()
 
