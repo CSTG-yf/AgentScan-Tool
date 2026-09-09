@@ -1,6 +1,6 @@
 [package]
 name = "defenseclaw-desktop"
-version = "0.1.1"
+version = "0.1.2"
 description = "TraceBastion Windows AI Agent security control plane"
 authors = ["TraceBastion contributors"]
 edition = "2021"

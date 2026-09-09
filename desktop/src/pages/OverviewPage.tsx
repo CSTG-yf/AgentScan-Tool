@@ -15,9 +15,10 @@ export interface OverviewPageProps {
   totalCount: number;
   onNavigate: (page: PageKey) => void;
   onGatewayAction: (running: boolean) => void;
+  onProcessGuardInstall: () => void;
 }
 
-export function OverviewPage({ environment, agentsCount, policy, enabledRules, readyCount, totalCount, onNavigate, onGatewayAction }: OverviewPageProps) {
+export function OverviewPage({ environment, agentsCount, policy, enabledRules, readyCount, totalCount, onNavigate, onGatewayAction, onProcessGuardInstall }: OverviewPageProps) {
   const posture = Math.round((readyCount / totalCount) * 100);
   const chartOption = {
     backgroundColor: "transparent",
@@ -72,7 +73,7 @@ export function OverviewPage({ environment, agentsCount, policy, enabledRules, r
         <Text type="secondary">更新于 {environment ? new Date(environment.capturedAt).toLocaleTimeString() : "-"}</Text>
       </div>
       <div className="component-grid">
-        {environment?.components.map((component) => <ComponentCard key={component.id} component={component} onGatewayAction={onGatewayAction} />) ?? <Progress percent={20} status="active" />}
+        {environment?.components.map((component) => <ComponentCard key={component.id} component={component} onGatewayAction={onGatewayAction} onProcessGuardInstall={onProcessGuardInstall} />) ?? <Progress percent={20} status="active" />}
       </div>
     </section>
   );

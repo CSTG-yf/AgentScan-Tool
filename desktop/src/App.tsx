@@ -544,7 +544,7 @@ export default function App() {
         );
       case "overview":
       default:
-        return <OverviewPage environment={environment} agentsCount={agentTotal || agents.length} policy={policy} enabledRules={enabledRules} readyCount={readyCount} totalCount={totalCount} onNavigate={setActive} onGatewayAction={(running) => void changeGatewayState(running)} />;
+        return <OverviewPage environment={environment} agentsCount={agentTotal || agents.length} policy={policy} enabledRules={enabledRules} readyCount={readyCount} totalCount={totalCount} onNavigate={setActive} onGatewayAction={(running) => void changeGatewayState(running)} onProcessGuardInstall={() => void requestGuardAction("install")} />;
     }
   };
 

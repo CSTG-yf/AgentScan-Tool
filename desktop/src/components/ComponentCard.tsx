@@ -12,8 +12,15 @@ const stateMeta = {
   unknown: { color: "processing", text: "检测中" },
 } as const;
 
-export function ComponentCard({ component, onGatewayAction }: { component: EnvironmentComponent; onGatewayAction: (running: boolean) => void }) {
+interface ComponentCardProps {
+  component: EnvironmentComponent;
+  onGatewayAction: (running: boolean) => void;
+  onProcessGuardInstall: () => void;
+}
+
+export function ComponentCard({ component, onGatewayAction, onProcessGuardInstall }: ComponentCardProps) {
   const meta = stateMeta[component.state];
+  const canInstallProcessGuard = component.id === "processGuard" && component.state !== "ready" && component.state !== "unknown";
   return (
     <Card className="component-card" bordered={false}>
       <div className="component-heading">
@@ -28,6 +35,13 @@ export function ComponentCard({ component, onGatewayAction }: { component: Envir
         <div className="component-action">
           <Button size="small" type={component.state === "ready" ? "default" : "primary"} danger={component.state === "ready"} onClick={() => onGatewayAction(component.state !== "ready")}>
             {component.state === "ready" ? "停止网关" : "启动网关"}
+          </Button>
+        </div>
+      )}
+      {canInstallProcessGuard && (
+        <div className="component-action">
+          <Button size="small" type="primary" onClick={onProcessGuardInstall}>
+            安装 / 修复服务
           </Button>
         </div>
       )}
