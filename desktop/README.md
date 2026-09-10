@@ -32,8 +32,12 @@ There are two command-control paths:
    Agent PID, the service records evidence and terminates the configured Agent
    process tree. This is a fallback for agents without a hook integration.
 
-The process guard is opt-in and starts in `observe` mode. Switching to `enforce`
-requires elevation and explicit operator confirmation.
+The process guard is opt-in and starts in `observe` mode. Applying system policy
+requires administrator privileges. Windows may execute the helper without a UAC
+prompt when the application already has those privileges. Install, apply, and
+uninstall wait for the helper to exit before reporting completion; cancellation,
+launch failure, a nonzero exit code, and an execution timeout are reported as
+errors. The UI remains responsive while waiting and suppresses duplicate clicks.
 
 ## Agent file blacklist and activity Trace
 

@@ -340,15 +340,22 @@ export default function App() {
     });
   };
 
+  const guardActionPending = useRef(false);
   const requestGuardAction = async (action: "install" | "apply" | "uninstall") => {
+    if (guardActionPending.current) return;
+    guardActionPending.current = true;
+    const dismiss = message.loading("正在执行管理员操作；如 Windows 请求授权，请确认。已有管理员权限时可能不弹出 UAC。", 0);
     try {
       if (action === "install") await installProcessGuard();
       else if (action === "apply") await applyProcessGuardPolicy();
       else await uninstallProcessGuard();
-      message.info("已发起管理员权限请求，请在 Windows UAC 窗口中确认");
-      window.setTimeout(() => void refresh(), 3000);
+      message.success(action === "install" ? "管理员服务已安装" : action === "apply" ? "系统策略已应用" : "管理员服务已卸载");
+      await refresh();
     } catch (error) {
       message.error(`操作失败：${String(error)}`);
+    } finally {
+      dismiss();
+      guardActionPending.current = false;
     }
   };
 
