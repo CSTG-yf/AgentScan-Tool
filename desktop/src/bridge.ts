@@ -978,6 +978,11 @@ export async function startProcessGuard(): Promise<void> {
   await invoke("start_process_guard");
 }
 
+export async function stopProcessGuard(): Promise<void> {
+  if (!inTauri()) throw new Error("仅桌面应用可以停止 Windows 服务");
+  await invoke("stop_process_guard");
+}
+
 export async function ensureGatewayReady(): Promise<LifecycleResult> {
   if (!inTauri()) {
     return { action: "start", success: true, message: "浏览器预览不启动本地 Gateway" };

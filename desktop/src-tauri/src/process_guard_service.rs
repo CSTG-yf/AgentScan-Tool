@@ -460,6 +460,29 @@ mod windows {
         }
     }
 
+    pub fn stop() -> std::result::Result<(), Box<dyn Error>> {
+        let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+        let service = manager.open_service(
+            SERVICE_NAME,
+            ServiceAccess::QUERY_STATUS | ServiceAccess::STOP,
+        )?;
+        if service.query_status()?.current_state == ServiceState::Stopped {
+            return Ok(());
+        }
+        service.stop()?;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let status = service.query_status()?;
+            if status.current_state == ServiceState::Stopped {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err("timed out waiting for process guard service to stop".into());
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
     pub fn install() -> std::result::Result<(), Box<dyn Error>> {
         let (policy_path, audit_path) = default_paths();
         if let Some(parent) = policy_path.parent() {
@@ -563,11 +586,16 @@ mod windows {
 }
 
 #[cfg(windows)]
-pub use windows::{dispatch, install, start, uninstall};
+pub use windows::{dispatch, install, start, stop, uninstall};
 
 #[cfg(not(windows))]
 pub fn start() -> Result<(), String> {
     Err("Windows service startup is available only on Windows".to_owned())
+}
+
+#[cfg(not(windows))]
+pub fn stop() -> Result<(), String> {
+    Err("Windows service stop is available only on Windows".to_owned())
 }
 
 #[cfg(not(windows))]

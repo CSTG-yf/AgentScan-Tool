@@ -13,6 +13,12 @@ fn main() {
             }
             return;
         }
+        Some("--stop-process-guard") => {
+            if defenseclaw_desktop_lib::process_guard_service::stop().is_err() {
+                std::process::exit(1);
+            }
+            return;
+        }
         Some("--install-process-guard") => {
             if defenseclaw_desktop_lib::process_guard_service::install().is_err() {
                 std::process::exit(1);

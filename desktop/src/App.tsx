@@ -19,6 +19,7 @@ import {
   getStaticResourceScanSettings,
   installProcessGuard,
   startProcessGuard,
+  stopProcessGuard,
   saveDefenseMode,
   saveGuardPolicy,
   saveScanScheduleSettings,
@@ -77,6 +78,10 @@ export default function App() {
   const [eventRefreshTick, setEventRefreshTick] = useState(0);
   const [gatewayBootState, setGatewayBootState] = useState<"starting" | "ready" | "failed">("starting");
   const [gatewayBootError, setGatewayBootError] = useState("");
+  const [gatewayStartup, setGatewayStartup] = useState<"auto" | "manual" | "disabled">(() => {
+    const saved = localStorage.getItem("tracebastion.gatewayStartup");
+    return saved === "manual" || saved === "disabled" ? saved : "auto";
+  });
 
   const persistPolicy = async (next: GuardPolicy) => {
     setSavingPolicy(true);
@@ -206,8 +211,10 @@ export default function App() {
       setGatewayBootState("starting");
       setGatewayBootError("");
       try {
-        const result = await ensureGatewayReady();
-        if (!result.success) throw new Error(result.message || "内置 Go Gateway 启动失败");
+        if (gatewayStartup === "auto") {
+          const result = await ensureGatewayReady();
+          if (!result.success) throw new Error(result.message || "内置 Go Gateway 启动失败");
+        }
         setGatewayBootState("ready");
       } catch (error) {
         const detail = String(error);
@@ -226,6 +233,12 @@ export default function App() {
   useEffect(() => {
     void bootstrap();
   }, []);
+
+  const changeGatewayStartup = (value: "auto" | "manual" | "disabled") => {
+    localStorage.setItem("tracebastion.gatewayStartup", value);
+    setGatewayStartup(value);
+    message.success("Gateway 启动方式已保存");
+  };
 
   const changeCursorRef = useRef(0);
 
@@ -338,16 +351,17 @@ export default function App() {
   };
 
   const guardActionPending = useRef(false);
-  const requestGuardAction = async (action: "install" | "start" | "apply" | "uninstall") => {
+  const requestGuardAction = async (action: "install" | "start" | "stop" | "apply" | "uninstall") => {
     if (guardActionPending.current) return;
     guardActionPending.current = true;
     const dismiss = message.loading("正在执行管理员操作；如 Windows 请求授权，请确认。已有管理员权限时可能不弹出 UAC。", 0);
     try {
       if (action === "install") await installProcessGuard();
       else if (action === "start") await startProcessGuard();
+      else if (action === "stop") await stopProcessGuard();
       else if (action === "apply") await applyProcessGuardPolicy();
       else await uninstallProcessGuard();
-      message.success(action === "install" ? "管理员服务已安装" : action === "start" ? "管理员服务已启动" : action === "apply" ? "系统策略已应用" : "管理员服务已卸载");
+      message.success(action === "install" ? "管理员服务已安装" : action === "start" ? "管理员服务已启动" : action === "stop" ? "管理员服务已停止" : action === "apply" ? "系统策略已应用" : "管理员服务已卸载");
       await refresh();
     } catch (error) {
       message.error(`操作失败：${String(error)}`);
@@ -378,6 +392,29 @@ export default function App() {
     } finally {
       await refresh();
     }
+  };
+
+  const requestGatewayAction = async (action: "start" | "stop" | "restart" | "health") => {
+    if (action === "health") {
+      await refreshTask("environment");
+      message.success("服务状态已刷新");
+      return;
+    }
+    if (action === "restart") {
+      setLoading(true);
+      try {
+        const stopped = await setGatewayRunning(false);
+        if (!stopped.success) throw new Error(stopped.message);
+        await saveDefenseMode(defenseMode);
+        message.success("Gateway 已重启");
+      } catch (error) {
+        message.error(`Gateway 重启失败：${String(error)}`);
+      } finally {
+        await refresh();
+      }
+      return;
+    }
+    await changeGatewayState(action === "start");
   };
 
   const configureDefenseMode = async (mode: string | number) => {
@@ -523,15 +560,16 @@ export default function App() {
       case "settings":
         return (
           <SettingsPage
+            gatewayComponent={environment?.components.find((component) => component.id === "gateway")}
             guardComponent={guardComponent}
-            scanSettings={scanSettings}
-            staticScanSettings={staticScanSettings}
-            savingScanSettings={savingScanSettings}
-            savingStaticScanSettings={savingStaticScanSettings}
-            onScanSettingsChange={(next) => void persistScanSettings(next)}
-            onStaticScanSettingsChange={(next) => void persistStaticScanSettings(next)}
-            onRunRefreshAll={() => void refresh()}
-            onRequestGuardAction={(action) => void requestGuardAction(action)}
+            defenseMode={defenseMode}
+            gatewayStartup={gatewayStartup}
+            refreshedAt={environment?.capturedAt}
+            busy={loading}
+            onRefresh={() => void refresh()}
+            onGatewayAction={(action) => void requestGatewayAction(action)}
+            onGatewayStartupChange={changeGatewayStartup}
+            onGuardAction={(action) => void requestGuardAction(action)}
           />
         );
       case "overview":
