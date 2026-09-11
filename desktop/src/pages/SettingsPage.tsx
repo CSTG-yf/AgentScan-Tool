@@ -127,7 +127,7 @@ function CapabilitySection({ section }: { section: Exclude<SectionKey, "services
     storage: { title: "数据与存储", description: "管理数据保留、存储容量与安全清理。", items: ["行为与异常事件保留", "数据库和日志容量", "完整性检查与清理预览"], icon: <DatabaseOutlined /> },
     privacy: { title: "隐私与脱敏", description: "控制敏感内容采集、持久化和导出。", items: ["日志敏感字段脱敏", "Prompt 与 Completion 持久化", "路径、用户名和凭据隐藏"], icon: <LockOutlined /> },
     notifications: { title: "通知", description: "配置本机 Critical、High 和服务异常通知。", items: ["风险和处置失败通知", "服务离线与磁盘通知", "免打扰和通知冷却"], icon: <BellOutlined /> },
-    updates: { title: "更新与版本", description: "检查桌面端及安全组件兼容性。", items: ["TraceBastion Desktop 0.1.2", "Gateway 与进程守护版本", "规则包和检测签名版本"], icon: <DownloadOutlined /> },
+    updates: { title: "更新与版本", description: "检查桌面端及安全组件兼容性。", items: ["TraceBastion Desktop 0.2.0", "Gateway 与进程守护版本", "规则包和检测签名版本"], icon: <DownloadOutlined /> },
     diagnostics: { title: "诊断与高级设置", description: "检查服务、端口、数据库和策略同步状态。", items: ["Gateway API 与端口检查", "Windows Service 状态检查", "脱敏诊断包与修复建议"], icon: <ExperimentOutlined /> },
   };
   const item = copy[section];

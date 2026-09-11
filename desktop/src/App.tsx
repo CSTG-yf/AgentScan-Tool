@@ -589,7 +589,7 @@ export default function App() {
             {!sidebarCollapsed && <div><div className="brand-title">TraceBastion</div><div className="brand-subtitle">AGENT SECURITY CONTROL PLANE</div></div>}
           </div>
           <Menu mode="inline" selectedKeys={[active]} items={navigation} onClick={({ key }) => setActive(key as PageKey)} />
-          <div className="sidebar-footer"><Badge status={readyCount ? "success" : "warning"} />{!sidebarCollapsed && <><span>本机控制平面</span><span className="version">v0.1</span></>}</div>
+          <div className="sidebar-footer"><Badge status={readyCount ? "success" : "warning"} />{!sidebarCollapsed && <><span>本机控制平面</span><span className="version">v0.2</span></>}</div>
         </Sider>
       )}
       <Layout className="main-layout" style={{ marginLeft: sidebarHidden ? 0 : sidebarCollapsed ? 80 : 238 }}>

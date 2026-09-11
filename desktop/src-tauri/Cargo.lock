@@ -524,7 +524,7 @@ dependencies = [
 
 [[package]]
 name = "defenseclaw-desktop"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "quick-xml 0.37.5",
