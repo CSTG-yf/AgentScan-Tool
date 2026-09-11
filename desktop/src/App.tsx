@@ -21,7 +21,6 @@ import {
   startProcessGuard,
   saveDefenseMode,
   saveGuardPolicy,
-  saveRangeRoot,
   saveScanScheduleSettings,
   saveStaticResourceScanSettings,
   setGatewayRunning,
@@ -59,7 +58,6 @@ export default function App() {
   const [agentWarning, setAgentWarning] = useState("");
   const [policy, setPolicy] = useState<GuardPolicy>();
   const [rangeStatus, setRangeStatus] = useState<RangeStatus>();
-  const [rangeRoot, setRangeRoot] = useState("");
   const [defenseMode, setDefenseMode] = useState<RangeMode>("baseline");
   const [replayCommand, setReplayCommand] = useState(defaultReplayCommand);
   const [replayStatus, setReplayStatus] = useState<RangeReplayStatus>();
@@ -172,7 +170,6 @@ export default function App() {
       case "rangeStatus": {
         const status = await getRangeStatus();
         setRangeStatus(status);
-        if (status.root) setRangeRoot(status.root);
         setDefenseMode(status.mode ?? "baseline");
         return;
       }
@@ -195,7 +192,6 @@ export default function App() {
     if (results[2].status === "fulfilled") setPolicy(results[2].value);
     if (results[3].status === "fulfilled") {
       setRangeStatus(results[3].value);
-      if (results[3].value.root) setRangeRoot(results[3].value.root);
       setDefenseMode(results[3].value.mode ?? "baseline");
     }
     if (results[4].status === "fulfilled") setAudit(results[4].value);
@@ -384,16 +380,6 @@ export default function App() {
     }
   };
 
-  const configureRange = async () => {
-    try {
-      const status = await saveRangeRoot(rangeRoot);
-      setRangeStatus(status);
-      message.success("AgentRange 路径已保存");
-    } catch (error) {
-      message.error(`靶场路径无效：${String(error)}`);
-    }
-  };
-
   const configureDefenseMode = async (mode: string | number) => {
     const nextMode = String(mode) as RangeMode;
     setDefenseMode(nextMode);
@@ -479,7 +465,6 @@ export default function App() {
         return (
           <RangePage
             rangeStatus={rangeStatus}
-            rangeRoot={rangeRoot}
             defenseMode={defenseMode}
             loading={loading}
             replayCommand={replayCommand}
@@ -489,8 +474,6 @@ export default function App() {
             replayCompleted={replayCompleted}
             replayRemaining={replayRemaining}
             replayPercent={replayPercent}
-            onRangeRootChange={setRangeRoot}
-            onConfigureRange={() => void configureRange()}
             onChangeRangeState={(running) => void changeRangeState(running)}
             onReplayCommandChange={setReplayCommand}
             onFillReplayScenario={fillReplayScenario}

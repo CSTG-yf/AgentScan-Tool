@@ -8,7 +8,6 @@ const { Text, Title } = Typography;
 
 export interface RangePageProps {
   rangeStatus?: RangeStatus;
-  rangeRoot: string;
   defenseMode: RangeMode;
   loading: boolean;
   replayCommand: string;
@@ -18,8 +17,6 @@ export interface RangePageProps {
   replayCompleted: number;
   replayRemaining: number;
   replayPercent: number;
-  onRangeRootChange: (value: string) => void;
-  onConfigureRange: () => void;
   onChangeRangeState: (running: boolean) => void;
   onReplayCommandChange: (value: string) => void;
   onFillReplayScenario: (scenario: string) => void;
@@ -29,7 +26,6 @@ export interface RangePageProps {
 
 export function RangePage({
   rangeStatus,
-  rangeRoot,
   defenseMode,
   loading,
   replayCommand,
@@ -39,8 +35,6 @@ export function RangePage({
   replayCompleted,
   replayRemaining,
   replayPercent,
-  onRangeRootChange,
-  onConfigureRange,
   onChangeRangeState,
   onReplayCommandChange,
   onFillReplayScenario,
@@ -62,10 +56,6 @@ export function RangePage({
         <div className="range-status-copy">
           <Title level={4}>AgentRange-player</Title>
           <Text type="secondary">{rangeStatus?.detail ?? "正在检测靶场环境"}</Text>
-          <div className="range-path">
-            <Input value={rangeRoot} onChange={(event) => onRangeRootChange(event.target.value)} placeholder="例如 C:\\SecurityLabs\\AgentRange-player" />
-            <Button onClick={onConfigureRange}>验证并保存</Button>
-          </div>
         </div>
         <Space direction="vertical" size={10} className="range-actions">
           <Tag color={defenseModeColors[defenseMode]}>当前全局模式：{defenseModeLabels[defenseMode]}</Tag>
@@ -79,7 +69,6 @@ export function RangePage({
         <div className="service-list">
           {rangeStatus?.runningServices.length ? rangeStatus.runningServices.map((service) => <Tag key={service} color="cyan">{service}</Tag>) : <Text type="secondary">当前没有运行中的 Compose 服务</Text>}
         </div>
-        {rangeStatus?.composeFile && <div className="compose-path"><Text type="secondary">Compose：</Text><Text className="mono">{rangeStatus.composeFile}</Text></div>}
       </Card>
       <Card bordered={false} className="range-attack-card" title="攻击事件快捷执行">
         <div className="range-attack-grid">
