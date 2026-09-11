@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, ConfigProvider, Descriptions, Drawer, Empty, Input, Modal, Segmented, Select, Space, Table, Tabs, Tag, Typography, message, theme } from "antd";
-import { blockRuntimeDetection, getRuntimeDetectionAgentTypeSummaries, getRuntimeDetectionDetail, getRuntimeDetections, getRuntimeDecisions, getRuntimeDecisionDetail, getRuntimeSecurityAgents, getRuntimeSecurityMode, getRuntimeSecuritySummary, setRuntimeSecurityMode } from "../bridge";
+import { blockRuntimeDetection, createRuntimeEventReplay, getRuntimeDetectionAgentTypeSummaries, getRuntimeDetectionDetail, getRuntimeDetections, getRuntimeDecisions, getRuntimeDecisionDetail, getRuntimeSecurityAgents, getRuntimeSecurityMode, getRuntimeSecuritySummary, getScanStatus, setRuntimeSecurityMode } from "../bridge";
 import type { RuntimeDetection, RuntimeDetectionAgentTypeSummary, RuntimeDetectionDetail, RuntimeDetectionListQuery, RuntimeDecisionDetail, RuntimeEnforcementResult, RuntimeSecurityAgent, RuntimeSecurityMode } from "../types";
 import { formatTimestamp } from "../app/display";
 import "./runtime-workbench.css";
@@ -28,6 +28,7 @@ export function EventsPage({ refreshNonce = 0 }: Props) {
   const [total, setTotal] = useState(0);
   const [mode, setMode] = useState<RuntimeSecurityMode>();
   const [modeBusy, setModeBusy] = useState(false);
+  const [replayBusy, setReplayBusy] = useState(false);
   const [listBusy, setListBusy] = useState(false);
   const [summaryBusy, setSummaryBusy] = useState(false);
   const [summaryReady, setSummaryReady] = useState(false);
@@ -100,6 +101,21 @@ export function EventsPage({ refreshNonce = 0 }: Props) {
   const changeMode = async (value: string | number) => {
     setModeBusy(true); try { setMode(await setRuntimeSecurityMode(value as RuntimeSecurityMode)); setError("mode"); } catch (e) { setError("mode", e); } finally { setModeBusy(false); }
   };
+  const rebuildDetections = async () => {
+    setReplayBusy(true); setError("replay");
+    try {
+      const job = await createRuntimeEventReplay();
+      if (!job.scan_id) throw new Error("网关未返回检测重建任务 ID");
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const status = await getScanStatus(job.scan_id);
+        if (status.status === "completed") { message.success("历史行为检测重建完成"); refresh(); return; }
+        if (["failed", "cancelled", "canceled"].includes(status.status)) throw new Error(status.error || `检测重建任务：${status.status}`);
+        await new Promise<void>(resolve => window.setTimeout(resolve, 1000));
+      }
+      throw new Error("检测重建等待超时，请稍后刷新查看");
+    } catch (error) { setError("replay", error); }
+    finally { setReplayBusy(false); }
+  };
   const previewBlock = async () => {
     const id = selected.current; if (!id) return; setActionBusy(true); setActionError("");
     try { const key = crypto.randomUUID(); const result = await blockRuntimeDetection(id, undefined, "manual_operator_action", { preview: true, idempotencyKey: key }); if (!result.plan) throw new Error("后端未返回处置预览，无法确认执行。"); if (selected.current === id) setPreview({ id, key, plan: result.plan }); }
@@ -115,7 +131,7 @@ export function EventsPage({ refreshNonce = 0 }: Props) {
   const record = detail?.detection;
   const info = record ? { "Detection ID": record.detectionId, "Agent 实例": `${record.agentName || detail?.agent?.name || ""} · ${record.agentId || detail?.agent?.agentId || "unknown"}`, "检测类型": record.detectionType, "规则 / 版本": `${record.ruleId || "—"} / ${record.ruleVersion || "—"}`, "来源": record.source || "—", "首次发现": formatTimestamp(record.firstSeenAt || ""), "最近发现": formatTimestamp(record.lastSeenAt || ""), "Session": record.sessionId || detail?.runtimeSession?.sessionId || "—", "Trace": record.traceId || detail?.trace?.traceId || "—", "置信度": record.confidence === undefined ? "—" : `${Math.round(record.confidence * 100)}%`, "处置建议": record.remediation || "—" } : {};
   return <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm, token: { colorPrimary: "#1677ff", colorBgContainer: "#fff", colorText: "#16273e", borderRadius: 10 } }}><section className="runtime-workbench">
-    <div className="runtime-workbench-heading"><div><Text className="eyebrow">ANOMALY DETECTION</Text><Title level={2}>异常事件检测</Title><Text type="secondary">追踪异常行为、核对证据与处置结果。</Text></div><Space wrap>{mode ? <Segmented value={mode} disabled={modeBusy} options={[{ value: "observe", label: "观察模式" }, { value: "action", label: "处置模式" }]} onChange={value => void changeMode(value)} /> : <Tag>运行模式不可用</Tag>}<Button icon={<ReloadOutlined />} loading={listBusy || summaryBusy} onClick={refresh}>刷新</Button></Space></div>
+    <div className="runtime-workbench-heading"><div><Text className="eyebrow">ANOMALY DETECTION</Text><Title level={2}>异常事件检测</Title><Text type="secondary">追踪异常行为、核对证据与处置结果。</Text></div><Space wrap>{mode ? <Segmented value={mode} disabled={modeBusy} options={[{ value: "observe", label: "观察模式" }, { value: "action", label: "处置模式" }]} onChange={value => void changeMode(value)} /> : <Tag>运行模式不可用</Tag>}<Button loading={replayBusy} onClick={() => void rebuildDetections()}>重建检测结果</Button><Button icon={<ReloadOutlined />} loading={listBusy || summaryBusy} onClick={refresh}>刷新</Button></Space></div>
     {Object.entries(errors).filter(([, e]) => e).map(([key, e]) => <Alert key={key} type="error" showIcon title={e} action={<Button onClick={refresh}>重试</Button>} />)}
     <div className="runtime-workbench-metrics">{[["总异常事件", totals.total], ["攻击事件", totals.attack], ["高危及以上", totals.high], ["未解决事件", totals.open]].map(([label, value], index) => <Card key={label} className={`runtime-workbench-metric metric-${index}`}><Text type="secondary">{label}</Text><strong>{summaryReady ? value : "—"}</strong><Text type="secondary">当前筛选的完整汇总</Text></Card>)}</div>
     <Card title="Agent 类型风险分布" extra={<Button type="link" onClick={() => change({ agentTypeId: undefined })}>全部类型</Button>}><div className="runtime-type-cards">{types.map(type => <button type="button" key={`${type.agentTypeId}:${type.agentType}`} className={filters.agentTypeId === type.agentTypeId ? "selected" : ""} onClick={() => change({ agentTypeId: type.agentTypeId || undefined })}><strong>{type.agentTypeName || type.agentType || "unknown"}</strong><b>{type.totalEvents}</b><span>异常事件</span><div>{Object.entries(type.riskCounts).map(([risk, count]) => <Tag key={risk} color={riskColors[risk.toLowerCase()]}>{risk.toUpperCase()} {count}</Tag>)}</div></button>)}</div>{!types.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={summaryBusy ? "正在读取汇总" : "当前筛选无异常事件"} />}</Card>
@@ -130,7 +146,7 @@ export function EventsPage({ refreshNonce = 0 }: Props) {
     </div><Table<RuntimeDetection> rowKey="detectionId" loading={listBusy} dataSource={rows} scroll={{ x: 1400 }} onRow={row => ({ onClick: () => open(row.detectionId) })} pagination={{ current: paging.page, pageSize: paging.pageSize, total, showSizeChanger: true, pageSizeOptions: [20, 50, 100], onChange: (page, pageSize) => setPaging({ page: pageSize === paging.pageSize ? page : 1, pageSize }) }} columns={[
       { title: "异常事件 / 检测类型", width: 260, render: (_, row) => <Space orientation="vertical" size={2}><Text strong>{row.title || row.detectionType}</Text><Text type="secondary">{row.detectionType} · {row.ruleId}</Text></Space> }, { title: "Agent", width: 150, render: (_, row) => <span title={row.agentId}>{row.agentName || row.agentId || "unknown"}</span> }, { title: "类别", dataIndex: "category", width: 100 }, { title: "风险", dataIndex: "severity", render: riskTag, width: 110 }, { title: "状态", dataIndex: "status", render: statusTag, width: 100 }, { title: "来源", dataIndex: "source", width: 150 }, { title: "最近发现", width: 180, render: (_, row) => formatTimestamp(row.lastSeenAt || row.createdAt || "") }, { title: "Session / Trace", width: 175, render: (_, row) => <Space orientation="vertical" size={0}><Text code>{row.sessionId || "—"}</Text><Text code>{row.traceId || "—"}</Text></Space> }, { title: "证据", dataIndex: "eventCount", width: 65, render: (count: number | undefined) => count ?? 0 }, { title: "操作", width: 85, render: (_, row) => <Button type="link" onClick={e => { e.stopPropagation(); open(row.detectionId); }}>详情</Button> },
     ]} locale={{ emptyText: "当前筛选无异常事件" }} /></Card></div>
-    <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { colorBgContainer: "#12243b", colorBgElevated: "#0c1b2e", colorText: "#e8f0fa", colorTextSecondary: "#adc0d8", colorBorderSecondary: "#2a405c" } }}>
+    <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm, token: { colorBgContainer: "#ffffff", colorBgElevated: "#ffffff", colorText: "#14213a", colorTextSecondary: "#667085", colorBorderSecondary: "#e7ebf3" } }}>
       <Drawer className="runtime-evidence-drawer" title={record?.title || "异常事件详情"} open={!!selectedId} width="min(680px, 96vw)" onClose={close} loading={detailBusy} footer={<Space><Button danger disabled={!record} loading={actionBusy} onClick={() => void previewBlock()}>预览阻断方案</Button><Button onClick={() => selectedId && void loadDetail(selectedId)}>重新读取</Button></Space>}>
         {detailError && <Alert type="error" title={detailError} action={<Button onClick={() => selectedId && void loadDetail(selectedId)}>重试详情</Button>} />}{actionError && <Alert type="error" title={actionError} />}
         {record && <><Space>{riskTag(record.severity)}{statusTag(record.status)}<Tag>{record.category}</Tag></Space>

@@ -58,3 +58,150 @@
 .scan-refresh-json { margin:8px 0 0; padding:12px; border-radius:8px; background:#f5f7fa; white-space:pre-wrap; overflow-wrap:anywhere; }
 @media(max-width:1000px) { .scan-refresh-policy-row { grid-template-columns:minmax(220px,1fr) 70px 160px; } .scan-refresh-policy-row>.ant-select,.scan-refresh-policy-row>button,.scan-refresh-policy-row>.ant-tag { grid-column:3; } .scan-refresh-watcher-grid { grid-template-columns:repeat(2,minmax(220px,1fr)); } }
 @media(max-width:720px) { .scan-refresh-metrics,.scan-refresh-actions { grid-template-columns:1fr; } .scan-refresh-policy-row,.scan-refresh-page-list .scan-refresh-policy-row { grid-template-columns:1fr; } .scan-refresh-policy-row>.ant-select,.scan-refresh-policy-row>button,.scan-refresh-policy-row>.ant-tag { grid-column:auto; } .scan-refresh-watcher-grid { grid-template-columns:1fr; } }
+
+/* Runtime detection and attack-chain pages share the static-resource workbench language. */
+.runtime-workbench {
+  gap:16px;
+  padding-top:0;
+  background:transparent;
+}
+.runtime-workbench-heading {
+  min-height:76px;
+  align-items:flex-end;
+}
+.runtime-workbench-heading h2 {
+  margin:6px 0 4px !important;
+}
+.runtime-workbench .ant-card {
+  border:1px solid #e7ebf3 !important;
+  border-radius:8px !important;
+  background:#fff !important;
+  box-shadow:0 14px 36px rgba(15,23,42,.07) !important;
+}
+.runtime-workbench .ant-card-head {
+  min-height:50px;
+  border-bottom:1px solid #e7ebf3 !important;
+}
+.runtime-workbench .ant-card-head-title {
+  color:#14213a !important;
+  font-weight:760;
+}
+.runtime-workbench-metrics {
+  gap:14px;
+}
+.runtime-workbench-metric .ant-card-body {
+  min-height:132px;
+  padding:18px;
+}
+.runtime-workbench-metric strong {
+  margin:9px 0 4px;
+  color:#1677ff;
+  font-size:38px;
+  line-height:1;
+}
+.runtime-workbench-columns {
+  grid-template-columns:246px minmax(0,1fr);
+  gap:16px;
+}
+.runtime-instance-list {
+  position:sticky;
+  top:112px;
+}
+.runtime-instance-list .ant-card-body {
+  gap:8px;
+  padding:14px;
+}
+.runtime-type-cards button,
+.runtime-instance-list button {
+  padding:12px;
+  color:#334155;
+  border:1px solid #e7ebf3;
+  border-radius:8px;
+  background:#f8fafc;
+  transition:border-color .16s ease,background .16s ease,box-shadow .16s ease;
+}
+.runtime-type-cards button:hover,
+.runtime-instance-list button:hover {
+  color:#14213a;
+  border-color:#8ec5ff;
+  background:#eaf4ff;
+}
+.runtime-type-cards button.selected,
+.runtime-instance-list button.selected {
+  color:#14213a;
+  border-color:#8ec5ff;
+  background:#eaf4ff;
+  box-shadow:inset 2px 0 #1677ff;
+}
+.runtime-result-card .ant-card-body {
+  padding:16px;
+}
+.runtime-workbench-filters {
+  padding:0;
+  margin-bottom:14px;
+}
+.runtime-workbench .ant-input,
+.runtime-workbench .ant-input-affix-wrapper,
+.runtime-workbench .ant-select-selector,
+.runtime-workbench .ant-segmented {
+  color:#14213a !important;
+  border-color:#d9e1ee !important;
+  background:#fff !important;
+  box-shadow:none !important;
+}
+.runtime-workbench .ant-btn:not(.ant-btn-primary):not(.ant-btn-dangerous):not(.ant-btn-link) {
+  color:#1f4f93 !important;
+  border-color:#91bfff !important;
+  background:#fff !important;
+  box-shadow:none !important;
+}
+.runtime-workbench .ant-btn:not(.ant-btn-primary):not(.ant-btn-dangerous):not(.ant-btn-link):hover {
+  color:#0958d9 !important;
+  border-color:#1677ff !important;
+  background:#f0f6ff !important;
+}
+.runtime-workbench .ant-btn-primary {
+  color:#fff !important;
+  border-color:#1677ff !important;
+  background:#1677ff !important;
+  box-shadow:none !important;
+}
+.runtime-workbench .ant-table-thead > tr > th {
+  color:#475467 !important;
+  border-bottom:1px solid #e9eef5 !important;
+  background:#fbfcfe !important;
+}
+.runtime-workbench .ant-table-tbody > tr > td {
+  color:#14213a !important;
+  border-bottom:1px solid #edf1f7 !important;
+  background:#fff !important;
+}
+.runtime-workbench .ant-table-tbody > tr:hover > td {
+  background:#f6f9ff !important;
+}
+.runtime-evidence-drawer .ant-drawer-content,
+.runtime-evidence-drawer .ant-drawer-header,
+.runtime-evidence-drawer .ant-drawer-body {
+  color:#14213a;
+  background:#fff !important;
+}
+.runtime-evidence-drawer .ant-drawer-header {
+  border-bottom:1px solid #e7ebf3 !important;
+}
+.runtime-evidence-drawer pre,
+.runtime-response,
+.runtime-chain-step {
+  color:#334155;
+  border:1px solid #e7ebf3;
+  background:#f8fafc;
+}
+.runtime-evidence-event {
+  border-bottom-color:#e7ebf3;
+}
+.runtime-raw-record {
+  color:#667085;
+}
+@media(max-width:1180px) {
+  .runtime-workbench-columns { grid-template-columns:1fr; }
+  .runtime-instance-list { position:static; }
+}

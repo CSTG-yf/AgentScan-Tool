@@ -198,7 +198,7 @@ export function AttackChainPage({ snapshot }: Props) {
           </Card>
         </div>
       </div>
-      <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { colorBgElevated: "#0c1b2e", colorBgContainer: "#10243c", colorText: "#e4edf8", colorTextSecondary: "#a2b6ce", colorBorder: "#2a405c" } }}>
+      <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm, token: { colorBgElevated: "#ffffff", colorBgContainer: "#ffffff", colorText: "#14213a", colorTextSecondary: "#667085", colorBorder: "#e7ebf3" } }}>
         <Drawer rootClassName="runtime-evidence-drawer" width="min(720px, 96vw)" open={!!selectedId} title={detail?.detections?.[0]?.title ? String(detail.detections[0].title) : "攻击链详情"} onClose={() => { detailGeneration.current++; setSelectedId(undefined); }} loading={detailBusy}
           footer={<Space wrap><Button icon={<ReloadOutlined />} onClick={() => selectedId && void openDetail(selectedId, true)}>刷新详情</Button><Button disabled={!detail} icon={<DownloadOutlined />} onClick={() => detail && exportJSON(detail, `attack-chain-${selectedId}.json`)}>导出详情</Button></Space>}>
           {detailError && <Alert type="error" showIcon title={detailError} />}
