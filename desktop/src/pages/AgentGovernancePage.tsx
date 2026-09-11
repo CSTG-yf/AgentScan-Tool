@@ -1552,11 +1552,6 @@ export function AgentGovernancePage(props: AgentGovernancePageProps) {
       ),
     },
     {
-      key: "scan-refresh-settings",
-      label: "扫描与刷新策略",
-      children: <ScanRefreshSettingsPage {...props} />,
-    },
-    {
       key: "decisions",
       label: "决策与动作",
       children: (
@@ -1801,6 +1796,7 @@ export function AgentGovernancePage(props: AgentGovernancePageProps) {
       <Tabs items={[
         ...tabs,
         { key: "runtime-detection-settings", label: "异常检测设置", children: <RuntimeDetectionSettingsPage /> },
+        { key: "scan-refresh-settings", label: "扫描与刷新策略", children: <ScanRefreshSettingsPage {...props} /> },
       ]} activeKey={activeGovernanceTab} onChange={setActiveGovernanceTab} />
 
       <Modal title={editingAgentType ? "编辑 Agent Type" : "新增 Agent Type"} open={agentModalOpen} onCancel={() => setAgentModalOpen(false)} onOk={() => void saveAgentType()} destroyOnHidden>

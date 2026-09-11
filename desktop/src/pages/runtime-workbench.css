@@ -56,6 +56,113 @@
 .scan-refresh-action-card>div { display:flex; flex-direction:column; gap:4px; }
 .scan-refresh-page-list .scan-refresh-policy-row { grid-template-columns:minmax(280px,1fr) 76px 180px; }
 .scan-refresh-json { margin:8px 0 0; padding:12px; border-radius:8px; background:#f5f7fa; white-space:pre-wrap; overflow-wrap:anywhere; }
+.scan-refresh-page > .ant-card,
+.scan-refresh-page .scan-refresh-metrics > .ant-card {
+  color:#14213a !important;
+  border:1px solid #e7ebf3 !important;
+  border-radius:8px !important;
+  background:#fff !important;
+  box-shadow:0 14px 36px rgba(15,23,42,.07) !important;
+}
+.scan-refresh-page .ant-card-head {
+  color:#14213a !important;
+  border-bottom:1px solid #e7ebf3 !important;
+  background:#fff !important;
+}
+.scan-refresh-page .ant-card-head-title,
+.scan-refresh-page .ant-typography,
+.scan-refresh-page strong {
+  color:#14213a !important;
+}
+.scan-refresh-page .ant-typography-secondary {
+  color:#667085 !important;
+}
+.scan-refresh-metrics {
+  gap:14px;
+}
+.scan-refresh-metrics .runtime-workbench-metric strong {
+  margin-top:8px;
+  color:#1677ff !important;
+  font-size:38px;
+  line-height:1;
+}
+.scan-refresh-metrics .runtime-workbench-metric.metric-1 strong { color:#16a36a !important; }
+.scan-refresh-metrics .runtime-workbench-metric.metric-2 strong { color:#d97706 !important; }
+.scan-refresh-policy-row {
+  border-bottom-color:#edf1f5;
+}
+.scan-refresh-policy-row:hover {
+  background:#f8fafc;
+}
+.scan-refresh-watcher-grid label,
+.scan-refresh-action-card {
+  color:#334155;
+  border-color:#e7ebf3;
+  background:#f8fafc;
+}
+.scan-refresh-page .ant-input,
+.scan-refresh-page .ant-input-number,
+.scan-refresh-page .ant-input-number-input,
+.scan-refresh-page .ant-select-selector {
+  color:#14213a !important;
+  border-color:#d9e1ee !important;
+  background:#fff !important;
+  box-shadow:none !important;
+}
+.scan-refresh-page .ant-select-selection-item,
+.scan-refresh-page .ant-input-number-group-addon {
+  color:#475467 !important;
+  border-color:#d9e1ee !important;
+  background:#f8fafc !important;
+}
+.scan-refresh-page .ant-switch:not(.ant-switch-checked) {
+  background:#cbd5e1 !important;
+}
+.scan-refresh-page .ant-switch-checked {
+  background:#1677ff !important;
+}
+.scan-refresh-page .ant-btn:not(.ant-btn-primary):not(.ant-btn-dangerous):not(.ant-btn-link) {
+  color:#1f4f93 !important;
+  border-color:#91bfff !important;
+  background:#fff !important;
+  box-shadow:none !important;
+}
+.scan-refresh-page .ant-btn-primary {
+  color:#fff !important;
+  border-color:#1677ff !important;
+  background:#1677ff !important;
+  box-shadow:none !important;
+}
+.scan-refresh-page .ant-table {
+  color:#14213a !important;
+  background:#fff !important;
+}
+.scan-refresh-page .ant-table-thead > tr > th {
+  color:#475467 !important;
+  border-bottom:1px solid #e9eef5 !important;
+  background:#fbfcfe !important;
+}
+.scan-refresh-page .ant-table-tbody > tr > td {
+  color:#14213a !important;
+  border-bottom:1px solid #edf1f7 !important;
+  background:#fff !important;
+}
+.scan-refresh-page .ant-table-tbody > tr:hover > td {
+  background:#f6f9ff !important;
+}
+.scan-refresh-drawer .ant-drawer-content,
+.scan-refresh-drawer .ant-drawer-header,
+.scan-refresh-drawer .ant-drawer-body {
+  color:#14213a !important;
+  background:#fff !important;
+}
+.scan-refresh-drawer .ant-drawer-header {
+  border-bottom-color:#e7ebf3 !important;
+}
+.scan-refresh-drawer .ant-typography,
+.scan-refresh-drawer .ant-drawer-title {
+  color:#14213a !important;
+}
 @media(max-width:1000px) { .scan-refresh-policy-row { grid-template-columns:minmax(220px,1fr) 70px 160px; } .scan-refresh-policy-row>.ant-select,.scan-refresh-policy-row>button,.scan-refresh-policy-row>.ant-tag { grid-column:3; } .scan-refresh-watcher-grid { grid-template-columns:repeat(2,minmax(220px,1fr)); } }
 @media(max-width:720px) { .scan-refresh-metrics,.scan-refresh-actions { grid-template-columns:1fr; } .scan-refresh-policy-row,.scan-refresh-page-list .scan-refresh-policy-row { grid-template-columns:1fr; } .scan-refresh-policy-row>.ant-select,.scan-refresh-policy-row>button,.scan-refresh-policy-row>.ant-tag { grid-column:auto; } .scan-refresh-watcher-grid { grid-template-columns:1fr; } }
 

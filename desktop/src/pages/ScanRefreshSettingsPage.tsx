@@ -310,7 +310,7 @@ export function ScanRefreshSettingsPage({
         </Card>
       )}
 
-      <Drawer title="扫描任务详情" width={720} open={!!selectedJob} onClose={() => setSelectedJob(undefined)}>
+      <Drawer rootClassName="scan-refresh-drawer" title="扫描任务详情" width={720} open={!!selectedJob} onClose={() => setSelectedJob(undefined)}>
         {selectedJob && <Space direction="vertical" size={16} style={{ width: "100%" }}>
           {selectedJob.error && <Alert type="error" showIcon message="任务失败" description={selectedJob.error} />}
           <Descriptions bordered size="small" column={2} items={[
