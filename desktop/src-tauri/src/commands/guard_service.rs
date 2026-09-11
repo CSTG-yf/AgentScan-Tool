@@ -109,6 +109,11 @@ pub async fn install_process_guard() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn start_process_guard() -> Result<(), String> {
+    run_elevated("--start-process-guard".to_owned()).await
+}
+
+#[tauri::command]
 pub async fn apply_process_guard_policy(app: tauri::AppHandle) -> Result<(), String> {
     let policy_path = app
         .path()

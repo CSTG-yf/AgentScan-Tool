@@ -431,6 +431,35 @@ mod windows {
         Ok(())
     }
 
+    pub fn start() -> std::result::Result<(), Box<dyn Error>> {
+        let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+        let service = manager.open_service(
+            SERVICE_NAME,
+            ServiceAccess::QUERY_STATUS | ServiceAccess::START,
+        )?;
+        if service.query_status()?.current_state == ServiceState::Running {
+            return Ok(());
+        }
+        if service.query_status()?.current_state == ServiceState::Stopped {
+            service.start::<&str>(&[])?;
+        }
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let status = service.query_status()?;
+            if status.current_state == ServiceState::Running {
+                return Ok(());
+            }
+            if status.current_state == ServiceState::Stopped || Instant::now() >= deadline {
+                return Err(std::io::Error::other(format!(
+                    "process guard failed to start: state={:?}, exit={:?}",
+                    status.current_state, status.exit_code
+                ))
+                .into());
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
     pub fn install() -> std::result::Result<(), Box<dyn Error>> {
         let (policy_path, audit_path) = default_paths();
         if let Some(parent) = policy_path.parent() {
@@ -534,7 +563,12 @@ mod windows {
 }
 
 #[cfg(windows)]
-pub use windows::{dispatch, install, uninstall};
+pub use windows::{dispatch, install, start, uninstall};
+
+#[cfg(not(windows))]
+pub fn start() -> Result<(), String> {
+    Err("Windows service startup is available only on Windows".to_owned())
+}
 
 #[cfg(not(windows))]
 pub fn dispatch() -> Result<(), String> {

@@ -68,6 +68,7 @@ pub fn run() {
             commands::static_assets::update_static_resource_status,
             commands::static_assets::reveal_static_resource_path,
             commands::guard_service::install_process_guard,
+            commands::guard_service::start_process_guard,
             commands::guard_service::apply_process_guard_policy,
             commands::guard_service::uninstall_process_guard,
             commands::lifecycle::ensure_gateway_ready,

@@ -1,5 +1,5 @@
 import { BugOutlined, ExperimentOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { Button, Card, Tag, Typography } from "antd";
+import { Button, Card, Space, Tag, Typography } from "antd";
 import type { EnvironmentComponent } from "../types";
 
 const { Text, Title } = Typography;
@@ -16,9 +16,10 @@ interface ComponentCardProps {
   component: EnvironmentComponent;
   onGatewayAction: (running: boolean) => void;
   onProcessGuardInstall: () => void;
+  onProcessGuardStart: () => void;
 }
 
-export function ComponentCard({ component, onGatewayAction, onProcessGuardInstall }: ComponentCardProps) {
+export function ComponentCard({ component, onGatewayAction, onProcessGuardInstall, onProcessGuardStart }: ComponentCardProps) {
   const meta = stateMeta[component.state];
   const canInstallProcessGuard = component.id === "processGuard" && component.state !== "ready" && component.state !== "unknown";
   return (
@@ -40,9 +41,12 @@ export function ComponentCard({ component, onGatewayAction, onProcessGuardInstal
       )}
       {canInstallProcessGuard && (
         <div className="component-action">
-          <Button size="small" type="primary" onClick={onProcessGuardInstall}>
-            安装 / 修复服务
-          </Button>
+          <Space wrap>
+            {component.state === "stopped" && <Button size="small" type="primary" onClick={onProcessGuardStart}>启动服务</Button>}
+            <Button size="small" type={component.state === "missing" ? "primary" : "default"} onClick={onProcessGuardInstall}>
+              {component.state === "missing" ? "安装服务" : "修复安装"}
+            </Button>
+          </Space>
         </div>
       )}
       {component.requiresElevation && <div className="elevation-note">敏感操作按需请求管理员权限</div>}
