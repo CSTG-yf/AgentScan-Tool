@@ -553,7 +553,7 @@ export default function App() {
         );
       case "overview":
       default:
-        return <OverviewPage environment={environment} agentsCount={agentTotal || agents.length} policy={policy} enabledRules={enabledRules} readyCount={readyCount} totalCount={totalCount} onNavigate={setActive} onGatewayAction={(running) => void changeGatewayState(running)} onProcessGuardInstall={() => void requestGuardAction("install")} onProcessGuardStart={() => void requestGuardAction("start")} />;
+        return <OverviewPage environment={environment} policy={policy} refreshNonce={eventRefreshTick + staticRefreshTick} onNavigate={setActive} />;
     }
   };
 

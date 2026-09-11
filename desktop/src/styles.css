@@ -76,6 +76,68 @@ body { min-height: 100vh; background: #f5f8fc; }
 }
 .eyebrow { color: #1677ff !important; font-size: 10px; font-weight: 750; letter-spacing: 1.8px; }
 .content { min-height: calc(100vh - 92px); padding: 30px 34px 48px; background: #f5f8fc; }
+.security-overview { display: grid; gap: 16px; }
+.overview-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; }
+.overview-header h2 { margin: 0 0 4px !important; font-size: 32px !important; }
+.overview-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+.freshness { display: inline-flex; align-items: center; gap: 6px; color: #16865a; font-size: 12px; font-weight: 700; }
+.freshness > span { width: 8px; height: 8px; border-radius: 50%; background: #20b47a; box-shadow: 0 0 0 4px rgba(32,180,122,.12); }
+.freshness.stale { color: #b7791f; }
+.freshness.stale > span { background: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,.12); }
+.priority-banner { min-height: 64px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 12px 16px; border: 1px solid #bbf0d9; border-radius: 10px; color: #087a51; background: #effcf6; }
+.priority-banner > .anticon { font-size: 28px; }
+.priority-banner > strong { font-size: 16px; }
+.priority-banner.tone-critical, .priority-banner.tone-error { color: #dc2638; border-color: #ffb7bd; background: #fff1f2; }
+.priority-banner.tone-high { color: #b45309; border-color: #fed7aa; background: #fff7ed; }
+.priority-banner.tone-neutral { color: #475467; border-color: #d9e1ee; background: #f8fafc; }
+.overview-source-error { margin-top: -4px; }
+.overview-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.overview-metric { cursor: pointer; border: 1px solid #e4e9f1 !important; background: #fff !important; box-shadow: 0 8px 24px rgba(15,23,42,.045) !important; transition: transform .16s ease, box-shadow .16s ease; }
+.overview-metric:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(15,23,42,.09) !important; }
+.overview-metric .ant-card-body { display: flex; align-items: flex-start; gap: 14px; min-height: 126px; padding: 18px; }
+.overview-metric-icon { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; border-radius: 11px; font-size: 22px; color: #1677ff; background: #eaf3ff; }
+.overview-metric.tone-danger .overview-metric-icon { color: #ef3340; background: #fff0f1; }
+.overview-metric.tone-attack .overview-metric-icon { color: #e9485b; background: #fff1f3; }
+.overview-metric.tone-safe .overview-metric-icon { color: #11a36a; background: #eafaf4; }
+.overview-metric > .ant-card-body > div:last-child { min-width: 0; display: grid; gap: 3px; }
+.overview-metric > .ant-card-body > div:last-child > strong { font-size: 34px; line-height: 1.15; }
+.overview-metric .ant-typography-secondary { font-size: 12px; }
+.overview-main-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(420px, 1fr); gap: 14px; }
+.overview-bottom-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(270px, .62fr); gap: 14px; }
+.overview-panel { border: 1px solid #e4e9f1 !important; background: #fff !important; box-shadow: 0 8px 24px rgba(15,23,42,.045) !important; }
+.overview-panel .ant-card-head { min-height: 50px; padding: 0 16px; }
+.overview-panel .ant-card-head-title { font-size: 16px; font-weight: 800; }
+.overview-panel .ant-card-body { padding: 10px 16px 16px; }
+.overview-chart { height: 280px !important; }
+.chart-legend { display: flex; gap: 16px; color: #64748b; font-size: 12px; }
+.chart-legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: currentColor; }
+.chart-legend .blue { color: #1677ff; }.chart-legend .red { color: #ef4444; }.chart-legend .green { color: #16a36a; }
+.overview-list .ant-card-body { min-height: 280px; }
+.overview-bottom-grid .overview-list .ant-card-body { min-height: 250px; }
+.overview-list button { appearance: none; width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 0; color: #14213a; font: inherit; text-align: left; border: 0; border-bottom: 1px solid #edf1f7; background: transparent; cursor: pointer; }
+.overview-list button:hover { background: #f7faff; }
+.overview-list button:last-child { border-bottom: 0; }
+.overview-row-copy { min-width: 0; display: grid; }
+.overview-row-copy > strong, .overview-row-copy > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overview-row-state { display: grid; justify-items: end; gap: 3px; font-size: 12px; color: #475467; }
+.overview-row-state small { color: #98a2b3; white-space: nowrap; }
+.protection-panel .ant-card-body { padding-top: 4px; }
+.protection-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 45px; border-bottom: 1px solid #edf1f7; }
+.protection-row:last-child { border-bottom: 0; }
+.protection-row > span { display: inline-flex; align-items: center; gap: 8px; color: #475467; }
+.protection-row .anticon { color: #8ba0b8; }
+.protection-row strong { max-width: 58%; overflow: hidden; font-size: 12px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.protection-row strong.ok { color: #119968 !important; }.protection-row strong.warn { color: #c47b13 !important; }
+@media (max-width: 1366px) {
+  .overview-header { align-items: flex-start; flex-direction: column; }
+  .overview-header-actions { justify-content: flex-start; }
+  .overview-main-grid { grid-template-columns: 1fr; }
+  .overview-bottom-grid { grid-template-columns: 1fr 1fr; }
+  .protection-panel { grid-column: 1 / -1; }
+}
+@media (max-width: 1120px) {
+  .overview-metrics { grid-template-columns: 1fr 1fr; }
+}
 .hero-grid { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(280px, .8fr); gap: 18px; }
 .hero-card, .signal-card, .component-card, .policy-summary, .placeholder, .static-metric-card, .static-agent-card, .event-metric-card, .event-agent-card, .event-side-panel, .event-filter-card, .event-timeline-card, .event-table-card, .range-attack-card, .range-replay-card, .chain-control-card, .chain-timeline-card, .chain-detail-card, .chain-live-audit { border: 1px solid rgba(125, 173, 207, .10) !important; background: linear-gradient(145deg, rgba(15, 32, 49, .96), rgba(10, 24, 39, .96)) !important; box-shadow: 0 20px 60px rgba(0, 0, 0, .13); }
 .hero-card .ant-card-body { min-height: 280px; display: flex; align-items: center; justify-content: space-between; padding: 34px; background-image: linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px); background-size: 28px 28px; }

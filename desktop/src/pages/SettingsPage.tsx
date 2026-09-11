@@ -118,7 +118,7 @@ interface SettingsPageProps {
   onScanSettingsChange: (settings: ScanScheduleSettings) => void;
   onStaticScanSettingsChange: (settings: StaticResourceScanSettings) => void;
   onRunRefreshAll: () => void;
-  onRequestGuardAction: (action: "install" | "apply" | "uninstall") => void;
+  onRequestGuardAction: (action: "install" | "start" | "apply" | "uninstall") => void;
 }
 
 export function SettingsPage({
@@ -308,6 +308,7 @@ export function SettingsPage({
             <Text>{guardComponent?.detail ?? "正在检测服务状态"}</Text>
             <Space wrap>
               <Button type="primary" disabled={guardComponent?.state === "ready"} onClick={() => onRequestGuardAction("install")}>安装 / 修复服务</Button>
+              <Button disabled={guardComponent?.state === "ready" || guardComponent?.state === "missing"} onClick={() => onRequestGuardAction("start")}>启动服务</Button>
               <Button disabled={guardComponent?.state !== "ready"} onClick={() => onRequestGuardAction("apply")}>应用当前策略</Button>
               <Button danger disabled={guardComponent?.state === "missing"} onClick={() => onRequestGuardAction("uninstall")}>卸载服务</Button>
             </Space>
