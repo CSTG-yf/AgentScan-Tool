@@ -758,6 +758,7 @@ func pageChainStepsFromRuntime(events []audit.AttackChainEvent) ([]pageAttackCha
 			Resource:      firstNonEmpty(e.MCPServer, e.Target),
 			Evidence:      truncate(firstNonEmpty(e.Target, e.Detail), 160),
 			Decision:      e.Outcome,
+			Stack:         []string{},
 			SourceEventID: strconv.FormatInt(e.ID, 10),
 			Source:        source,
 			TraceID:       e.TraceID,

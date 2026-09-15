@@ -1,7 +1,15 @@
 use super::events::{path_with_query, push_query};
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+fn null_to_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Option::<T>::deserialize(deserializer).map(Option::unwrap_or_default)
+}
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -102,8 +110,11 @@ struct AttackChain {
     summary: String,
     step_count: usize,
     evidence_count: usize,
+    #[serde(default, deserialize_with = "null_to_default")]
     sources: Vec<String>,
+    #[serde(default, deserialize_with = "null_to_default")]
     steps: Vec<AttackChainStep>,
+    #[serde(default, deserialize_with = "null_to_default")]
     evidence: Vec<AttackChainEvidenceRow>,
     // Phase 3: links to the structured detection and the policy
     // decision behind this persisted chain (empty for legacy
@@ -136,6 +147,7 @@ struct AttackChainStep {
     resource: String,
     evidence: String,
     decision: String,
+    #[serde(default, deserialize_with = "null_to_default")]
     stack: Vec<String>,
     source_event_id: String,
     source: String,
@@ -308,5 +320,19 @@ mod chain_filter_tests {
         assert_eq!(value["coveredAgents"], 2);
         assert_eq!(value["agents"][0]["agentId"], "one");
         assert_eq!(value["severityCounts"]["vendor-risk"], 3);
+    }
+
+    #[test]
+    fn nullable_step_stack_is_normalized_to_an_empty_sequence() {
+        let step: AttackChainStep = serde_json::from_value(serde_json::json!({
+            "id":"1", "order":1, "occurredAt":"2026-09-15T00:00:00Z",
+            "title":"tool call", "stage":"execution", "kind":"tool",
+            "severity":"critical", "actor":"agent", "prompt":"", "tool":"shell",
+            "resource":"target", "evidence":"evidence", "decision":"blocked",
+            "stack":null, "sourceEventId":"1", "source":"agent-hook",
+            "traceId":"trace-1", "sessionId":"session-1"
+        }))
+        .unwrap();
+        assert!(step.stack.is_empty());
     }
 }
