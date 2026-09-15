@@ -207,6 +207,24 @@ export interface TracePolicy {
 }
 
 export interface AgentTraceEvent {
+  agentName?: string;
+  sessionId?: string;
+  traceId?: string;
+  operation?: string;
+  target?: string;
+  toolName?: string;
+  severity?: string;
+  attributes?: Record<string, unknown>;
+  eventId?: string;
+  eventSource?: string;
+  eventCategory?: string;
+  spanId?: string;
+  parentSpanId?: string;
+  ppid?: number;
+  mcpServer?: string;
+  confidence?: number;
+  canonicalAgentId?: string;
+  agentInstanceId?: string;
   id: number;
   timestamp: string;
   eventType: "agentProcessStart" | "agentCommandStart" | "fileRead" | "fileWrite" | "fileCreate" | "fileDelete" | "blacklistFileAccess" | string;
@@ -220,6 +238,18 @@ export interface AgentTraceEvent {
   outcome: string;
   detail: string;
 }
+
+export interface RuntimeEventQuery { agentId?:string; sessionId?:string; traceId?:string; eventType?:string; eventCategory?:string; source?:string; severity?:string; outcome?:string; keyword?:string; startTime?:string; endTime?:string; sort?:"timestamp_desc"|"timestamp_asc"; agentPid?:number; actorPid?:number; page?:number; pageSize?:number; includeDesktopBehavior?:boolean }
+export interface RuntimeEventListResponse { items:AgentTraceEvent[]; total:number; page:number; pageSize:number }
+export interface RuntimeEventSummary { totalEvents:number; activeAgentCount:number; toolEventCount:number; fileEventCount:number }
+export interface EventAgentSummary { agentId:string; agentName:string; agentType:string; eventCount:number; highOrAboveCount?:number; latestEventAt:string }
+export interface RuntimeEventFacets { eventTypes:string[]; eventCategories:string[]; sources:string[]; severities:string[]; outcomes:string[] }
+
+export interface AuditEventQuery { agentId?:string; startTime?:string; endTime?:string; action?:string; severity?:string; connector?:string; enforced?:boolean; actor?:string; toolName?:string; policyId?:string; requestId?:string; sessionId?:string; traceId?:string; keyword?:string; sort?:"timestamp_desc"|"timestamp_asc"; page?:number; pageSize?:number }
+export interface AuditEventRecord { id:string; timestamp:string; action:string; target?:string; actor:string; details?:string; severity?:string; runId?:string; traceId?:string; requestId?:string; sessionId?:string; agentName?:string; agentInstanceId?:string; policyId?:string; destinationApp?:string; toolName?:string; toolId?:string; agentId?:string; canonicalAgentId?:string; connector?:string; stepIdx?:number; enforced?:boolean; rulePackDir?:string; structured?:Record<string,unknown> }
+export interface AuditEventListResponse { items:AuditEventRecord[]; total:number; page:number; pageSize:number }
+export interface AuditEventSummary { totalEvents:number; relatedAgentCount:number; highOrAboveCount:number; enforcedCount:number }
+export interface AuditEventFacets { actions:string[]; severities:string[]; connectors:string[]; actors:string[]; tools:string[] }
 
 export interface AgentTraceSnapshot {
   capturedAt: string;
@@ -1461,4 +1491,148 @@ export interface GovernanceResourcePreviewResponse {
   agent_type_key: string;
   expanded_paths: string[];
   targets: Array<{ name: string; target: string; exists: boolean; type: string }>;
+}
+
+// Runtime detection configuration types.
+export type RuntimeRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+export type RuntimeRiskDecision = "ALLOW" | "ALERT" | "CONFIRM" | "BLOCK";
+export type RuntimeMatchType = "exact" | "contains" | "prefix" | "glob" | "regex";
+export interface RuntimePattern { match_type: RuntimeMatchType; value: string }
+export interface RuntimeMatcher {
+  kind: "builtin" | "event_match";
+  builtin_rule_id?: string;
+  event_type?: string;
+  event_category?: string;
+  event_source?: string;
+  target?: RuntimePattern;
+  tool_name?: RuntimePattern;
+  mcp_server?: RuntimePattern;
+  detail?: RuntimePattern;
+  path?: RuntimePattern;
+  operation?: RuntimePattern;
+}
+export interface RuntimeRule {
+  id: number;
+  rule_id: string;
+  rule_name: string;
+  source: "builtin" | "custom";
+  scope: "global" | "agent_type";
+  agent_type_id: number | null;
+  detection_type: string;
+  category: "attack" | "suspicious" | "hygiene";
+  severity: RuntimeRiskLevel;
+  confidence: number;
+  matcher: RuntimeMatcher;
+  detail: string;
+  remediation: string;
+  priority: number;
+  enabled: boolean;
+  system: boolean;
+  version: number;
+  override_severity: boolean;
+  override_confidence: boolean;
+  created_at: string;
+  updated_at: string;
+}
+export interface RuntimeBlacklist {
+  id: number;
+  agent_type_id: number;
+  target_type: "command" | "path" | "tool" | "mcp" | "domain" | "url" | "process";
+  match_type: RuntimeMatchType;
+  value: string;
+  detection_type: string;
+  category: RuntimeRule["category"];
+  severity: RuntimeRiskLevel;
+  confidence: number;
+  reason: string;
+  priority: number;
+  enabled: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+export interface RuntimeRiskPolicyRule {
+  risk_level: RuntimeRiskLevel;
+  min_score: number;
+  max_score: number;
+  decision: RuntimeRiskDecision;
+  display_decision: string;
+  priority: number;
+  enabled: boolean;
+}
+export interface RuntimeRiskPolicy {
+  policy_id: number;
+  policy_key: string;
+  name: string;
+  scope: "global" | "agent_type";
+  agent_type_id: number | null;
+  editable: boolean;
+  version: number;
+  rules: RuntimeRiskPolicyRule[];
+  updated_at: string;
+}
+export interface RuntimeTypeSettings {
+  agent_type_id: number;
+  enabled: boolean;
+  inherit_global_rules: boolean;
+  use_global_risk_policy: boolean;
+  custom_risk_policy_id: number | null;
+  updated_at: string;
+}
+export interface RuntimeTypeRow {
+  agent_type_id: number;
+  agent_type_key: string;
+  agent_type_name: string;
+  vendor: string;
+  runtime: string;
+  enabled: boolean;
+  inherit_global_rules: boolean;
+  specific_rule_count: number;
+  blacklist_count: number;
+  risk_policy_mode: "global" | "custom";
+  use_global_risk_policy: boolean;
+  status: string;
+  updated_at: string;
+}
+export interface RuntimeRiskData {
+  mode: "global" | "custom";
+  use_global_risk_policy: boolean;
+  policy: RuntimeRiskPolicy | null;
+  custom_policy?: RuntimeRiskPolicy | null;
+  effective_policy: RuntimeRiskPolicy;
+}
+export interface RuntimeTypeDetail {
+  agent_type: Pick<RuntimeTypeRow, "agent_type_id" | "agent_type_key" | "agent_type_name">;
+  settings: RuntimeTypeSettings;
+  specific_rules: RuntimeRule[];
+  blacklist: RuntimeBlacklist[];
+  risk_policy: RuntimeRiskData;
+  effective_summary: { global_rule_count: number; specific_rule_count: number; blacklist_count: number; effective_rule_count: number };
+}
+export interface RuntimeSettingsOverview {
+  global_rule_count: number;
+  enabled_global_rule_count: number;
+  agent_type_count: number;
+  custom_agent_type_count: number;
+  blacklist_count: number;
+  custom_risk_policy_count: number;
+  updated_at: string;
+}
+export interface RuntimeSettingsPage<T> { items: T[]; total: number; page: number; page_size: number }
+export interface RuntimeSettingsQuery {
+  page?: number;
+  page_size?: number;
+  keyword?: string;
+  enabled?: "all" | "true" | "false";
+  source?: "builtin" | "custom";
+  inherit_global_rules?: "all" | "true" | "false";
+  risk_policy?: "all" | "global" | "custom";
+  target_type?: string;
+}
+export interface RuntimeEvaluation {
+  matched: boolean;
+  matched_rules: { rule_id: string; rule_version: string; source: string; severity: RuntimeRiskLevel; confidence: number; detection_type: string; detail: string }[];
+  risk_score: number;
+  risk_level: string;
+  decision: RuntimeRiskDecision;
 }

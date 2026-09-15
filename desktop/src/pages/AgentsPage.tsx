@@ -13,13 +13,112 @@ import {
   RobotOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
-import { Avatar, Button, Card, Descriptions, Drawer, Empty, Input, Select, Space, Spin, Table, Tag, Tooltip, Typography, message } from "antd";
+import { theme, ConfigProvider, Avatar, Button, Card, Descriptions, Drawer, Empty, Input, Select, Space, Spin, Table, Tag, Tooltip, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { formatUptime } from "../app/display";
 import { exportAgentsReportPdf, getAgentDetail, getScanStatus, triggerAgentScan } from "../bridge";
 import type { AgentInventory, AgentStatus } from "../types";
 
 const { Text, Title } = Typography;
+
+const detectionTheme = {
+  algorithm: theme.defaultAlgorithm,
+  token: {
+    colorPrimary: "#2563eb",
+    colorBgContainer: "#ffffff",
+    colorBgElevated: "#ffffff",
+    colorText: "#14213a",
+    colorTextSecondary: "#475467",
+    colorTextPlaceholder: "#667085",
+    colorBorder: "#d9e1ee",
+    colorBorderSecondary: "#e7ebf3",
+    borderRadius: 8,
+  },
+};
+
+const pageStyles = String.raw`
+.agent-detection-surface .ant-select,
+.agent-detection-surface .ant-select-selector,
+.agent-detection-surface .ant-input,
+.agent-detection-surface .ant-input-affix-wrapper {
+  color: #14213a !important;
+  background: #fff !important;
+  border-color: #d9e1ee !important;
+  border-radius: 6px !important;
+}
+.agent-detection-surface .ant-select-selection-item,
+.agent-detection-surface .ant-select-selection-placeholder,
+.agent-detection-surface .ant-select-content,
+.agent-detection-surface .ant-select-placeholder {
+  color: #475467 !important;
+  -webkit-text-fill-color: #475467 !important;
+  opacity: 1 !important;
+}
+.agent-detection-surface .ant-btn:not(.ant-btn-dangerous) {
+  color: #14213a !important;
+  -webkit-text-fill-color: #14213a !important;
+  background: #fff !important;
+  border-color: #cbd5e1 !important;
+}
+.agent-detection-surface .ant-btn:not(.ant-btn-dangerous):not(:disabled):hover {
+  color: #175cd3 !important;
+  background: #eff6ff !important;
+  border-color: #93b4ef !important;
+}
+.agent-detection-surface .ant-btn:disabled { color: #667085 !important; -webkit-text-fill-color: #667085 !important; background: #f2f4f7 !important; }
+.agent-detection-surface .detection-actions-cell .ant-btn-primary { color: #fff !important; -webkit-text-fill-color: #fff !important; background: #2563eb !important; border-color: #2563eb !important; }
+.agent-detection-filter-popup.ant-select-dropdown,
+.agent-detection-filter-menu .ant-dropdown-menu { color: #14213a !important; background: #fff !important; }
+.agent-detection-filter-popup .ant-select-item,
+.agent-detection-filter-menu .ant-dropdown-menu-item { color: #14213a !important; }
+.agent-detection-filter-popup .ant-select-item-option-active { background: #f2f6fc !important; }
+.agent-detection-filter-popup .ant-select-item-option-selected { color: #175cd3 !important; background: #eaf2ff !important; }
+
+.agent-detection-detail-drawer .ant-drawer-content,
+.agent-detection-detail-drawer .ant-drawer-header,
+.agent-detection-detail-drawer .ant-drawer-body,
+.agent-detection-detail-drawer .ant-drawer-footer,
+.agent-detection-detail-drawer .ant-card,
+.agent-detection-detail-drawer .ant-table,
+.agent-detection-detail-drawer .ant-table-tbody > tr > td {
+  color: #14213a !important;
+  background: #fff !important;
+  border-color: #e7ebf3 !important;
+}
+.agent-detection-detail-drawer .ant-typography,
+.agent-detection-detail-drawer .ant-drawer-title,
+.agent-detection-detail-drawer .ant-tabs-tab-btn,
+.agent-detection-detail-drawer .ant-descriptions-item-content,
+.agent-detection-detail-drawer .ant-empty-description,
+.agent-detection-detail-drawer .ant-list-item-meta-title { color: #14213a !important; }
+.agent-detection-detail-drawer .ant-typography-secondary,
+.agent-detection-detail-drawer .ant-descriptions-item-label,
+.agent-detection-detail-drawer .ant-drawer-close { color: #475467 !important; }
+.agent-detection-detail-drawer .ant-descriptions-item-label,
+.agent-detection-detail-drawer .ant-table-thead > tr > th { color: #475467 !important; background: #f8fafc !important; }
+.agent-detection-detail-drawer .static-finding-card,
+.agent-detection-detail-drawer .static-soft-note,
+.agent-detection-detail-drawer .static-relation-item,
+.agent-detection-detail-drawer .static-content-preview { color: #14213a !important; background: #f8fafc !important; border-color: #e7ebf3 !important; }
+
+.agent-detection-surface .ant-tag { --tag-color: #64748b; color: #fff !important; -webkit-text-fill-color: #fff !important; background: var(--tag-color) !important; border-color: var(--tag-color) !important; }
+.agent-detection-surface .ant-tag-blue,
+.agent-detection-surface .ant-tag-processing { --tag-color: #2563eb; }
+.agent-detection-surface .ant-tag-red,
+.agent-detection-surface .ant-tag-error { --tag-color: #dc2626; }
+.agent-detection-surface .ant-tag-green,
+.agent-detection-surface .ant-tag-success { --tag-color: #15803d; }
+.agent-detection-surface .ant-tag-orange,
+.agent-detection-surface .ant-tag-volcano,
+.agent-detection-surface .ant-tag-warning { --tag-color: #c2410c; }
+.agent-detection-surface .ant-tag-gold { --tag-color: #a16207; }
+.agent-detection-surface .ant-tag-purple { --tag-color: #7c3aed; }
+.agent-detection-surface .ant-tag-geekblue { --tag-color: #4f46e5; }
+.agent-detection-surface .ant-tag-cyan { --tag-color: #0e7490; }
+.agent-detection-surface .ant-tag-magenta { --tag-color: #be185d; }
+.agent-detection-surface .ant-tag-lime { --tag-color: #4d7c0f; }
+.agent-detection-surface .ant-tag span { color: inherit !important; -webkit-text-fill-color: inherit !important; }
+`;
 
 type StatusFilter = AgentStatus | "all";
 type DateSort = "none" | "asc" | "desc";
@@ -197,6 +296,7 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
   const [agentDetailOpen, setAgentDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [listRefreshing, setListRefreshing] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -258,6 +358,18 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
       message.error(`Agent 扫描失败：${String(error)}`);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const refreshAgentList = async () => {
+    if (!onRefresh) return;
+    setListRefreshing(true);
+    try {
+      await onRefresh();
+    } catch (error) {
+      message.error(`刷新 Agent 列表失败：${String(error)}`);
+    } finally {
+      setListRefreshing(false);
     }
   };
 
@@ -336,7 +448,7 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
       render: (_, row) => (
         <Space>
           <span className="agent-type-icon">{agentTypeIcon(row)}</span>
-          <Text>{agentTypeLabel(row)}</Text>
+          <Tag color="blue">{agentTypeLabel(row)}</Tag>
         </Space>
       ),
     },
@@ -378,6 +490,7 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
     },
     {
       title: "操作",
+      className: "detection-actions-cell",
       width: 220,
       fixed: "right",
       render: (_, row) => (
@@ -400,7 +513,8 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
   const detailStatus = detailAgent ? agentStatus(detailAgent) : "unknown";
 
   return (
-    <section className="agent-management-page">
+    <ConfigProvider theme={detectionTheme}><section className="agent-management-page agent-detection-surface">
+      <style>{pageStyles}</style>
       <div className="agent-page-header">
         <div>
           <Title level={2}>Agent 管理</Title>
@@ -411,8 +525,13 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
             <Button type="primary" icon={<DownloadOutlined />} loading={exporting} disabled={!agents.length} onClick={() => void exportReport(agents)}>
               导出报告
             </Button>
-            <Button type="primary" icon={<ReloadOutlined />} loading={loading || refreshing} onClick={() => void refreshAgents()}>
-              立即扫描
+            <Tooltip title="重新读取数据库中的 Agent 列表，不执行扫描">
+              <Button icon={<ReloadOutlined />} loading={listRefreshing} disabled={!onRefresh || loading || refreshing} onClick={() => void refreshAgentList()}>
+                刷新列表
+              </Button>
+            </Tooltip>
+            <Button type="primary" icon={<SearchOutlined />} loading={refreshing} disabled={!onRefresh || loading || listRefreshing} onClick={() => void refreshAgents()}>
+              重新扫描
             </Button>
           </Space>
           <Space className="agent-last-scan">
@@ -484,6 +603,7 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
               onChange={(event) => setQuery(event.target.value)}
             />
             <Select
+              classNames={{ popup: { root: "agent-detection-filter-popup" } }}
               value={statusFilter}
               options={[
                 { label: "全部运行状态", value: "all" },
@@ -494,6 +614,7 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
               onChange={(value) => setStatusFilter(value)}
             />
             <Select
+              classNames={{ popup: { root: "agent-detection-filter-popup" } }}
               value={firstSeenSort}
               options={[
                 { label: "默认", value: "none" },
@@ -506,6 +627,7 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
               }}
             />
             <Select
+              classNames={{ popup: { root: "agent-detection-filter-popup" } }}
               value={lastSeenSort}
               options={[
                 { label: "默认", value: "none" },
@@ -521,7 +643,7 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
 
           <Table
             rowKey={(row) => row.id}
-            loading={loading || refreshing}
+            loading={loading || refreshing || listRefreshing}
             columns={columns}
             dataSource={filteredAgents}
             pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `共 ${total} 条记录` }}
@@ -534,7 +656,7 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
       </div>
 
       <Drawer
-        className="agent-detail-drawer"
+        className="agent-detail-drawer agent-detection-detail-drawer agent-detection-surface"
         width={620}
         open={agentDetailOpen && Boolean(detailAgent)}
         onClose={() => {
@@ -623,6 +745,6 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
           </Spin>
         ) : null}
       </Drawer>
-    </section>
+    </section></ConfigProvider>
   );
 }

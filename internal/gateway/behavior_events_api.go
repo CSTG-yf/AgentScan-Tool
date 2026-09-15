@@ -22,29 +22,30 @@ type pageBehaviorSnapshot struct {
 }
 
 type pageBehaviorEvent struct {
-	ID               int64  `json:"id"`
-	Timestamp        string `json:"timestamp"`
-	EventType        string `json:"eventType"`
-	Source           string `json:"source"`
-	AgentPID         uint32 `json:"agentPid"`
-	AgentExecutable  string `json:"agentExecutable"`
-	ActorPID         uint32 `json:"actorPid"`
-	ActorExecutable  string `json:"actorExecutable"`
-	Path             string `json:"path,omitempty"`
-	Action           string `json:"action,omitempty"`
-	Outcome          string `json:"outcome"`
-	Detail           string `json:"detail"`
-	AgentName        string `json:"agentName,omitempty"`
-	CanonicalAgentID string `json:"canonicalAgentId,omitempty"`
-	AgentInstanceID  string `json:"agentInstanceId,omitempty"`
-	SessionID        string `json:"sessionId,omitempty"`
-	TraceID          string `json:"traceId,omitempty"`
-	EventSource      string `json:"eventSource,omitempty"`
-	EventCategory    string `json:"eventCategory,omitempty"`
-	Operation        string `json:"operation,omitempty"`
-	Target           string `json:"target,omitempty"`
-	ToolName         string `json:"toolName,omitempty"`
-	Severity         string `json:"severity,omitempty"`
+	Attributes       map[string]any `json:"attributes,omitempty"`
+	ID               int64          `json:"id"`
+	Timestamp        string         `json:"timestamp"`
+	EventType        string         `json:"eventType"`
+	Source           string         `json:"source"`
+	AgentPID         uint32         `json:"agentPid"`
+	AgentExecutable  string         `json:"agentExecutable"`
+	ActorPID         uint32         `json:"actorPid"`
+	ActorExecutable  string         `json:"actorExecutable"`
+	Path             string         `json:"path,omitempty"`
+	Action           string         `json:"action,omitempty"`
+	Outcome          string         `json:"outcome"`
+	Detail           string         `json:"detail"`
+	AgentName        string         `json:"agentName,omitempty"`
+	CanonicalAgentID string         `json:"canonicalAgentId,omitempty"`
+	AgentInstanceID  string         `json:"agentInstanceId,omitempty"`
+	SessionID        string         `json:"sessionId,omitempty"`
+	TraceID          string         `json:"traceId,omitempty"`
+	EventSource      string         `json:"eventSource,omitempty"`
+	EventCategory    string         `json:"eventCategory,omitempty"`
+	Operation        string         `json:"operation,omitempty"`
+	Target           string         `json:"target,omitempty"`
+	ToolName         string         `json:"toolName,omitempty"`
+	Severity         string         `json:"severity,omitempty"`
 }
 
 func (a *APIServer) handleBehaviorEvents(w http.ResponseWriter, r *http.Request) {
@@ -154,6 +155,7 @@ func pageBehaviorEventFromAudit(row audit.BehaviorEvent) pageBehaviorEvent {
 		timestamp = row.Timestamp.UTC().Format(time.RFC3339Nano)
 	}
 	return pageBehaviorEvent{
+		Attributes:       row.Attributes,
 		ID:               row.ID,
 		Timestamp:        timestamp,
 		EventType:        row.EventType,

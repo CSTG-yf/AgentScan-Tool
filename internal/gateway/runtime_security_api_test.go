@@ -121,6 +121,34 @@ func runtimeSecurityGET(t *testing.T, api *APIServer, path string, handler http.
 	return rec
 }
 
+func TestRuntimeDecisionDetailEmptyCollectionsAreArrays(t *testing.T) {
+	api, linked := newRuntimeSecurityAPITest(t)
+	unlinked, err := api.store.RecordRuntimeDetection(audit.RuntimeDetectionInput{
+		AgentID: "codex", DetectionType: "empty_evidence", Category: "suspicious", Severity: "HIGH",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, detection := range []audit.RuntimeDetection{linked, unlinked} {
+		decision, _, err := api.store.RecordRuntimeDecision(audit.RuntimeDecisionInput{
+			DetectionID: detection.DetectionID, AgentID: "codex", Decision: audit.RuntimeDecisionConfirm,
+		})
+		if err != nil || decision.DecisionID == "" {
+			t.Fatalf("record decision: %+v %v", decision, err)
+		}
+		rec := runtimeSecurityGET(t, api, "/api/v1/runtime-decisions/"+decision.DecisionID, api.handleRuntimeDecisions)
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"responses", "evidence"} {
+			if _, ok := payload[key].([]any); !ok {
+				t.Fatalf("%s must be an array, got %v", key, payload[key])
+			}
+		}
+	}
+}
+
 func decodeRuntimeSecurityResponse(t *testing.T, rec *httptest.ResponseRecorder, out any) {
 	t.Helper()
 	if err := json.NewDecoder(rec.Body).Decode(out); err != nil {

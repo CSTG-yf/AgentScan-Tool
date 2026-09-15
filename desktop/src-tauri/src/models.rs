@@ -459,6 +459,22 @@ impl Default for TracePolicy {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceEvent {
+    #[serde(default)]
+    pub agent_name: String,
+    #[serde(default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub trace_id: String,
+    #[serde(default)]
+    pub operation: String,
+    #[serde(default)]
+    pub target: String,
+    #[serde(default)]
+    pub tool_name: String,
+    #[serde(default)]
+    pub severity: String,
+    #[serde(default)]
+    pub attributes: serde_json::Map<String, serde_json::Value>,
     pub id: i64,
     pub timestamp: String,
     pub event_type: String,

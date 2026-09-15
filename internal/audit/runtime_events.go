@@ -81,6 +81,9 @@ const (
 // the canonical Agent Inventory, the runtime session, and the unified
 // behavior_events table.
 type RuntimeEventInput struct {
+	// IngestKey is supplied by authenticated adapters for retry-safe ingestion.
+	// Legacy callers leave it empty and continue to append independent events.
+	IngestKey string
 	// Core identity. EventType must come from the unified vocabulary;
 	// EventSource from the RuntimeSource* constants.
 	EventType     string
@@ -205,16 +208,18 @@ func (s *Store) RecordRuntimeEvent(in RuntimeEventInput) (int64, error) {
 		}
 	}
 
-	result, err := s.execDB(context.Background(), "runtime_event_insert", `
+	query := `
 INSERT INTO behavior_events (
   timestamp, event_type, source, event_source, event_category,
-  event_id, span_id, parent_span_id,
+  event_id, span_id, parent_span_id, ingest_key,
   agent_pid, agent_executable, actor_pid, actor_executable, path, action,
   ppid, operation, target, tool_name, mcp_server,
   severity, confidence, outcome, detail,
   agent_name, canonical_agent_id, agent_instance_id, session_id, trace_id,
   attributes_json, raw_data_json, sidecar_instance_id
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(ingest_key) DO NOTHING`
+	args := []any{
 		in.Timestamp.UTC().Format(time.RFC3339Nano),
 		in.EventType,
 		// source is the legacy NOT NULL column; keep it aligned with
@@ -225,6 +230,7 @@ INSERT INTO behavior_events (
 		uuid.NewString(),
 		nullStr(in.SpanID),
 		nullStr(in.ParentSpanID),
+		nullStr(in.IngestKey),
 		in.PID,
 		// The legacy behavior_events schema declares executable columns
 		// NOT NULL. Preserve an empty string when the sensor did not expose
@@ -251,9 +257,24 @@ INSERT INTO behavior_events (
 		nullStr(attrsJSON),
 		nullStr(rawJSON),
 		nullStr(ProcessAgentInstanceID()),
-	)
+	}
+	if in.IngestKey == "" {
+		// Preserve append support on pre-migration databases used by upgrade
+		// tooling. Only authenticated adapter events require the new column.
+		query = strings.Replace(query, ", ingest_key", "", 1)
+		query = strings.Replace(query, "\nON CONFLICT(ingest_key) DO NOTHING", "", 1)
+		query = strings.Replace(query, "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?", "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?", 1)
+		args = append(args[:8], args[9:]...)
+	}
+	result, err := s.execDB(context.Background(), "runtime_event_insert", query, args...)
+
 	if err != nil {
 		return 0, err
+	}
+	if in.IngestKey != "" {
+		var id int64
+		err := s.db.QueryRowContext(context.Background(), `SELECT id FROM behavior_events WHERE ingest_key = ?`, in.IngestKey).Scan(&id)
+		return id, err
 	}
 	id, _ := result.LastInsertId()
 	return id, nil
@@ -520,6 +541,10 @@ type RuntimeEventFilter struct {
 	EventSource   string
 	Severity      string
 	PID           uint32
+	AgentPID      uint32
+	ActorPID      uint32
+	Outcome       string
+	Sort          string
 	Keyword       string
 	Since         time.Time
 	Until         time.Time
@@ -540,14 +565,17 @@ func runtimeEventWhereClause(f RuntimeEventFilter) (string, []any) {
 	if f.EventSource != "" {
 		conds = append(conds, "COALESCE(NULLIF(event_source, ''), source, '') = ?")
 		args = append(args, f.EventSource)
-	} else if !f.IncludeDesktop {
+	}
+	if !f.IncludeDesktop {
 		// Legacy rows written before event_source was introduced have
 		// source=desktop-behavior but a NULL event_source. Treat both
 		// representations identically so they do not leak into the
 		// unified runtime timeline.
 		conds = append(conds, "COALESCE(NULLIF(event_source, ''), source, '') != '"+RuntimeSourceDesktop+"'")
 	}
-	if f.AgentID != "" {
+	if f.AgentID == UnlinkedAgentID {
+		conds = append(conds, "(COALESCE(canonical_agent_id, '') = '' OR NOT EXISTS (SELECT 1 FROM agents ua WHERE ua.id=canonical_agent_id AND ua.\"delete\"=0))")
+	} else if f.AgentID != "" {
 		conds = append(conds, "canonical_agent_id = ?")
 		args = append(args, f.AgentID)
 	}
@@ -578,6 +606,18 @@ func runtimeEventWhereClause(f RuntimeEventFilter) (string, []any) {
 	if f.PID > 0 {
 		conds = append(conds, "agent_pid = ?")
 		args = append(args, f.PID)
+	}
+	if f.AgentPID > 0 {
+		conds = append(conds, "agent_pid = ?")
+		args = append(args, f.AgentPID)
+	}
+	if f.ActorPID > 0 {
+		conds = append(conds, "actor_pid = ?")
+		args = append(args, f.ActorPID)
+	}
+	if f.Outcome != "" {
+		conds = append(conds, "outcome = ?")
+		args = append(args, f.Outcome)
 	}
 	if !f.Since.IsZero() {
 		conds = append(conds, "timestamp >= ?")
@@ -617,6 +657,10 @@ func (s *Store) ListRuntimeEvents(f RuntimeEventFilter) ([]BehaviorEvent, error)
 	if f.Offset < 0 {
 		f.Offset = 0
 	}
+	order := "ASC"
+	if f.Sort == "timestamp_desc" {
+		order = "DESC"
+	}
 	args = append(args, f.Limit, f.Offset)
 	rows, err := s.queryDB(context.Background(), "runtime_events_list", `
 SELECT id, timestamp, event_type, source,
@@ -631,7 +675,7 @@ SELECT id, timestamp, event_type, source,
        COALESCE(session_id, ''), COALESCE(trace_id, ''), COALESCE(attributes_json, '')
 FROM behavior_events
 `+where+`
-ORDER BY timestamp ASC, id ASC
+ORDER BY timestamp `+order+`, id `+order+`
 LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err

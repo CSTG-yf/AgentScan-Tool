@@ -6,6 +6,7 @@ package gateway
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/defenseclaw/defenseclaw/internal/detection"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -58,7 +59,7 @@ func runtimeSettingsRequest(t *testing.T, a *APIServer, method, path, body strin
 func TestRuntimeSettingsAPIRuleCRUDPaginationAndErrors(t *testing.T) {
 	a, typeA, typeB := newRuntimeSettingsAPI(t)
 	list := runtimeSettingsRequest(t, a, "GET", "/rules?page_size=1&source=builtin", "", 200)
-	if list["total"] != float64(12) || len(list["items"].([]any)) != 1 {
+	if list["total"] != float64(len(detection.DefaultRules())) || len(list["items"].([]any)) != 1 {
 		t.Fatalf("builtin page: %+v", list)
 	}
 	builtin := list["items"].([]any)[0].(map[string]any)

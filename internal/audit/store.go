@@ -2713,6 +2713,22 @@ WHERE id = ?`,
 		description: "scan schedules: independent backend task scheduling",
 		apply:       migrateScanSchedules,
 	},
+	{
+		description: "retry-safe runtime adapter ingestion",
+		apply: func(ex dbExecer) error {
+			has, err := hasColumnDB(ex, "behavior_events", "ingest_key")
+			if err != nil {
+				return err
+			}
+			if !has {
+				if _, err = ex.Exec(`ALTER TABLE behavior_events ADD COLUMN ingest_key TEXT`); err != nil {
+					return err
+				}
+			}
+			_, err = ex.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_behavior_ingest_key ON behavior_events(ingest_key)`)
+			return err
+		},
+	},
 }
 
 type agentDiscoverySeed struct {

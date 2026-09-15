@@ -1,8 +1,10 @@
+import type { RuntimeBlacklist, RuntimeEvaluation, RuntimeRiskData, RuntimeRiskPolicy, RuntimeRiskPolicyRule, RuntimeRule, RuntimeSettingsOverview, RuntimeSettingsPage, RuntimeSettingsQuery, RuntimeTypeDetail, RuntimeTypeRow, RuntimeTypeSettings } from "./types";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AgentRuntimeCatalog,
   AgentInventory,
   AgentSnapshot,
+  AgentTraceEvent,
   AgentTraceSnapshot,
   AttackChainAgentTypeSummaryResponse,
   AttackChainSnapshot,
@@ -416,6 +418,25 @@ async function governancePut<T>(path: string, body: unknown): Promise<T> {
 
 async function governanceDelete<T>(path: string): Promise<T> {
   return invoke<T>("agent_governance_delete", { path });
+}
+
+export interface GovernanceSummary {
+  agent_type_count: number;
+  discovery_rule_count: number;
+  resource_rule_count: number;
+  scan_profile_count: number;
+  decision_profile_count: number;
+  risk_rule_count: number;
+  runtime_rule_count: number;
+  runtime_blacklist_count: number;
+  runtime_risk_policy_count: number;
+  scan_schedule_count: number;
+  page_refresh_policy_count: number;
+}
+
+export async function getGovernanceSummary(): Promise<GovernanceSummary> {
+  if (!inTauri()) throw new Error("治理统计需要连接桌面网关");
+  return governanceGet<GovernanceSummary>("/summary");
 }
 
 export async function getGovernanceAgentTypes(query: GovernanceListQuery = {}): Promise<GovernancePage<GovernanceAgentType>> {
@@ -905,6 +926,11 @@ export async function exportAgentsReportPdf(agents: AgentInventory[], defaultFil
   return invoke<string | null>("export_agents_report_pdf", { agents, defaultFileName });
 }
 
+export async function exportPageReportPdf(html: string, defaultFileName?: string): Promise<string | null> {
+  if (!inTauri()) throw new Error("仅桌面应用可以选择路径并导出 PDF 报告");
+  return invoke<string | null>("export_page_report_pdf", { html, defaultFileName });
+}
+
 export async function getAgentRuntimeCatalog(): Promise<AgentRuntimeCatalog> {
   if (!inTauri()) throw new Error("Agent runtime catalog is available from the desktop host only");
   return invoke<AgentRuntimeCatalog>("get_agent_runtime_catalog");
@@ -932,6 +958,31 @@ export async function getAgentTrace(limit = 300): Promise<AgentTraceSnapshot> {
   }
   return invoke<AgentTraceSnapshot>("get_agent_trace", { limit });
 }
+
+function camelizeEvent<T>(value: unknown, preserveKeys = false): T {
+  if (Array.isArray(value)) return value.map(item => camelizeEvent(item)) as T;
+  if (!value || typeof value !== "object") return value as T;
+  if (preserveKeys) return value as T;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => {
+    const mapped = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+    return [mapped, camelizeEvent(item, mapped === "attributes" || mapped === "structured")];
+  })) as T;
+}
+
+export async function getRuntimeEvents(query: import("./types").RuntimeEventQuery = {}): Promise<import("./types").RuntimeEventListResponse> {
+  if (!inTauri()) return { items: [], total: 0, page: query.page ?? 1, pageSize: query.pageSize ?? 20 };
+  return camelizeEvent(await invoke("get_runtime_events", { query }));
+}
+export async function getRuntimeEventDetail(eventId: number): Promise<AgentTraceEvent> { return camelizeEvent(await invoke("get_runtime_event_detail", { eventId })); }
+export async function getRuntimeEventSummary(query: import("./types").RuntimeEventQuery = {}): Promise<import("./types").RuntimeEventSummary> { if (!inTauri()) return { totalEvents:0,activeAgentCount:0,toolEventCount:0,fileEventCount:0 }; return camelizeEvent(await invoke("get_runtime_event_summary", { query })); }
+export async function getRuntimeEventAgents(query: import("./types").RuntimeEventQuery = {}): Promise<import("./types").EventAgentSummary[]> { if (!inTauri()) return []; const response=camelizeEvent<{items:import("./types").EventAgentSummary[]}>(await invoke("get_runtime_event_agents", { query })); return response.items ?? []; }
+export async function getRuntimeEventFacets(query: import("./types").RuntimeEventQuery = {}): Promise<import("./types").RuntimeEventFacets> { if (!inTauri()) return {eventTypes:[],eventCategories:[],sources:[],severities:[],outcomes:[]}; return camelizeEvent(await invoke("get_runtime_event_facets", { query })); }
+
+export async function getAuditEvents(query: import("./types").AuditEventQuery = {}): Promise<import("./types").AuditEventListResponse> { if (!inTauri()) return {items:[],total:0,page:query.page??1,pageSize:query.pageSize??20}; return camelizeEvent(await invoke("get_audit_events", { query })); }
+export async function getAuditEventDetail(eventId:string):Promise<import("./types").AuditEventRecord>{return camelizeEvent(await invoke("get_audit_event_detail",{eventId}));}
+export async function getAuditEventSummary(query:import("./types").AuditEventQuery={}):Promise<import("./types").AuditEventSummary>{if(!inTauri())return{totalEvents:0,relatedAgentCount:0,highOrAboveCount:0,enforcedCount:0};return camelizeEvent(await invoke("get_audit_event_summary",{query}));}
+export async function getAuditEventAgents(query:import("./types").AuditEventQuery={}):Promise<import("./types").EventAgentSummary[]>{if(!inTauri())return[];const response=camelizeEvent<{items:import("./types").EventAgentSummary[]}>(await invoke("get_audit_event_agents",{query}));return response.items??[];}
+export async function getAuditEventFacets(query:import("./types").AuditEventQuery={}):Promise<import("./types").AuditEventFacets>{if(!inTauri())return{actions:[],severities:[],connectors:[],actors:[],tools:[]};return camelizeEvent(await invoke("get_audit_event_facets",{query}));}
 
 export async function saveGuardPolicy(policy: GuardPolicy): Promise<GuardPolicy> {
   if (!inTauri()) return policy;
@@ -1031,3 +1082,33 @@ export async function stopRangeReplay(): Promise<RangeReplayStatus> {
   if (!inTauri()) throw new Error("Only the desktop app can stop AgentRange replay");
   return invoke<RangeReplayStatus>("stop_range_replay");
 }
+
+// Runtime detection settings API.
+
+async function requestRuntimeSettings<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
+  if (!inTauri()) throw new Error("异常检测设置需要连接桌面网关。请在 TraceBastion 桌面应用中打开此页面。");
+  return invoke<T>("runtime_detection_settings_request", { method, path, body: body ?? null });
+}
+function runtimeSettingsQueryPath(path: string, query: RuntimeSettingsQuery) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+  return `${path}?${params}`;
+}
+const runtimeSettingsTypePath = (id: number) => `/agent-types/${id}`;
+const runtimeSettingsRulesPath = (typeId?: number) => typeId === undefined ? "/rules" : `${runtimeSettingsTypePath(typeId)}/rules`;
+
+export const getRuntimeSettingsOverview = () => requestRuntimeSettings<RuntimeSettingsOverview>("GET", "/overview");
+export const getGlobalRuntimeRiskPolicy = () => requestRuntimeSettings<RuntimeRiskPolicy>("GET", "/risk-policy/global");
+export const getRuntimeRules = (query: RuntimeSettingsQuery, typeId?: number) => requestRuntimeSettings<RuntimeSettingsPage<RuntimeRule>>("GET", runtimeSettingsQueryPath(runtimeSettingsRulesPath(typeId), query));
+export const createRuntimeRule = (body: Partial<RuntimeRule>, typeId?: number) => requestRuntimeSettings<RuntimeRule>("POST", runtimeSettingsRulesPath(typeId), body);
+export const patchRuntimeRule = (id: number, body: Partial<RuntimeRule>, typeId?: number) => requestRuntimeSettings<RuntimeRule>("PATCH", `${runtimeSettingsRulesPath(typeId)}/${id}`, body);
+export const deleteRuntimeRule = (id: number, typeId?: number) => requestRuntimeSettings<{ deleted: boolean }>("DELETE", `${runtimeSettingsRulesPath(typeId)}/${id}`);
+export const getRuntimeTypes = (query: RuntimeSettingsQuery) => requestRuntimeSettings<RuntimeSettingsPage<RuntimeTypeRow>>("GET", runtimeSettingsQueryPath("/agent-types", query));
+export const getRuntimeTypeDetail = (id: number) => requestRuntimeSettings<RuntimeTypeDetail>("GET", runtimeSettingsTypePath(id));
+export const patchRuntimeTypeSettings = (id: number, body: Pick<RuntimeTypeSettings, "enabled" | "inherit_global_rules" | "use_global_risk_policy">) => requestRuntimeSettings<RuntimeTypeSettings>("PATCH", `${runtimeSettingsTypePath(id)}/settings`, body);
+export const getRuntimeBlacklist = (id: number, query: RuntimeSettingsQuery) => requestRuntimeSettings<RuntimeSettingsPage<RuntimeBlacklist>>("GET", runtimeSettingsQueryPath(`${runtimeSettingsTypePath(id)}/blacklist`, query));
+export const createRuntimeBlacklist = (typeId: number, body: Partial<RuntimeBlacklist>) => requestRuntimeSettings<RuntimeBlacklist>("POST", `${runtimeSettingsTypePath(typeId)}/blacklist`, body);
+export const patchRuntimeBlacklist = (typeId: number, id: number, body: Partial<RuntimeBlacklist>) => requestRuntimeSettings<RuntimeBlacklist>("PATCH", `${runtimeSettingsTypePath(typeId)}/blacklist/${id}`, body);
+export const deleteRuntimeBlacklist = (typeId: number, id: number) => requestRuntimeSettings<{ deleted: boolean }>("DELETE", `${runtimeSettingsTypePath(typeId)}/blacklist/${id}`);
+export const saveRuntimeRiskPolicy = (typeId: number, useGlobal: boolean, policy?: { name: string; rules: RuntimeRiskPolicyRule[] }) => requestRuntimeSettings<RuntimeRiskData>("PUT", `${runtimeSettingsTypePath(typeId)}/risk-policy`, { use_global_risk_policy: useGlobal, policy });
+export const evaluateRuntimeEvent = (typeId: number, event: Record<string, unknown>) => requestRuntimeSettings<RuntimeEvaluation>("POST", `${runtimeSettingsTypePath(typeId)}/evaluate`, { event });

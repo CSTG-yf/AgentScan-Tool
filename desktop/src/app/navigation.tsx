@@ -17,6 +17,7 @@ export type PageKey =
   | "agents"
   | "governance"
   | "trace"
+  | "auditEvents"
   | "staticAssets"
   | "events"
   | "alerts"
@@ -33,9 +34,10 @@ export const navigation: Array<{ key: PageKey; icon: React.ReactNode; label: str
   { key: "staticAssets", icon: <DatabaseOutlined />, label: "静态资源检测" },
   { key: "events", icon: <BugOutlined />, label: "事件检测" },
   { key: "chain", icon: <AuditOutlined />, label: "攻击链" },
-  { key: "settings", icon: <SettingOutlined />, label: "系统设置" },
-  { key: "alerts", icon: <AlertOutlined />, label: "告警中心" },
   { key: "trace", icon: <AuditOutlined />, label: "行为追踪" },
-  { key: "policies", icon: <FileProtectOutlined />, label: "策略中心" },
-  { key: "evidence", icon: <SafetyCertificateOutlined />, label: "报告与证据" },
+  { key: "auditEvents", icon: <FileProtectOutlined />, label: "事件审计" },
+  { key: "settings", icon: <SettingOutlined />, label: "系统设置" },
+  // { key: "alerts", icon: <AlertOutlined />, label: "告警中心" },
+  // { key: "policies", icon: <FileProtectOutlined />, label: "策略中心" },
+  // { key: "evidence", icon: <SafetyCertificateOutlined />, label: "报告与证据" },
 ];

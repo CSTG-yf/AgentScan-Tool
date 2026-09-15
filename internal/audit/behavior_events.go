@@ -7,6 +7,7 @@ package audit
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -181,7 +182,7 @@ SELECT id,
        COALESCE(event_category, ''),
        COALESCE(tool_name, ''),
        COALESCE(target, ''),
-       COALESCE(severity, '')
+       COALESCE(severity, ''), COALESCE(operation, ''), COALESCE(attributes_json, '{}')
 FROM behavior_events
 WHERE "delete" = 0
 ORDER BY id DESC
@@ -194,7 +195,7 @@ LIMIT ?`, limit)
 	var out []BehaviorEvent
 	for rows.Next() {
 		var e BehaviorEvent
-		var ts string
+		var ts, attrs string
 		var agentPID, actorPID int64
 		if err := rows.Scan(
 			&e.ID,
@@ -219,13 +220,14 @@ LIMIT ?`, limit)
 			&e.EventCategory,
 			&e.ToolName,
 			&e.Target,
-			&e.Severity,
+			&e.Severity, &e.Operation, &attrs,
 		); err != nil {
 			return nil, fmt.Errorf("audit: scan behavior event row: %w", err)
 		}
 		if parsed, err := time.Parse(time.RFC3339Nano, ts); err == nil {
 			e.Timestamp = parsed
 		}
+		_ = json.Unmarshal([]byte(attrs), &e.Attributes)
 		e.AgentPID = uint32(agentPID)
 		e.ActorPID = uint32(actorPID)
 		out = append(out, e)

@@ -1,10 +1,16 @@
 import { CaretRightOutlined, ExperimentOutlined, StopOutlined } from "@ant-design/icons";
+import { useEffect, useState } from "react";
 import { Button, Card, Input, Progress, Space, Tag, Typography } from "antd";
 import { defenseModeColors, defenseModeLabels } from "../app/display";
 import { rangeAttackEvents } from "../data/range";
 import type { RangeMode, RangeReplayStatus, RangeStatus } from "../types";
 
 const { Text, Title } = Typography;
+
+function displayFolderPath(path: string) {
+  if (path.startsWith("\\\\?\\UNC\\")) return "\\\\" + path.slice(8);
+  return path.startsWith("\\\\?\\") ? path.slice(4) : path;
+}
 
 export interface RangePageProps {
   rangeStatus?: RangeStatus;
@@ -18,6 +24,7 @@ export interface RangePageProps {
   replayRemaining: number;
   replayPercent: number;
   onChangeRangeState: (running: boolean) => void;
+  onConfigureRange: (root: string, start: boolean) => void;
   onReplayCommandChange: (value: string) => void;
   onFillReplayScenario: (scenario: string) => void;
   onStartReplay: (commandOverride?: string) => void;
@@ -36,13 +43,18 @@ export function RangePage({
   replayRemaining,
   replayPercent,
   onChangeRangeState,
+  onConfigureRange,
   onReplayCommandChange,
   onFillReplayScenario,
   onStartReplay,
   onStopReplay,
 }: RangePageProps) {
+  const [root, setRoot] = useState(displayFolderPath(rangeStatus?.root ?? ""));
+  useEffect(() => { setRoot(displayFolderPath(rangeStatus?.root ?? "")); }, [rangeStatus?.root]);
+  const rootBusy = loading || replayBusy || Boolean(replayStatus?.running);
+  const canConfigure = Boolean(root.trim()) && !rootBusy && rangeStatus?.state !== "running";
   return (
-    <section>
+    <section className="range-page">
       <div className="section-heading">
         <div>
           <Text className="eyebrow">AGENTRANGE RUNTIME</Text>
@@ -51,19 +63,24 @@ export function RangePage({
         </div>
         <Tag color={rangeStatus?.state === "running" ? "success" : rangeStatus?.state === "invalid" ? "error" : "default"}>{rangeStatus?.state === "running" ? "运行中" : rangeStatus?.state === "stopped" ? "已停止" : "未就绪"}</Tag>
       </div>
-      <Card bordered={false} className="range-hero">
-        <div className="range-status-icon"><ExperimentOutlined /></div>
-        <div className="range-status-copy">
-          <Title level={4}>AgentRange-player</Title>
-          <Text type="secondary">{rangeStatus?.detail ?? "正在检测靶场环境"}</Text>
+      <Card bordered={false} className="range-control-card">
+        <div className="range-control-heading">
+          <div className="range-control-title">
+            <div className="range-status-icon"><ExperimentOutlined /></div>
+            <div className="range-status-copy">
+              <Title level={4}>AgentRange-player</Title>
+              <Text type="secondary">{rangeStatus?.detail ?? "正在检测靶场环境"}</Text>
+            </div>
+          </div>
+          <Tag color={defenseModeColors[defenseMode]}>{defenseModeLabels[defenseMode]}</Tag>
         </div>
-        <Space direction="vertical" size={10} className="range-actions">
-          <Tag color={defenseModeColors[defenseMode]}>当前全局模式：{defenseModeLabels[defenseMode]}</Tag>
-          <Space>
-            <Button size="large" type="primary" disabled={!rangeStatus?.configured || !rangeStatus.dockerAvailable || rangeStatus.state === "running"} loading={loading} onClick={() => onChangeRangeState(true)}>启动靶场</Button>
-            <Button className="range-stop-button" size="large" type="primary" danger icon={<StopOutlined />} disabled={rangeStatus?.state !== "running"} loading={loading} onClick={() => onChangeRangeState(false)}>停止靶场</Button>
-          </Space>
-        </Space>
+        <label htmlFor="range-root" className="range-root-label">靶场文件夹</label>
+        <div className="range-root-toolbar">
+          <Input id="range-root" size="large" value={root} disabled={rootBusy || rangeStatus?.state === "running"} onChange={(event) => setRoot(displayFolderPath(event.target.value))} placeholder={'输入靶场文件夹地址，例如 C:\\AgentRange-player'} />
+          <Button size="large" type="primary" icon={<CaretRightOutlined />} disabled={!canConfigure} loading={loading} onClick={() => root.trim() === displayFolderPath(rangeStatus?.root ?? "") && rangeStatus?.configured ? onChangeRangeState(true) : onConfigureRange(root, true)}>启动靶场</Button>
+          <Button className="range-stop-button" size="large" danger icon={<StopOutlined />} disabled={loading || rangeStatus?.state !== "running"} onClick={() => onChangeRangeState(false)}>停止靶场</Button>
+        </div>
+        <Text type="secondary">{rangeStatus?.state === "running" ? "停止靶场后可更换文件夹。" : "输入文件夹地址，点击启动即可。"}</Text>
       </Card>
       <Card bordered={false} title={`运行服务（${rangeStatus?.runningServices.length ?? 0}）`}>
         <div className="service-list">

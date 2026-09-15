@@ -2,6 +2,8 @@
 
 本文所有命令均从仓库根目录执行。返回 [项目 README](../README.md)。
 
+行为、审计、异常的接入流程、去重机制与更新步骤见 [AgentRange 运行时事件接入](AGENTRANGE_RUNTIME_EVENTS.md)。
+
 `task/AgentRange-player/` 是原始靶场。适配器在项目侧生成 overlay，将 OpsPilot 入口、LLM、MCP 与 Langflow 流量送入检查 sidecar，不修改靶场源码。其 Compose 文件使用 `!reset []` 重置入口端口，需使用支持该语法的 Docker Compose 版本。
 
 ## 启动适配靶场

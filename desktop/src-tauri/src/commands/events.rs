@@ -319,7 +319,7 @@ pub struct RuntimeEventsTimelineResponse {
     pub(crate) buckets: Vec<RuntimeEventsTimelineBucket>,
 }
 
-fn urlencode(value: &str) -> String {
+pub(super) fn urlencode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         match byte {
@@ -637,4 +637,125 @@ pub fn get_runtime_events_timeline(
         &path_with_query("/api/v1/runtime-events/timeline", &query),
     )
     .map_err(|error| format!("获取运行态事件时间线失败：{error}"))
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeEventPageQuery {
+    agent_id: Option<String>,
+    session_id: Option<String>,
+    trace_id: Option<String>,
+    event_type: Option<String>,
+    event_category: Option<String>,
+    source: Option<String>,
+    severity: Option<String>,
+    outcome: Option<String>,
+    keyword: Option<String>,
+    start_time: Option<String>,
+    end_time: Option<String>,
+    sort: Option<String>,
+    agent_pid: Option<u32>,
+    actor_pid: Option<u32>,
+    page: Option<usize>,
+    page_size: Option<usize>,
+    include_desktop_behavior: Option<bool>,
+}
+
+impl RuntimeEventPageQuery {
+    fn query(&self, paginate: bool) -> Vec<String> {
+        let mut q = Vec::new();
+        for (key, value) in [
+            ("agent_id", &self.agent_id),
+            ("session_id", &self.session_id),
+            ("trace_id", &self.trace_id),
+            ("event_type", &self.event_type),
+            ("event_category", &self.event_category),
+            ("source", &self.source),
+            ("severity", &self.severity),
+            ("outcome", &self.outcome),
+            ("keyword", &self.keyword),
+            ("start_time", &self.start_time),
+            ("end_time", &self.end_time),
+            ("sort", &self.sort),
+        ] {
+            push_query(&mut q, key, value.as_deref());
+        }
+        if let Some(v) = self.agent_pid {
+            q.push(format!("agent_pid={v}"));
+        }
+        if let Some(v) = self.actor_pid {
+            q.push(format!("actor_pid={v}"));
+        }
+        if let Some(v) = self.include_desktop_behavior {
+            q.push(format!("include_desktop_behavior={v}"));
+        }
+        if paginate {
+            q.push(format!("page={}", self.page.unwrap_or(1).max(1)));
+            q.push(format!(
+                "page_size={}",
+                self.page_size.unwrap_or(20).clamp(1, 200)
+            ));
+        }
+        q
+    }
+}
+
+#[tauri::command]
+pub fn get_runtime_events(
+    app: tauri::AppHandle,
+    query: Option<RuntimeEventPageQuery>,
+) -> Result<serde_json::Value, String> {
+    let q = query.unwrap_or_default();
+    crate::commands::gateway_api::get_json(
+        &app,
+        &path_with_query("/api/v1/runtime-events", &q.query(true)),
+    )
+    .map_err(|e| format!("获取行为事件失败：{e}"))
+}
+#[tauri::command]
+pub fn get_runtime_event_detail(
+    app: tauri::AppHandle,
+    event_id: i64,
+) -> Result<serde_json::Value, String> {
+    if event_id <= 0 {
+        return Err("event_id 必须是正整数".into());
+    };
+    crate::commands::gateway_api::get_json(&app, &format!("/api/v1/runtime-events/{event_id}"))
+        .map_err(|e| format!("获取行为事件详情失败：{e}"))
+}
+#[tauri::command]
+pub fn get_runtime_event_summary(
+    app: tauri::AppHandle,
+    query: Option<RuntimeEventPageQuery>,
+) -> Result<serde_json::Value, String> {
+    let q = query.unwrap_or_default();
+    crate::commands::gateway_api::get_json(
+        &app,
+        &path_with_query("/api/v1/runtime-events/summary", &q.query(false)),
+    )
+    .map_err(|e| format!("获取行为事件总览失败：{e}"))
+}
+#[tauri::command]
+pub fn get_runtime_event_agents(
+    app: tauri::AppHandle,
+    query: Option<RuntimeEventPageQuery>,
+) -> Result<serde_json::Value, String> {
+    let q = query.unwrap_or_default();
+    crate::commands::gateway_api::get_json(
+        &app,
+        &path_with_query("/api/v1/runtime-events/agents", &q.query(false)),
+    )
+    .map_err(|e| format!("获取行为事件 Agent 汇总失败：{e}"))
+}
+#[tauri::command]
+pub fn get_runtime_event_facets(
+    app: tauri::AppHandle,
+    query: Option<RuntimeEventPageQuery>,
+) -> Result<serde_json::Value, String> {
+    let q = query.unwrap_or_default();
+    crate::commands::gateway_api::get_json(
+        &app,
+        &path_with_query("/api/v1/runtime-events/facets", &q.query(false)),
+    )
+    .map_err(|e| format!("获取行为事件筛选项失败：{e}"))
 }

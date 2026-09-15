@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CloseCircleOutlined,
-  DatabaseOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   SaveOutlined,
@@ -31,7 +30,7 @@ import {
   getScanJob,
   getScanJobs,
   updateBackendScanSchedule,
-} from "../bridge";
+} from "../../bridge";
 import type {
   BackendScanSchedule,
   ScanJob,
@@ -39,8 +38,7 @@ import type {
   ScanTaskKey,
   ScanTaskType,
   StaticResourceScanSettings,
-} from "../types";
-import "./runtime-workbench.css";
+} from "../../types";
 
 const { Text, Title } = Typography;
 
@@ -89,7 +87,7 @@ function formatTime(value?: string) {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString("zh-CN", { hour12: false });
 }
 
-export interface ScanRefreshSettingsPageProps {
+export interface ScanRefreshStrategyPageProps {
   scanSettings?: ScanScheduleSettings;
   staticScanSettings?: StaticResourceScanSettings;
   savingScanSettings?: boolean;
@@ -99,7 +97,7 @@ export interface ScanRefreshSettingsPageProps {
   onRefreshData: () => void | Promise<void>;
 }
 
-export function ScanRefreshSettingsPage({
+export function ScanRefreshStrategyPage({
   scanSettings,
   staticScanSettings,
   savingScanSettings,
@@ -107,7 +105,7 @@ export function ScanRefreshSettingsPage({
   onScanSettingsChange,
   onStaticScanSettingsChange,
   onRefreshData,
-}: ScanRefreshSettingsPageProps) {
+}: ScanRefreshStrategyPageProps) {
   const [schedules, setSchedules] = useState<BackendScanSchedule[]>([]);
   const [jobs, setJobs] = useState<ScanJob[]>([]);
   const [jobsTotal, setJobsTotal] = useState(0);
@@ -209,7 +207,7 @@ export function ScanRefreshSettingsPage({
     { title: "阶段", dataIndex: "phase", width: 110, render: (value) => value || "-" },
     {
       title: "进度", width: 180, render: (_, job) => (
-        <Space direction="vertical" size={0} style={{ width: "100%" }}>
+        <Space direction="vertical" size={0} className="governance-full-width">
           <Progress percent={job.progress ?? 0} size="small" status={job.status === "failed" ? "exception" : undefined} />
           <Text type="secondary">{job.total ? `${job.current ?? 0} / ${job.total}` : `${job.progress ?? 0}%`}</Text>
         </Space>
@@ -226,15 +224,9 @@ export function ScanRefreshSettingsPage({
     },
   ];
 
-  const latestJob = jobs[0];
-  const configurableScheduleCount = schedules.filter((item) => !NATIVE_OWNED.has(item.task_type)).length;
-  const enabledScheduleCount = schedules.some((item) => item.enabled) ? 1 : 0;
-  const enabledRefreshCount = refreshDraft ? REFRESH_KEYS.filter((key) => refreshDraft[key].enabled).length : 0;
-  const enabledTriggers = (staticDraft?.realtimeEnabled ? 1 : 0) + (enabledScheduleCount || staticDraft?.rescanEnabled ? 1 : 0);
-
   return (
     <section className="scan-refresh-page">
-      <div className="runtime-workbench-heading">
+      <div className="scan-page-workbench-heading">
         <div>
           <Text className="eyebrow">SCAN AND REFRESH</Text>
           <Title level={3}>扫描与刷新策略</Title>
@@ -243,12 +235,6 @@ export function ScanRefreshSettingsPage({
         <Button icon={<ReloadOutlined />} loading={loading} onClick={() => { void loadServerData(); void onRefreshData(); }}>刷新数据</Button>
       </div>
 
-      <div className="runtime-workbench-metrics scan-refresh-metrics">
-        <Card className="runtime-workbench-metric"><DatabaseOutlined /><Text>后端扫描策略</Text><strong>{configurableScheduleCount}</strong></Card>
-        <Card className="runtime-workbench-metric metric-1"><SyncOutlined /><Text>已启用扫描触发</Text><strong>{enabledTriggers}</strong></Card>
-        <Card className="runtime-workbench-metric metric-2"><ReloadOutlined /><Text>自动刷新页面</Text><strong>{enabledRefreshCount}</strong></Card>
-        <Card className="runtime-workbench-metric metric-3"><PlayCircleOutlined /><Text>最近扫描任务</Text><div className="scan-refresh-latest">{latestJob ? statusTag(latestJob.status) : <Tag>暂无</Tag>}<Text>{latestJob ? TASK_COPY[latestJob.task_type]?.title : "尚无记录"}</Text></div></Card>
-      </div>
 
       <Card title="后端扫描策略" extra={<Text type="secondary">各任务独立调度，同类任务运行时自动去重</Text>}>
         <div className="scan-refresh-policy-list">
@@ -311,7 +297,7 @@ export function ScanRefreshSettingsPage({
       )}
 
       <Drawer rootClassName="scan-refresh-drawer" title="扫描任务详情" width={720} open={!!selectedJob} onClose={() => setSelectedJob(undefined)}>
-        {selectedJob && <Space direction="vertical" size={16} style={{ width: "100%" }}>
+        {selectedJob && <Space direction="vertical" size={16} className="governance-full-width">
           {selectedJob.error && <Alert type="error" showIcon message="任务失败" description={selectedJob.error} />}
           <Descriptions bordered size="small" column={2} items={[
             { key: "id", label: "Job ID", span: 2, children: selectedJob.job_id },

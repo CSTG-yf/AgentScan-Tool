@@ -31,6 +31,12 @@ func (a *APIServer) handleAgentGovernanceAPI(w http.ResponseWriter, r *http.Requ
 	}
 	parts := strings.Split(rest, "/")
 	switch parts[0] {
+	case "summary":
+		if len(parts) != 1 {
+			http.NotFound(w, r)
+			return
+		}
+		a.handleAgentGovernanceSummary(w, r)
 	case "agent-types":
 		a.handleGovernanceAgentTypes(w, r, parts[1:])
 	case "discovery-rules":
@@ -84,6 +90,32 @@ func (a *APIServer) handleAgentGovernanceAPI(w http.ResponseWriter, r *http.Requ
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// GET /api/v1/agent-governance/summary returns counts for all governance tabs.
+func (a *APIServer) handleAgentGovernanceSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	summary, err := a.store.GetGovernanceSummary(r.Context())
+	// Page refresh policies have a fixed, typed set of entries. Defaults are
+	// returned by the settings API even before the first configuration save.
+	if err == nil {
+		var fields map[string]json.RawMessage
+		encoded, marshalErr := json.Marshal(defaultPageScanScheduleSettings())
+		if marshalErr != nil {
+			a.writeGovernanceResult(w, nil, marshalErr)
+			return
+		}
+		if decodeErr := json.Unmarshal(encoded, &fields); decodeErr != nil {
+			a.writeGovernanceResult(w, nil, decodeErr)
+			return
+		}
+		delete(fields, "version")
+		summary.PageRefreshPolicyCount = len(fields)
+	}
+	a.writeGovernanceResult(w, summary, err)
 }
 
 func (a *APIServer) handleAgentGovernanceOverview(w http.ResponseWriter, r *http.Request) {

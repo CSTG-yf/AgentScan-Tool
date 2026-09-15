@@ -98,6 +98,42 @@ pub fn export_agents_report_pdf(
     Ok(Some(output_path.to_string_lossy().to_string()))
 }
 
+/// Export a pre-rendered, self-contained report from a desktop page. The HTML
+/// is produced by trusted application code and printed through the same local
+/// Edge/Chrome pipeline used by the Agent report.
+#[tauri::command]
+pub fn export_page_report_pdf(
+    html: String,
+    default_file_name: Option<String>,
+) -> Result<Option<String>, String> {
+    if html.trim().is_empty() {
+        return Err("导出内容不能为空".to_owned());
+    }
+    let file_name = safe_pdf_file_name(
+        default_file_name
+            .as_deref()
+            .unwrap_or("runtime-detections-current-page.pdf"),
+    );
+    let Some(output_path) = choose_pdf_output_path(&file_name)? else {
+        return Ok(None);
+    };
+
+    let temp_dir = env::temp_dir().join(format!(
+        "defenseclaw-page-report-{}",
+        Utc::now().timestamp_millis()
+    ));
+    fs::create_dir_all(&temp_dir).map_err(|err| format!("创建临时目录失败：{err}"))?;
+    let html_path = temp_dir.join("report.html");
+    fs::write(&html_path, html).map_err(|err| format!("写入临时报告失败：{err}"))?;
+
+    let print_result = print_html_to_pdf(&html_path, &output_path);
+    let _ = fs::remove_file(&html_path);
+    let _ = fs::remove_dir_all(&temp_dir);
+    print_result?;
+
+    Ok(Some(output_path.to_string_lossy().to_string()))
+}
+
 fn agent_list_path(query: Option<&AgentListQuery>) -> String {
     let mut pairs = vec![("page_size".to_string(), "5000".to_string())];
     if let Some(query) = query {
@@ -236,7 +272,7 @@ fn print_html_to_pdf(html_path: &Path, output_path: &Path) -> Result<(), String>
             .arg("--no-default-browser-check")
             .arg("--run-all-compositor-stages-before-draw")
             .arg("--virtual-time-budget=1000")
-            .arg("--print-to-pdf-no-header")
+            .arg("--no-pdf-header-footer")
             .arg(format!("--user-data-dir={}", profile_dir.to_string_lossy()))
             .arg(format!("--print-to-pdf={target}"))
             .arg(&source)

@@ -49,6 +49,10 @@ export function outcomeTag(outcome: string) {
     terminationFailed: "终止失败",
     terminationPending: "准备终止",
     observed: "已观察",
+    allowed: "已放行",
+    flagged: "发现风险",
+    blocked: "已阻断",
+    error: "失败",
     debugPrivilegeEnabled: "调试特权已启用",
     debugPrivilegeUnavailable: "调试特权不可用",
   };

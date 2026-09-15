@@ -90,26 +90,29 @@ func truncateInspectContent(s string, max int) string {
 // RequestInspectRequest is the payload for POST /api/v1/inspect/request.
 // Called before the user query is sent to the LLM.
 type RequestInspectRequest struct {
-	Content   string `json:"content"`
-	Model     string `json:"model,omitempty"`
-	SessionID string `json:"session_id,omitempty"`
+	RuntimeContext *InspectRuntimeContext `json:"runtime_context,omitempty"`
+	Content        string                 `json:"content"`
+	Model          string                 `json:"model,omitempty"`
+	SessionID      string                 `json:"session_id,omitempty"`
 }
 
 // ResponseInspectRequest is the payload for POST /api/v1/inspect/response.
 // Called after the LLM returns a response.
 type ResponseInspectRequest struct {
-	Content   string `json:"content"`
-	Model     string `json:"model,omitempty"`
-	SessionID string `json:"session_id,omitempty"`
+	RuntimeContext *InspectRuntimeContext `json:"runtime_context,omitempty"`
+	Content        string                 `json:"content"`
+	Model          string                 `json:"model,omitempty"`
+	SessionID      string                 `json:"session_id,omitempty"`
 }
 
 // ToolResponseInspectRequest is the payload for POST /api/v1/inspect/tool-response.
 // Called after a tool finishes execution, before the result is fed back to the LLM.
 type ToolResponseInspectRequest struct {
-	Tool      string          `json:"tool"`
-	Output    json.RawMessage `json:"output,omitempty"`
-	ExitCode  int             `json:"exit_code,omitempty"`
-	SessionID string          `json:"session_id,omitempty"`
+	RuntimeContext *InspectRuntimeContext `json:"runtime_context,omitempty"`
+	Tool           string                 `json:"tool"`
+	Output         json.RawMessage        `json:"output,omitempty"`
+	ExitCode       int                    `json:"exit_code,omitempty"`
+	SessionID      string                 `json:"session_id,omitempty"`
 }
 
 // handleInspectRequest inspects user query content before it is sent to the LLM.
@@ -124,9 +127,16 @@ func (a *APIServer) handleInspectRequest(w http.ResponseWriter, r *http.Request)
 		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
+	runtimeID, runtimeOK := a.beginInspectRuntime(w, r, req.RuntimeContext, req.SessionID)
+	if !runtimeOK {
+		return
+	}
 	req.Content = truncateInspectContent(req.Content, maxInspectContentLen)
 	if req.Content == "" {
-		a.writeJSON(w, http.StatusOK, &ToolInspectVerdict{Action: "allow", Severity: "NONE", Findings: []string{}})
+		empty := &ToolInspectVerdict{Action: "allow", Severity: "NONE", Findings: []string{}}
+		empty.applyMode(inspectMode(a.scannerCfg))
+		a.completeInspectRuntime(w, runtimeID, empty)
+		a.writeJSON(w, http.StatusOK, empty)
 		return
 	}
 
@@ -138,6 +148,7 @@ func (a *APIServer) handleInspectRequest(w http.ResponseWriter, r *http.Request)
 	ruleFindings, err := scanWithTimeout(r.Context(), req.Content, "user-request", inspectScanTimeout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[inspect] pre-request scan timeout after %s\n", time.Since(t0))
+		a.failInspectRuntime(runtimeID)
 		a.writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "scan timeout"})
 		return
 	}
@@ -148,6 +159,7 @@ func (a *APIServer) handleInspectRequest(w http.ResponseWriter, r *http.Request)
 	clampPromptDirectionToolVerdict(verdict, "prompt")
 	verdict.applyMode(inspectMode(a.scannerCfg))
 
+	a.completeInspectRuntime(w, runtimeID, verdict)
 	elapsed := time.Since(t0)
 
 	fmt.Fprintf(os.Stderr, "[inspect] <<< pre-request action=%s raw_action=%s severity=%s mode=%s would_block=%v elapsed=%s reason=%q\n",
@@ -180,7 +192,7 @@ func (a *APIServer) handleInspectRequest(w http.ResponseWriter, r *http.Request)
 		auditDetails += fmt.Sprintf(" request_id=%s", requestID)
 	}
 	auditDetails = appendHookEvaluationDetails(auditDetails, evalCtx)
-	_ = a.logger.LogActionCtx(r.Context(), auditAction, "pre-request", auditDetails)
+	a.logInspectAudit(r, req.RuntimeContext, runtimeID, auditAction, "pre-request", auditDetails, verdict)
 
 	reveal := wantsReveal(r)
 	a.writeJSON(w, http.StatusOK, verdict.sanitizeForResponse(reveal))
@@ -198,9 +210,16 @@ func (a *APIServer) handleInspectResponse(w http.ResponseWriter, r *http.Request
 		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
+	runtimeID, runtimeOK := a.beginInspectRuntime(w, r, req.RuntimeContext, req.SessionID)
+	if !runtimeOK {
+		return
+	}
 	req.Content = truncateInspectContent(req.Content, maxInspectContentLen)
 	if req.Content == "" {
-		a.writeJSON(w, http.StatusOK, &ToolInspectVerdict{Action: "allow", Severity: "NONE", Findings: []string{}})
+		empty := &ToolInspectVerdict{Action: "allow", Severity: "NONE", Findings: []string{}}
+		empty.applyMode(inspectMode(a.scannerCfg))
+		a.completeInspectRuntime(w, runtimeID, empty)
+		a.writeJSON(w, http.StatusOK, empty)
 		return
 	}
 
@@ -212,12 +231,14 @@ func (a *APIServer) handleInspectResponse(w http.ResponseWriter, r *http.Request
 	ruleFindings, err := scanWithTimeout(r.Context(), req.Content, "llm-response", inspectScanTimeout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[inspect] post-response scan timeout after %s\n", time.Since(t0))
+		a.failInspectRuntime(runtimeID)
 		a.writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "scan timeout"})
 		return
 	}
 	verdict := a.buildVerdict(ruleFindings, "completion", false)
 	verdict.applyMode(inspectMode(a.scannerCfg))
 
+	a.completeInspectRuntime(w, runtimeID, verdict)
 	elapsed := time.Since(t0)
 
 	fmt.Fprintf(os.Stderr, "[inspect] <<< post-response action=%s raw_action=%s severity=%s mode=%s would_block=%v elapsed=%s reason=%q\n",
@@ -250,7 +271,7 @@ func (a *APIServer) handleInspectResponse(w http.ResponseWriter, r *http.Request
 		auditDetails += fmt.Sprintf(" request_id=%s", requestID)
 	}
 	auditDetails = appendHookEvaluationDetails(auditDetails, evalCtx)
-	_ = a.logger.LogActionCtx(r.Context(), auditAction, "post-response", auditDetails)
+	a.logInspectAudit(r, req.RuntimeContext, runtimeID, auditAction, "post-response", auditDetails, verdict)
 
 	reveal := wantsReveal(r)
 	a.writeJSON(w, http.StatusOK, verdict.sanitizeForResponse(reveal))
@@ -273,6 +294,10 @@ func (a *APIServer) handleInspectToolResponse(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	runtimeID, runtimeOK := a.beginInspectRuntime(w, r, req.RuntimeContext, req.SessionID)
+	if !runtimeOK {
+		return
+	}
 	outputStr := truncateInspectContent(string(req.Output), maxInspectContentLen)
 
 	fmt.Fprintf(os.Stderr, "[inspect] >>> post-tool tool=%q output_len=%d exit_code=%d\n",
@@ -283,6 +308,7 @@ func (a *APIServer) handleInspectToolResponse(w http.ResponseWriter, r *http.Req
 	ruleFindings, err := scanWithTimeout(r.Context(), outputStr, req.Tool+"-response", inspectScanTimeout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[inspect] post-tool scan timeout after %s\n", time.Since(t0))
+		a.failInspectRuntime(runtimeID)
 		a.writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "scan timeout"})
 		return
 	}
@@ -306,6 +332,7 @@ func (a *APIServer) handleInspectToolResponse(w http.ResponseWriter, r *http.Req
 
 	verdict.applyMode(inspectMode(a.scannerCfg))
 
+	a.completeInspectRuntime(w, runtimeID, verdict)
 	elapsed := time.Since(t0)
 
 	fmt.Fprintf(os.Stderr, "[inspect] <<< post-tool tool=%q action=%s raw_action=%s severity=%s mode=%s would_block=%v elapsed=%s reason=%q\n",
@@ -339,7 +366,7 @@ func (a *APIServer) handleInspectToolResponse(w http.ResponseWriter, r *http.Req
 		auditDetails += fmt.Sprintf(" request_id=%s", requestID)
 	}
 	auditDetails = appendHookEvaluationDetails(auditDetails, evalCtx)
-	_ = a.logger.LogActionCtx(r.Context(), auditAction, req.Tool, auditDetails)
+	a.logInspectAudit(r, req.RuntimeContext, runtimeID, auditAction, req.Tool, auditDetails, verdict)
 
 	reveal := wantsReveal(r)
 	a.writeJSON(w, http.StatusOK, verdict.sanitizeForResponse(reveal))

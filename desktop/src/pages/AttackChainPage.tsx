@@ -4,10 +4,10 @@ import { Alert, Button, Card, ConfigProvider, Drawer, Empty, Input, Select, Spac
 import { createAttackChainRebuildJob, getAttackChainAgentTypeSummaries, getAttackChainDetail, getAttackChains, getRuntimeSecurityAgents, getScanStatus } from "../bridge";
 import { formatTimestamp } from "../app/display";
 import type { AttackChain, AttackChainAgentTypeSummary, AttackChainDetail, AttackChainListQuery, AttackChainSnapshot, GatewayAuditSnapshot, RangeMode, RuntimeSecurityAgent } from "../types";
-import "./runtime-workbench.css";
 import { attackChainDetailTabs } from "./AttackChainDetailContent";
 
 const { Text, Title } = Typography;
+
 type Filters = Omit<AttackChainListQuery, "page" | "pageSize">;
 interface Props { defenseMode: RangeMode; gatewayAudit?: GatewayAuditSnapshot; snapshot?: AttackChainSnapshot; loading?: boolean; onRefresh?: () => Promise<void> | void }
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -139,8 +139,8 @@ export function AttackChainPage({ snapshot }: Props) {
   const statusOptions = [...new Set(["active", "contained", ...types.flatMap(type => Object.keys(type.statusCounts))])];
 
   return <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm, token: { colorPrimary: "#1677ff", colorBgContainer: "#ffffff", colorText: "#16273e", borderRadius: 10 } }}>
-    <div className="runtime-workbench">
-      <div className="runtime-workbench-heading">
+    <div className="chain-page-workbench">
+      <div className="chain-page-workbench-heading">
         <div><Text type="secondary">RUNTIME ATTACK CHAINS</Text><Title level={2}>攻击链</Title><Text type="secondary">按 Agent、类型与风险调查链路及关联证据</Text></div>
         <Space wrap>
           <Button icon={<DownloadOutlined />} disabled={!rows.length} onClick={() => exportJSON({ filters, ...paging, total, chains: rows }, "attack-chains-page.json")}>导出当前页</Button>
@@ -150,10 +150,10 @@ export function AttackChainPage({ snapshot }: Props) {
       </div>
       {Object.entries(errors).filter(([, value]) => value).map(([key, value]) => <Alert key={key} type="error" showIcon title={value} />)}
       {jobId && <Alert type="info" showIcon title={`重建任务 ${jobId} · ${jobStatus}`} />}
-      <div className="runtime-workbench-metrics">{[
+      <div className="chain-page-workbench-metrics">{[
         ["覆盖 Agent", totals.covered], ["攻击链总数", totals.chains], ["活跃攻击链", totals.active], ["高危及以上", totals.high],
-      ].map(([label, value], index) => <Card key={label} className={`runtime-workbench-metric metric-${index}`}><Text type="secondary">{label}</Text><strong>{summaryReady ? value : "—"}</strong><Text type="secondary">当前筛选完整统计</Text></Card>)}</div>
-      <div className="runtime-workbench-columns">
+      ].map(([label, value], index) => <Card key={label} className={`chain-page-workbench-metric metric-${index}`}><Text type="secondary">{label}</Text><strong>{summaryReady ? value : "—"}</strong><Text type="secondary">当前筛选完整统计</Text></Card>)}</div>
+      <div className="chain-page-workbench-columns">
         <Card title="Agents" className="runtime-instance-list">
           <Input aria-label="搜索 Agent 实例" prefix={<SearchOutlined />} placeholder="搜索实例" value={search} onChange={event => setSearch(event.target.value)} />
           <button className={!filters.agentId ? "selected" : ""} onClick={() => change({ agentId: undefined })}><strong>全部 Agent</strong><span>{summaryReady ? totals.chains : "—"} Chains · {summaryReady ? totals.high : "—"} High+</span></button>
@@ -168,7 +168,7 @@ export function AttackChainPage({ snapshot }: Props) {
             <div style={{ marginTop: 8 }}><Space wrap>{types.flatMap(type => Object.entries(type.statusCounts).map(([status, count]) => <Text type="secondary" key={`${type.agentTypeId}:${type.agentType}:${status}`}>{type.agentType} · {status}: {count}</Text>))}</Space></div>
           </Card>
           <Card className="runtime-result-card">
-            <div className="runtime-workbench-filters" data-expanded={advanced}>
+            <div className="chain-page-workbench-filters" data-expanded={advanced}>
               <Input aria-label="搜索攻击链" allowClear prefix={<SearchOutlined />} placeholder="链路 ID、Agent、会话、检测/决策 ID" value={filters.keyword} onChange={event => change({ keyword: event.target.value || undefined })} />
               <Select aria-label="攻击类型" mode="tags" maxCount={1} placeholder="全部攻击类型" value={filters.attackType ? [filters.attackType] : []} options={[...new Set(rows.map(row => row.category))].map(value => ({ value }))} onChange={value => change({ attackType: value[0] })} />
               <Select aria-label="风险等级" allowClear placeholder="全部风险" value={filters.severity} options={riskOptions.map(value => ({ value }))} onChange={severity => change({ severity })} />
@@ -199,7 +199,7 @@ export function AttackChainPage({ snapshot }: Props) {
         </div>
       </div>
       <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm, token: { colorBgElevated: "#ffffff", colorBgContainer: "#ffffff", colorText: "#14213a", colorTextSecondary: "#667085", colorBorder: "#e7ebf3" } }}>
-        <Drawer rootClassName="runtime-evidence-drawer" width="min(720px, 96vw)" open={!!selectedId} title={detail?.detections?.[0]?.title ? String(detail.detections[0].title) : "攻击链详情"} onClose={() => { detailGeneration.current++; setSelectedId(undefined); }} loading={detailBusy}
+        <Drawer rootClassName="chain-page-workbench-drawer" width="min(720px, 96vw)" open={!!selectedId} title={detail?.detections?.[0]?.title ? String(detail.detections[0].title) : "攻击链详情"} onClose={() => { detailGeneration.current++; setSelectedId(undefined); }} loading={detailBusy}
           footer={<Space wrap><Button icon={<ReloadOutlined />} onClick={() => selectedId && void openDetail(selectedId, true)}>刷新详情</Button><Button disabled={!detail} icon={<DownloadOutlined />} onClick={() => detail && exportJSON(detail, `attack-chain-${selectedId}.json`)}>导出详情</Button></Space>}>
           {detailError && <Alert type="error" showIcon title={detailError} />}
           {detail && <><Title level={4}>{rawText(raw?.attack_type)}</Title><Text code>{rawText(raw?.attack_chain_id)}</Text><div style={{ margin: "16px 0" }}><Space>{riskTag(String(raw?.severity || "unknown"))}{statusTag(String(raw?.status || "unknown"))}<Tag>{responses.filter(response => response.status === "executed").length} 条已执行响应</Tag></Space></div>

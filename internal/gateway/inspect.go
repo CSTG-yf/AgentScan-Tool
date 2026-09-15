@@ -62,12 +62,13 @@ func wantsReveal(r *http.Request) bool {
 // A single endpoint handles both general tool policy checks and message
 // content inspection — the handler branches on the Tool field.
 type ToolInspectRequest struct {
-	Tool            string          `json:"tool"`
-	Args            json.RawMessage `json:"args,omitempty"`
-	Content         string          `json:"content,omitempty"`
-	Direction       string          `json:"direction,omitempty"`
-	SessionID       string          `json:"session_id,omitempty"`
-	ApprovalSurface string          `json:"approval_surface,omitempty"`
+	RuntimeContext  *InspectRuntimeContext `json:"runtime_context,omitempty"`
+	Tool            string                 `json:"tool"`
+	Args            json.RawMessage        `json:"args,omitempty"`
+	Content         string                 `json:"content,omitempty"`
+	Direction       string                 `json:"direction,omitempty"`
+	SessionID       string                 `json:"session_id,omitempty"`
+	ApprovalSurface string                 `json:"approval_surface,omitempty"`
 	// Connector selects which connector's rule set the scan uses. The hook
 	// handlers stamp it (codex/claudecode/...) so each connector scans
 	// against its own EffectiveRulePackDir. Empty ⇒ process-global default
@@ -876,6 +877,10 @@ func (a *APIServer) handleInspectTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	runtimeID, runtimeOK := a.beginInspectRuntime(w, r, req.RuntimeContext, req.SessionID)
+	if !runtimeOK {
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), inspectScanTimeout)
 	defer cancel()
 
@@ -908,6 +913,7 @@ func (a *APIServer) handleInspectTool(w http.ResponseWriter, r *http.Request) {
 		verdict = res.v
 	case <-ctx.Done():
 		fmt.Fprintf(os.Stderr, "[inspect] tool scan timeout after %s\n", time.Since(t0))
+		a.failInspectRuntime(runtimeID)
 		a.writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "scan timeout"})
 		return
 	}
@@ -915,6 +921,7 @@ func (a *APIServer) handleInspectTool(w http.ResponseWriter, r *http.Request) {
 	verdict.applyMode(inspectMode(a.scannerCfg))
 	a.resolveOpenClawInspectConfirm(r.Context(), &req, verdict)
 
+	a.completeInspectRuntime(w, runtimeID, verdict)
 	elapsed := time.Since(t0)
 
 	// verdict.Reason is composed as "matched: <rule-id>:<title>"
@@ -998,7 +1005,7 @@ func (a *APIServer) handleInspectTool(w http.ResponseWriter, r *http.Request) {
 		auditDetails += fmt.Sprintf(" request_id=%s", requestID)
 	}
 	auditDetails = appendHookEvaluationDetails(auditDetails, evalCtx)
-	_ = a.logger.LogActionCtx(r.Context(), auditAction, req.Tool, auditDetails)
+	a.logInspectAudit(r, req.RuntimeContext, runtimeID, auditAction, req.Tool, auditDetails, verdict)
 
 	a.emitCodeGuardOTel(&req, verdict, elapsed)
 

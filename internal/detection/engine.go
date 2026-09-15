@@ -84,6 +84,7 @@ type EvidenceSpec struct {
 // policy engine: every recorded detection flows into the unified
 // decision → response → attack-chain pipeline.
 type Engine struct {
+	evaluateMu   sync.Mutex
 	store        *audit.Store
 	rules        []Rule
 	configMu     sync.Mutex
@@ -154,6 +155,10 @@ func (e *Engine) EvaluateEvent(eventID int64) {
 	_ = e.evaluateEvent(eventID, "")
 }
 
+func (e *Engine) EvaluateEventWithError(eventID int64) error {
+	return e.evaluateEvent(eventID, "")
+}
+
 // EvaluateEventForJob is used by historical replay jobs. It preserves the
 // normal live-event behaviour while attaching the replay job id to every
 // detection created or refreshed by the evaluation.
@@ -171,6 +176,24 @@ func (e *Engine) evaluateEvent(eventID int64, evaluationJobID string) error {
 	}
 	if !ok {
 		return fmt.Errorf("runtime event %d not found", eventID)
+	}
+	inspection := event.Attributes["inspection_status"] == "complete"
+	if inspection {
+		// Serialize inspection retries without changing concurrency of the
+		// existing OS/hook/proxy pipeline. Re-read the durable checkpoint
+		// after acquiring the lock because another retry may have finished.
+		e.evaluateMu.Lock()
+		defer e.evaluateMu.Unlock()
+		event, ok, err = e.store.GetRuntimeEvent(eventID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("runtime event %d unavailable", eventID)
+		}
+	}
+	if evaluationJobID == "" && inspection && event.Attributes["inspection_evaluated"] == true {
+		return nil
 	}
 	typeID, err := e.store.RuntimeAgentTypeID(event.CanonicalAgentID)
 	if err != nil {
@@ -197,6 +220,9 @@ func (e *Engine) evaluateEvent(eventID int64, evaluationJobID string) error {
 				return err
 			}
 		}
+	}
+	if inspection && evaluationJobID == "" {
+		return e.store.MarkRuntimeInspectionEvaluated(eventID)
 	}
 	return nil
 }
@@ -322,7 +348,7 @@ func (e *Engine) record(trigger audit.BehaviorEvent, rule configuredRule, res De
 		// Phase 3: detection → decision → response → attack chain.
 		// ProcessDetection re-reads the merged detection + evidence
 		// so escalations see the full chain.
-		e.policy.processDetectionWithPolicy(d, nil, riskPolicy)
+		return e.policy.processDetectionWithPolicy(d, nil, riskPolicy)
 	}
 	return err
 }

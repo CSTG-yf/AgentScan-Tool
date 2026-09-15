@@ -237,11 +237,13 @@ func (p *PolicyEngine) ProcessDetection(d audit.RuntimeDetection, evidence []aud
 
 // Live detection passes its configuration snapshot so a concurrent settings
 // save cannot combine rules from one revision with another revision's policy.
-func (p *PolicyEngine) processDetectionWithPolicy(d audit.RuntimeDetection, evidence []audit.DetectionEvidence, policy audit.RuntimeRiskPolicy) {
+func (p *PolicyEngine) processDetectionWithPolicy(d audit.RuntimeDetection, evidence []audit.DetectionEvidence, policy audit.RuntimeRiskPolicy) error {
 	if evidence == nil {
-		if _, ev, err := p.store.GetRuntimeDetectionDetail(d.DetectionID); err == nil {
-			evidence = ev
+		_, ev, err := p.store.GetRuntimeDetectionDetail(d.DetectionID)
+		if err != nil {
+			return err
 		}
+		evidence = ev
 	}
 	mode := p.Mode()
 	_, decision, risk := policy.Evaluate(RiskScore(d.Severity, d.Category, d.Confidence))
@@ -278,14 +280,42 @@ func (p *PolicyEngine) processDetectionWithPolicy(d audit.RuntimeDetection, evid
 		WouldBlock:       decision == audit.RuntimeDecisionBlock,
 		CreatedAt:        time.Now().UTC(),
 	})
-	if err != nil || !isNew {
-		// Same verdict inside the dedup window: responses already
-		// dispatched, chain already recorded.
-		return
+	if err != nil {
+		return err
+	}
+	if !isNew && d.Attributes["enforcement_owner"] != "inspect" {
+		return nil
 	}
 
-	p.dispatchResponse(recorded, actionType, evidence)
+	if d.Attributes["enforcement_owner"] == "inspect" && recorded.Decision == audit.RuntimeDecisionBlock {
+		// The synchronous inspect decision owns prevention. Do not repeat
+		// network/process/tool enforcement from an observational finding.
+		status := audit.ResponseStatusWouldBlock
+		result := "observe mode: inspection risk recorded without enforcement"
+		if mode == audit.RuntimeSecurityModeAction {
+			status = audit.ResponseStatusPlanned
+			result = "inspection owns prevention; automatic dispatch suppressed, inspect mode and operation result remain authoritative"
+		}
+		responses, err := p.store.ListResponseActions(recorded.DecisionID)
+		if err != nil {
+			return err
+		}
+		found := false
+		for _, response := range responses {
+			if response.Executor == "inspect" {
+				found = true
+			}
+		}
+		if !found {
+			if _, err := p.store.RecordResponseAction(audit.ResponseActionInput{DecisionID: recorded.DecisionID, ActionType: "INSPECT_PREVENTION", Executor: "inspect", Status: status, Result: result, ExecutedAt: time.Now().UTC()}); err != nil {
+				return err
+			}
+		}
+	} else {
+		p.dispatchResponse(recorded, actionType, evidence)
+	}
 	p.recordAttackChain(recorded, evidence)
+	return nil
 }
 
 // dispatchResponse executes (action mode) or simulates (observe mode)

@@ -1,4 +1,4 @@
-# Copyright 2026 Cisco Systems, Inc. and its affiliates
+ # Copyright 2026 Cisco Systems, Inc. and its affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 from uuid import uuid4
-
+ 
 HOP_BY_HOP_HEADERS = {
     "connection",
     "keep-alive",
@@ -44,6 +44,10 @@ HOP_BY_HOP_HEADERS = {
     "transfer-encoding",
     "upgrade",
 }
+
+# Request-local operation metadata; no audit data is used to construct events.
+from contextvars import ContextVar
+_runtime_request = ContextVar("agentrange_runtime_request", default=None)
 
 MAX_FORWARD_BODY_BYTES = int(os.getenv("DC_MAX_FORWARD_BODY_BYTES", str(10 * 1024 * 1024)))
 MAX_INSPECT_TEXT_BYTES = int(os.getenv("DC_MAX_INSPECT_TEXT_BYTES", str(256 * 1024)))
@@ -117,6 +121,12 @@ def authed_request(url: str, payload: dict[str, Any], *, timeout: float) -> Requ
     request.add_header("Content-Type", "application/json")
     request.add_header("X-DefenseClaw-Client", "agentrange-sidecar")
     token = getenv("DC_GATEWAY_TOKEN") or getenv("DEFENSECLAW_GATEWAY_TOKEN")
+    state = _runtime_request.get()
+    if state:
+        context = state["context"]
+        request.add_header("X-DefenseClaw-Session-Id", context["session_id"])
+        request.add_header("X-DefenseClaw-Trace-Id", context["trace_id"])
+        request.add_header("X-Instance-Id", context["session_id"])
     if token:
         request.add_header("Authorization", f"Bearer {token}")
         request.add_header("X-DefenseClaw-Token", token)
@@ -126,11 +136,30 @@ def authed_request(url: str, payload: dict[str, Any], *, timeout: float) -> Requ
 
 
 def inspect_call(endpoint: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    state = _runtime_request.get()
+    if state:
+        context = dict(state["context"])
+        context["event_id"] = str(uuid4())
+        if endpoint.endswith("/tool"):
+            context["phase"] = "pre"
+            context["tool_name"] = str(payload.get("tool") or "")
+            context["operation"] = "tool.inspect"
+        elif endpoint.endswith("/tool-response"):
+            context["phase"] = "post"
+            context["tool_name"] = str(payload.get("tool") or "")
+        payload = dict(payload, runtime_context=context)
+        state["inspection_ids"].append(context["event_id"])
+        check = {"endpoint": endpoint, "payload": payload}
+        state["pending_checks"].append(check)
     url = f"{gateway_base()}{endpoint}"
     request = authed_request(url, payload, timeout=inspect_timeout())
     try:
         with urlopen(request, timeout=inspect_timeout()) as response:
             raw = response.read()
+            if response.headers.get("X-DefenseClaw-Runtime-Status") in {"failed", "unavailable"}:
+                sys.stderr.write("[runtime] inspection persistence/evaluation failed; see gateway log\n")
+            elif state:
+                state["pending_checks"].remove(check)
     except (HTTPError, URLError, TimeoutError, OSError) as exc:
         return None, str(exc)
     parsed = json_loads_maybe(raw)
@@ -188,6 +217,11 @@ def emit_audit_event(
         "session_id": session_id,
         "trace_id": trace_id,
         "stage": stage,
+        "call_id": (_runtime_request.get() or {}).get("context", {}).get("call_id", ""),
+        "inspection_event_ids": (_runtime_request.get() or {}).get("inspection_ids", []),
+        "raw_action": (verdict or {}).get("raw_action", ""),
+        "mode": (verdict or {}).get("mode", ""),
+        "would_block": (verdict or {}).get("would_block", False),
         "source": meta.get("source", ""),
         "destination": meta.get("destination", ""),
         "actor": "defenseclaw-agentrange-sidecar",
@@ -225,8 +259,38 @@ def emit_audit_event(
         request = authed_request(f"{gateway_base()}/audit/event", payload, timeout=inspect_timeout())
         with urlopen(request, timeout=inspect_timeout()):
             pass
-    except (HTTPError, URLError, TimeoutError, OSError):
+    except (HTTPError, URLError, TimeoutError, OSError) as exc:
+        sys.stderr.write(f"[audit] delivery failed: {type(exc).__name__}\n")
         return
+
+
+def emit_runtime_result(outcome: str, status: int = 0) -> None:
+    state = _runtime_request.get()
+    if not state:
+        return
+    context = dict(state["context"], phase="result", event_id=state["result_id"])
+    payload = {"runtime_context": context, "outcome": outcome,
+               "http_status": status, "inspection_event_ids": state["inspection_ids"]}
+    # Result delivery is independent of audit and happens after response delivery.
+    # Two attempts reuse the same event id; failures are visible, never silent.
+    for attempt in range(2):
+        try:
+            # Retry failed check persistence after response delivery, with the
+            # same original payload/id. Payloads stay request-local in memory;
+            # no raw input is written to an outbox or audit-derived event.
+            for check in list(state["pending_checks"]):
+                request = authed_request(f"{gateway_base()}{check['endpoint']}", check["payload"], timeout=1)
+                with urlopen(request, timeout=1) as response:
+                    response.read()
+                    if response.headers.get("X-DefenseClaw-Runtime-Status") in {"failed", "unavailable"}:
+                        raise OSError("runtime persistence unavailable")
+                state["pending_checks"].remove(check)
+            request = authed_request(f"{gateway_base()}/api/v1/runtime-results", payload, timeout=1)
+            with urlopen(request, timeout=1) as response:
+                response.read()
+            return
+        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+            sys.stderr.write(f"[runtime] result delivery attempt={attempt + 1} failed: {type(exc).__name__}\n")
 
 
 def inspect_request(content: str, session_id: str, model: str = "") -> tuple[dict[str, Any] | None, str | None]:
@@ -436,6 +500,13 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
         sys.stderr.write(f"[{timestamp}] {fmt % args}\n")
 
     def handle_proxy(self) -> None:
+        token = _runtime_request.set(None)
+        try:
+            self._handle_proxy()
+        finally:
+            _runtime_request.reset(token)
+
+    def _handle_proxy(self) -> None:
         session_id = extract_session(self.headers)
         trace_id = extract_trace(self.headers)
         self._trace_id = trace_id
@@ -450,6 +521,17 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
             return
 
         meta = request_event_meta(self, body, target_url)
+        _runtime_request.set({
+            "context": {
+                "connector": connector_name(), "session_id": session_id, "trace_id": trace_id,
+                "call_id": str(uuid4()), "event_id": str(uuid4()), "phase": "pre",
+                "proxy_kind": getenv("DC_PROXY_KIND"), "operation": "http.request",
+                "tool_name": meta.get("tool_name", ""), "mcp_server": meta.get("mcp_server", ""),
+                "http_method": self.command, "http_path": self.path.split("?", 1)[0],
+                "target": str(meta.get("target") or getenv("DC_PROXY_KIND")),
+            },
+            "result_id": str(uuid4()), "inspection_ids": [], "pending_checks": [],
+        })
         started = time.monotonic()
         verdict, inspect_error = self._pre_inspect(session_id, body)
         emit_audit_event(
@@ -472,9 +554,11 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
                 latency_ms=int((time.monotonic() - started) * 1000),
             )
             self._send_block(verdict, inspect_error, phase="pre")
+            emit_runtime_result("rejected")
             return
 
         status, headers, response_body = self._forward(target_url, body)
+        _runtime_request.get()["context"]["phase"] = "post"
         post_started = time.monotonic()
         post_verdict, post_error = self._post_inspect(session_id, response_body, status)
         emit_audit_event(
@@ -499,9 +583,11 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
                 response_body=response_body,
             )
             self._send_block(post_verdict, post_error, phase="post")
+            emit_runtime_result("response_blocked", status)
             return
 
         self._send(status, headers, response_body)
+        emit_runtime_result("forward_failed" if getattr(self, "_forward_failed", False) else "response_received", status)
 
     def _read_body(self) -> bytes | None:
         length_raw = self.headers.get("Content-Length") or "0"
@@ -562,12 +648,16 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
 
     def _forward(self, target_url: str, body: bytes) -> tuple[int, list[tuple[str, str]], bytes]:
         self._last_request_body = body
+        self._forward_failed = False
         request_body = body if body or self.command not in {"GET", "HEAD"} else None
         request = Request(target_url, data=request_body, method=self.command)
         for key, value in self.headers.items():
             if key.lower() in HOP_BY_HOP_HEADERS or key.lower() == "host":
                 continue
             request.add_header(key, value)
+        if _runtime_request.get():
+            request.add_header("X-Instance-Id", _runtime_request.get()["context"]["session_id"])
+            request.add_header("X-DefenseClaw-Session-Id", _runtime_request.get()["context"]["session_id"])
         request.add_header("X-DefenseClaw-Trace-Id", getattr(self, "_trace_id", extract_trace(self.headers)))
         try:
             with urlopen(request, timeout=UPSTREAM_TIMEOUT_SECONDS) as response:
@@ -577,6 +667,7 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
             headers = [(key, value) for key, value in exc.headers.items()]
             return exc.code, headers, exc.read()
         except (URLError, TimeoutError, OSError) as exc:
+            self._forward_failed = True
             return response_json(HTTPStatus.BAD_GATEWAY, {"error": f"upstream unavailable: {exc}"})
 
     def _send_block(self, verdict: dict[str, Any] | None, error: str | None, *, phase: str) -> None:

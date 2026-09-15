@@ -6,7 +6,6 @@ import {
   ensureGatewayReady,
   getAgents,
   getChanges,
-  getAgentTrace,
   getAttackChains,
   getEnvironment,
   getGatewayAudit,
@@ -26,6 +25,7 @@ import {
   saveStaticResourceScanSettings,
   setGatewayRunning,
   setRangeRunning,
+  saveRangeRoot,
   startRangeReplay,
   stopRangeReplay,
   uninstallProcessGuard,
@@ -45,7 +45,8 @@ import { RangePage } from "./pages/RangePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { StaticAssetsPage } from "./pages/StaticAssetsPage";
 import { TracePage } from "./pages/TracePage";
-import type { AgentInventory, AgentSnapshot, AgentTraceSnapshot, AttackChainSnapshot, EnvironmentSnapshot, GatewayAuditSnapshot, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus, ScanScheduleSettings, ScanTaskKey, StaticResourceScanSettings } from "./types";
+import { AuditEventsPage } from "./pages/AuditEventsPage";
+import type { AgentInventory, AgentSnapshot, AttackChainSnapshot, EnvironmentSnapshot, GatewayAuditSnapshot, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus, ScanScheduleSettings, ScanTaskKey, StaticResourceScanSettings } from "./types";
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title } = Typography;
@@ -63,7 +64,6 @@ export default function App() {
   const [replayCommand, setReplayCommand] = useState(defaultReplayCommand);
   const [replayStatus, setReplayStatus] = useState<RangeReplayStatus>();
   const [audit, setAudit] = useState<GuardAuditSnapshot>();
-  const [trace, setTrace] = useState<AgentTraceSnapshot>();
   const [gatewayAudit, setGatewayAudit] = useState<GatewayAuditSnapshot>();
   const [attackChains, setAttackChains] = useState<AttackChainSnapshot>();
   const [scanSettings, setScanSettings] = useState<ScanScheduleSettings>();
@@ -76,6 +76,9 @@ export default function App() {
   const [replayBusy, setReplayBusy] = useState(false);
   const [staticRefreshTick, setStaticRefreshTick] = useState(0);
   const [eventRefreshTick, setEventRefreshTick] = useState(0);
+  const [traceRefreshTick, setTraceRefreshTick] = useState(0);
+  const [auditRefreshTick, setAuditRefreshTick] = useState(0);
+  const [traceFocusId, setTraceFocusId] = useState<string>();
   const [gatewayBootState, setGatewayBootState] = useState<"starting" | "ready" | "failed">("starting");
   const [gatewayBootError, setGatewayBootError] = useState("");
   const [gatewayStartup, setGatewayStartup] = useState<"auto" | "manual" | "disabled">(() => {
@@ -156,7 +159,7 @@ export default function App() {
         return;
       }
       case "behaviorTrace":
-        setTrace(await getAgentTrace());
+        setTraceRefreshTick((tick) => tick + 1);
         return;
       case "processGuardAudit":
         setAudit(await getProcessGuardAudit());
@@ -189,7 +192,7 @@ export default function App() {
 
   const refresh = async () => {
     setLoading(true);
-    const results = await Promise.allSettled([getEnvironment(), getAgents(), getGuardPolicy(), getRangeStatus(), getProcessGuardAudit(), getAgentTrace(), getGatewayAudit(), getRangeReplayStatus(), getStaticResourceAgents(), getAttackChains()]);
+    const results = await Promise.allSettled([getEnvironment(), getAgents(), getGuardPolicy(), getRangeStatus(), getProcessGuardAudit(), getGatewayAudit(), getRangeReplayStatus(), getStaticResourceAgents(), getAttackChains()]);
     if (results[0].status === "fulfilled") setEnvironment(results[0].value);
     if (results[1].status === "fulfilled") {
       applyAgentSnapshot(results[1].value);
@@ -200,10 +203,11 @@ export default function App() {
       setDefenseMode(results[3].value.mode ?? "baseline");
     }
     if (results[4].status === "fulfilled") setAudit(results[4].value);
-    if (results[5].status === "fulfilled") setTrace(results[5].value);
-    if (results[6].status === "fulfilled") setGatewayAudit(results[6].value);
-    if (results[7].status === "fulfilled") setReplayStatus(results[7].value);
-    if (results[9].status === "fulfilled") setAttackChains(results[9].value);
+    if (results[5].status === "fulfilled") setGatewayAudit(results[5].value);
+    if (results[6].status === "fulfilled") setReplayStatus(results[6].value);
+    if (results[8].status === "fulfilled") setAttackChains(results[8].value);
+    if (active === "trace") setTraceRefreshTick((tick) => tick + 1);
+    if (active === "auditEvents") setAuditRefreshTick((tick) => tick + 1);
     setLoading(false);
   };
 
@@ -328,8 +332,6 @@ export default function App() {
   const guardEvents = useMemo(() => [...(audit?.events ?? [])].reverse(), [audit]);
   const commandEvents = useMemo(() => guardEvents.filter((event) => event.eventType === "agent-command-rule-matched"), [guardEvents]);
   const terminatedCount = commandEvents.filter((event) => event.outcome === "terminated").length;
-  const traceEvents = trace?.events ?? [];
-  const fileTraceCount = traceEvents.filter((event) => event.eventType.startsWith("file") || event.eventType === "blacklistFileAccess").length;
 
   const updateBlacklist = (id: string, patch: Partial<GuardPolicy["fileGuard"]["blacklist"][number]>, save = false) => {
     if (!policy) return;
@@ -447,6 +449,25 @@ export default function App() {
     }
   };
 
+  const configureRange = async (root: string, start: boolean) => {
+    setLoading(true);
+    try {
+      const configured = await saveRangeRoot(root.trim());
+      setRangeStatus(configured);
+      if (start) {
+        const status = await setRangeRunning(true);
+        setRangeStatus(status);
+        message.success("靶场路径已保存，AgentRange 已启动");
+      } else {
+        message.success("靶场路径已保存");
+      }
+    } catch (error) {
+      message.error(`靶场配置或启动失败：${String(error)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fillReplayScenario = (scenario: string) => {
     setReplayCommand(replayCommandForScenario(scenario));
   };
@@ -512,6 +533,7 @@ export default function App() {
             replayRemaining={replayRemaining}
             replayPercent={replayPercent}
             onChangeRangeState={(running) => void changeRangeState(running)}
+            onConfigureRange={(root, start) => void configureRange(root, start)}
             onReplayCommandChange={setReplayCommand}
             onFillReplayScenario={fillReplayScenario}
             onStartReplay={(command) => void startReplay(command)}
@@ -531,7 +553,9 @@ export default function App() {
           onRefreshData={refresh}
         />;
       case "trace":
-        return <TracePage trace={trace} events={traceEvents} fileTraceCount={fileTraceCount} />;
+        return <TracePage refreshNonce={traceRefreshTick} focusTraceId={traceFocusId} />;
+      case "auditEvents":
+        return <AuditEventsPage refreshNonce={auditRefreshTick} onOpenTrace={(traceId) => { setTraceFocusId(traceId); setActive("trace"); }} />;
       case "staticAssets":
         return <StaticAssetsPage loading={loading} refreshNonce={staticRefreshTick} onRefresh={() => refreshTask("staticAssets")} />;
       case "events":
@@ -622,6 +646,7 @@ export default function App() {
               <Tag color={defenseModeColors[defenseMode]}>{defenseModeLabels[defenseMode]}</Tag>
               <Text type="secondary" className="global-mode-detail">{defenseModeDescriptions[defenseMode]}</Text>
             </div>
+            {/* <Tooltip title="自动刷新间隔可在系统设置中按任务配置"><Button icon={<ReloadOutlined spin={loading || gatewayBootState === "starting"} />} disabled={gatewayBootState !== "ready"} onClick={() => void refresh()}>刷新状态</Button></Tooltip> */}
             <Tooltip title="自动刷新间隔可在系统设置中按任务配置"><Button icon={<ReloadOutlined spin={loading || gatewayBootState === "starting"} />} disabled={gatewayBootState !== "ready"} onClick={() => void refresh()}>刷新状态</Button></Tooltip>
           </div>
         </Header>

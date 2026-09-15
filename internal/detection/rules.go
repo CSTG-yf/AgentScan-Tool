@@ -24,6 +24,7 @@ const RuleVersion = "runtime-rules-v1"
 func DefaultRules() []Rule {
 	return []Rule{
 		// Atomic detections.
+		NewInspectFindingsRule(),
 		NewPromptInjectionRule(),
 		NewCredentialAccessRule(),
 		NewSensitiveFileRule(),

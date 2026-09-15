@@ -841,7 +841,10 @@ func (a *APIServer) Run(ctx context.Context) error {
 	// through which pipeline" query over behavior_events.
 	mux.HandleFunc("/api/v1/runtime-events/timeline", a.handleRuntimeEventsTimeline)
 	mux.HandleFunc("/api/v1/runtime-events", a.handleRuntimeEvents)
+	mux.HandleFunc("/api/v1/runtime-results", a.handleInspectRuntimeResult)
 	mux.HandleFunc("/api/v1/runtime-events/", a.handleRuntimeEvents)
+	mux.HandleFunc("/api/v1/audit-events", a.handleAuditEvents)
+	mux.HandleFunc("/api/v1/audit-events/", a.handleAuditEvents)
 	mux.HandleFunc("/api/v1/runtime-sessions", a.handleRuntimeSessions)
 	mux.HandleFunc("/api/v1/runtime-security/summary", a.handleRuntimeSecuritySummary)
 	// AgentType rollup for the anomaly-detection page. The grouped response

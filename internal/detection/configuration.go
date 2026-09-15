@@ -81,6 +81,7 @@ func builtinConfiguration(rules []Rule) []audit.RuntimeDetectionRule {
 		kind, category, severity string
 		confidence               float64
 	}{
+		"inspect-findings":              {"inspection_risk", "suspicious", "MEDIUM", .8},
 		"prompt-injection":              {"prompt_injection", "attack", "HIGH", .9},
 		"credential-access":             {"credential_access", "attack", "HIGH", .85},
 		"sensitive-file":                {"sensitive_file_access", "suspicious", "MEDIUM", .7},

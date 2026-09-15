@@ -714,6 +714,19 @@ func (a *APIServer) handleRuntimeEvents(w http.ResponseWriter, r *http.Request) 
 	}
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/runtime-events"), "/")
 	if rest != "" {
+		if r.Method == http.MethodGet {
+			switch rest {
+			case "summary":
+				a.handleRuntimeEventsSummary(w, r)
+				return
+			case "agents":
+				a.handleRuntimeEventsAgents(w, r)
+				return
+			case "facets":
+				a.handleRuntimeEventsFacets(w, r)
+				return
+			}
+		}
 		if rest == "batch" {
 			if r.Method != http.MethodPost {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -845,7 +858,7 @@ func runtimeTimelineCategory(event audit.BehaviorEvent) string {
 
 func (a *APIServer) handleRuntimeEventsGet(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	page, pageSize := requestPage(r, 1, 300, 2000)
+	page, pageSize := requestPage(r, 1, 20, 2000)
 	limit := pageSize
 	if v := strings.TrimSpace(q.Get("limit")); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 2000 {
@@ -858,27 +871,13 @@ func (a *APIServer) handleRuntimeEventsGet(w http.ResponseWriter, r *http.Reques
 			offset = parsed
 		}
 	}
-	var pid uint32
-	if v := strings.TrimSpace(q.Get("pid")); v != "" {
-		if parsed, err := strconv.ParseUint(v, 10, 32); err == nil {
-			pid = uint32(parsed)
-		}
+	filter, err := runtimeEventFilterFromRequest(r)
+	if err != nil {
+		a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
-	filter := audit.RuntimeEventFilter{
-		AgentID:       strings.TrimSpace(q.Get("agent_id")),
-		SessionID:     strings.TrimSpace(q.Get("session_id")),
-		TraceID:       strings.TrimSpace(q.Get("trace_id")),
-		EventType:     strings.TrimSpace(q.Get("event_type")),
-		EventCategory: strings.TrimSpace(q.Get("event_category")),
-		EventSource:   strings.TrimSpace(q.Get("source")),
-		Severity:      strings.ToUpper(strings.TrimSpace(q.Get("severity"))),
-		PID:           pid,
-		Keyword:       strings.TrimSpace(q.Get("keyword")),
-		Since:         parseAPITime(q.Get("start_time")),
-		Until:         parseAPITime(q.Get("end_time")),
-		Limit:         limit,
-		Offset:        offset,
-	}
+	filter.Limit = limit
+	filter.Offset = offset
 	events, err := a.store.ListRuntimeEvents(filter)
 	if err != nil {
 		a.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -1351,6 +1350,12 @@ func (a *APIServer) handleRuntimeDecisions(w http.ResponseWriter, r *http.Reques
 	var evidence []audit.DetectionEvidence
 	if decision.DetectionID != "" {
 		detection, evidence, _ = a.store.GetRuntimeDetectionDetail(decision.DetectionID)
+	}
+	if responses == nil {
+		responses = []audit.ResponseAction{}
+	}
+	if evidence == nil {
+		evidence = []audit.DetectionEvidence{}
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{
 		"decision":  decision,

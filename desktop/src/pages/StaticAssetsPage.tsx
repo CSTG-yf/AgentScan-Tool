@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CopyOutlined, DownloadOutlined, EyeOutlined, FileTextOutlined, FolderOpenOutlined, ReloadOutlined, SearchOutlined, SecurityScanOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Descriptions, Drawer, Dropdown, Empty, Input, List, message, Modal, Select, Space, Spin, Table, Tabs, Tag, Tooltip, Typography } from "antd";
+import { theme, ConfigProvider, Alert, Button, Card, Descriptions, Drawer, Dropdown, Empty, Input, List, message, Modal, Select, Space, Spin, Table, Tabs, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { staticRiskTag } from "../app/display";
 import { staticRiskMeta, staticTypeMeta } from "../data/staticAssets";
@@ -30,6 +30,22 @@ import type {
 } from "../types";
 
 const { Text, Title } = Typography;
+
+const detectionTheme = {
+  algorithm: theme.defaultAlgorithm,
+  token: {
+    colorPrimary: "#2563eb",
+    colorBgContainer: "#ffffff",
+    colorBgElevated: "#ffffff",
+    colorText: "#14213a",
+    colorTextSecondary: "#475467",
+    colorTextPlaceholder: "#667085",
+    colorBorder: "#d9e1ee",
+    colorBorderSecondary: "#e7ebf3",
+    borderRadius: 8,
+  },
+};
+
 
 const PAGE_SIZE = 20;
 
@@ -381,6 +397,12 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
     () => agents.find((agent) => agent.agent_id === selectedAgentId),
     [agents, selectedAgentId],
   );
+  const globalResources = useMemo(() => agents.reduce((totals, agent) => ({
+    resources: totals.resources + agent.resource_count,
+    risks: totals.risks + agent.risk_resource_count,
+    critical: totals.critical + agent.critical_resource_count,
+  }), { resources: 0, risks: 0, critical: 0 }), [agents]);
+  const currentSummary = summary?.agent.agent_id === selectedAgentId ? summary : undefined;
 
   const refreshListAndSummary = useCallback(async () => {
     if (selectedAgentId) {
@@ -688,6 +710,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
   const renderStatusCell = (resource: StaticResourceListItem | StaticResourceDetailResponse) => (
     <span className="static-status-cell" onClick={(event) => event.stopPropagation()}>
       <Dropdown
+          overlayClassName="static-detection-filter-menu"
         trigger={["click"]}
         menu={{
           items: MANUAL_STATUS_OPTIONS.map((option) => ({
@@ -750,7 +773,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
   ];
 
   const typeCards = useMemo(() => {
-    const byType = new Map(summary?.by_type?.map((item) => [item.resource_type, item]) ?? []);
+    const byType = new Map(currentSummary?.by_type?.map((item) => [item.resource_type, item]) ?? []);
     return ALL_TYPES.map((apiType) => {
       const item = byType.get(apiType);
       return {
@@ -761,21 +784,21 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
         malicious: item?.malicious_count ?? 0,
       };
     });
-  }, [summary]);
+  }, [currentSummary]);
 
   const selectedTypeLabel =
     selectedType === "all" ? "全部资源" : staticTypeMeta[(API_TYPE_TO_DISPLAY[selectedType] ?? "Config") as keyof typeof staticTypeMeta]?.label ?? selectedType;
 
-  const summaryHeader = summary ?? {
-    total_resources: listTotal,
+  const summaryHeader = currentSummary ?? {
+    total_resources: selectedAgent?.resource_count ?? 0,
     resource_type_count: typeCards.filter((card) => card.count > 0).length,
-    risk_resource_count: 0,
-    malicious_resource_count: 0,
-    critical_resource_count: 0,
+    risk_resource_count: selectedAgent?.risk_resource_count ?? 0,
+    malicious_resource_count: selectedAgent?.malicious_resource_count ?? 0,
+    critical_resource_count: selectedAgent?.critical_resource_count ?? 0,
   };
 
   return (
-    <section className="static-assets-page">
+    <ConfigProvider theme={detectionTheme}><section className="static-assets-page static-detection-surface">
       <div className="static-page-header">
         <div>
           <Text className="eyebrow">STATIC ASSET INVENTORY</Text>
@@ -798,10 +821,10 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
             disabled={!selectedAgentId}
             onClick={() => void handleRescanAgent()}
           >
-            重新扫描 Agent
+            重新扫描 Agent资源
           </Button>
           <Button icon={<ReloadOutlined />} loading={agentsLoading || listLoading} onClick={() => void handleRefresh()}>
-            刷新结果
+            刷新Agent资源
           </Button>
         </div>
       </div>
@@ -811,26 +834,21 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
       ) : null}
       {agentsError ? <Alert type="error" showIcon message={agentsError} /> : null}
 
-      <div className="static-summary-grid">
+      <div className="static-summary-grid static-global-summary">
         <Card bordered={false} className="static-metric-card">
-          <Text type="secondary">系统内 Agent</Text>
-          <div className="static-metric-value"><span>{agents.length}</span><small>Agents</small></div>
-          <Text>来自后端 Agent 发现与资源归属</Text>
-        </Card>
-        <Card bordered={false} className="static-metric-card">
-          <Text type="secondary">当前 Agent 资源</Text>
-          <div className="static-metric-value resource"><span>{summaryHeader.total_resources}</span><small>Resources</small></div>
-          <Text>{summaryHeader.resource_type_count} 种资源类型</Text>
+          <Text type="secondary">全部资源</Text>
+          <div className="static-metric-value resource"><span>{agentsLoading || agentsError ? "—" : globalResources.resources}</span></div>
+          <Text type="secondary">所有 Agent 总体统计</Text>
         </Card>
         <Card bordered={false} className="static-metric-card static-metric-card-risk">
           <Text type="secondary">风险资源数量</Text>
-          <div className="static-metric-value warning"><span>{summaryHeader.risk_resource_count}</span><small>Risks</small></div>
-          <Text>中风险及以上资源需要复核</Text>
+          <div className="static-metric-value warning"><span>{agentsLoading || agentsError ? "—" : globalResources.risks}</span></div>
+          <Text type="secondary">所有 Agent 的中危及以上资源</Text>
         </Card>
         <Card bordered={false} className="static-metric-card static-metric-card-critical">
           <Text type="secondary">严重风险数量</Text>
-          <div className="static-metric-value danger"><span>{summaryHeader.critical_resource_count}</span><small>Critical</small></div>
-          <Text>恶意资源 {summaryHeader.malicious_resource_count} 个</Text>
+          <div className="static-metric-value danger"><span>{agentsLoading || agentsError ? "—" : globalResources.critical}</span></div>
+          <Text type="secondary">所有 Agent 的严重风险资源</Text>
         </Card>
       </div>
 
@@ -864,16 +882,16 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
         <main className="static-resource-panel">
           {selectedAgent ? (
             <>
-              <div className="static-agent-context">
-                <div>
+              <div className="static-agent-context static-current-summary">
+                <div className="static-current-heading">
                   <Title level={3}>{selectedAgent.name}</Title>
-                  <Text type="secondary">
-                    {summaryHeader.total_resources} Resources · {summaryHeader.resource_type_count} Types · {summaryHeader.risk_resource_count} Risks
-                    {summaryHeader.critical_resource_count ? ` · ${summaryHeader.critical_resource_count} Critical` : ""}
-                    {summaryHeader.malicious_resource_count ? ` · ${summaryHeader.malicious_resource_count} Malicious` : ""}
-                  </Text>
+                  <Text className="mono static-agent-path">{selectedAgent.agent_id}</Text>
                 </div>
-                <Text className="mono static-agent-path">{selectedAgent.agent_id}</Text>
+                <div className="static-current-metrics">
+                  <div><Text type="secondary">资源数</Text><strong>{summaryHeader.total_resources}</strong></div>
+                  <div className="risk"><Text type="secondary">风险资源数</Text><strong>{summaryHeader.risk_resource_count}</strong></div>
+                  <div className="critical"><Text type="secondary">严重风险数</Text><strong>{summaryHeader.critical_resource_count}</strong></div>
+                </div>
               </div>
 
               <div className="static-type-grid">
@@ -910,6 +928,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
                     onChange={(event) => setQuery(event.target.value)}
                   />
                   <Select
+              classNames={{ popup: { root: "static-detection-filter-popup" } }}
                     value={selectedType}
                     onChange={(value) => setSelectedType(value as TypeFilter)}
                     options={[
@@ -921,6 +940,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
                     ]}
                   />
                   <Select
+              classNames={{ popup: { root: "static-detection-filter-popup" } }}
                     value={riskFilter}
                     onChange={(value) => setRiskFilter(value as RiskFilter)}
                     options={[
@@ -929,6 +949,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
                     ]}
                   />
                   <Select
+              classNames={{ popup: { root: "static-detection-filter-popup" } }}
                     value={statusFilter}
                     onChange={(value) => setStatusFilter(value as StatusFilter)}
                     options={[
@@ -983,7 +1004,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
       </div>
 
       <Drawer
-        className="static-detail-drawer"
+        className="static-detail-drawer static-detection-detail-drawer static-detection-surface"
         width={520}
         open={resourceDetailOpen}
         onClose={() => {
@@ -1187,6 +1208,6 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
           <Text className="mono static-detail-path" copyable>{revealPath}</Text>
         </Space>
       </Modal>
-    </section>
+    </section></ConfigProvider>
   );
 }

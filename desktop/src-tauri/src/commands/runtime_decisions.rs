@@ -2,6 +2,41 @@ use serde::{Deserialize, Serialize};
 
 use crate::commands::events::RuntimeDetection;
 
+fn null_to_empty<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+#[cfg(test)]
+mod collection_tests {
+    use super::RuntimeDecisionDetail;
+
+    #[test]
+    fn decision_detail_accepts_null_missing_and_array_collections() {
+        for input in [
+            r#"{"responses":null,"evidence":null}"#,
+            r#"{}"#,
+            r#"{"responses":[],"evidence":[]}"#,
+        ] {
+            let detail: RuntimeDecisionDetail = serde_json::from_str(input).unwrap();
+            assert!(detail.responses.is_empty());
+            assert!(detail.evidence.is_empty());
+        }
+        let detail: RuntimeDecisionDetail = serde_json::from_str(
+            r#"{"responses":[{"response_id":"r1"}],"evidence":[{"event_id":42}]}"#,
+        )
+        .unwrap();
+        assert_eq!(detail.responses[0].response_id, "r1");
+        assert_eq!(detail.evidence[0].event_id, 42);
+        assert!(
+            serde_json::from_str::<RuntimeDecisionDetail>(r#"{"responses":"invalid"}"#).is_err()
+        );
+    }
+}
+
 /// Phase-3 unified policy decision (runtime_decisions row). The Go
 /// gateway sends snake_case keys; aliases accept those while the
 /// frontend receives camelCase.
@@ -154,11 +189,11 @@ pub struct DecisionEvidenceEvent {
 pub struct RuntimeDecisionDetail {
     #[serde(default)]
     pub(crate) decision: RuntimeDecision,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_empty")]
     pub(crate) responses: Vec<RuntimeResponseAction>,
     #[serde(default)]
     pub(crate) detection: RuntimeDetection,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_empty")]
     pub(crate) evidence: Vec<DecisionEvidenceEvent>,
 }
 
@@ -192,7 +227,7 @@ pub fn get_runtime_decisions(
         path.push_str(&format!("&detection_id={}", urlencode(id.trim())));
     }
     crate::commands::gateway_api::get_json::<RuntimeDecisionListResponse>(&app, &path)
-        .map_err(|error| format!("Go Gateway 暂不可用，运行时决策只能由 Go 后端提供：{error}"))
+        .map_err(|error| format!("加载运行时决策列表失败：{error}"))
 }
 
 #[tauri::command]
@@ -207,7 +242,7 @@ pub fn get_runtime_decision_detail(
         &app,
         &format!("/api/v1/runtime-decisions/{}", decision_id.trim()),
     )
-    .map_err(|error| format!("Go Gateway 暂不可用，运行时决策只能由 Go 后端提供：{error}"))
+    .map_err(|error| format!("加载运行时决策详情失败：{error}"))
 }
 
 #[tauri::command]

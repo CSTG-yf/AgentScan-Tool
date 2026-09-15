@@ -191,8 +191,20 @@ LIMIT 1`,
 		if in.Confidence > confidence {
 			confidence = in.Confidence
 		}
-		if len(in.Evidence) > 0 {
-			eventCount += len(in.Evidence)
+		// A retry after a partial evaluation must not inflate evidence counts.
+		if err := s.db.QueryRowContext(context.Background(), `SELECT COUNT(DISTINCT event_id) FROM runtime_detection_events WHERE detection_id=?`, existingID).Scan(&eventCount); err != nil {
+			return RuntimeDetection{}, err
+		}
+		newEvidence := map[int64]bool{}
+		for _, ev := range in.Evidence {
+			var count int
+			if err := s.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM runtime_detection_events WHERE detection_id=? AND event_id=?`, existingID, ev.EventID).Scan(&count); err != nil {
+				return RuntimeDetection{}, err
+			}
+			if count == 0 && ev.EventID > 0 && !newEvidence[ev.EventID] {
+				eventCount++
+				newEvidence[ev.EventID] = true
+			}
 		}
 		if _, err := s.execDB(context.Background(), "runtime_detection_update", `
 UPDATE runtime_detections
@@ -215,7 +227,9 @@ WHERE detection_id = ?`,
 		); err != nil {
 			return RuntimeDetection{}, err
 		}
-		s.linkDetectionEvidence(existingID, in.Evidence, in.SeenAt)
+		if err := s.linkDetectionEvidence(existingID, in.Evidence, in.SeenAt); err != nil {
+			return RuntimeDetection{}, err
+		}
 		d := in.toDetection(existingID)
 		d.Severity = newSeverity
 		d.FirstSeenAt = parseTimeOrDefault(firstSeen, in.SeenAt)
@@ -250,7 +264,9 @@ INSERT INTO runtime_detections (
 	); err != nil {
 		return RuntimeDetection{}, err
 	}
-	s.linkDetectionEvidence(detectionID, in.Evidence, in.SeenAt)
+	if err := s.linkDetectionEvidence(detectionID, in.Evidence, in.SeenAt); err != nil {
+		return RuntimeDetection{}, err
+	}
 	d := in.toDetection(detectionID)
 	return d, nil
 }
@@ -277,9 +293,9 @@ func (in RuntimeDetectionInput) detectionStatusFromEvidence(fallback string) str
 
 // linkDetectionEvidence appends evidence links. Duplicates are ignored
 // so re-firing rules never double-link the same event.
-func (s *Store) linkDetectionEvidence(detectionID string, evidence []DetectionEvidenceInput, seenAt time.Time) {
+func (s *Store) linkDetectionEvidence(detectionID string, evidence []DetectionEvidenceInput, seenAt time.Time) error {
 	if len(evidence) == 0 {
-		return
+		return nil
 	}
 	linkedAt := seenAt.UTC().Format(time.RFC3339Nano)
 	for _, ev := range evidence {
@@ -289,12 +305,16 @@ func (s *Store) linkDetectionEvidence(detectionID string, evidence []DetectionEv
 		if ev.Role == "" {
 			ev.Role = DetectionRoleSupporting
 		}
-		_, _ = s.execDB(context.Background(), "runtime_detection_event_link", `
+		_, err := s.execDB(context.Background(), "runtime_detection_event_link", `
 INSERT OR IGNORE INTO runtime_detection_events (detection_id, event_id, role, sequence, linked_at)
 VALUES (?, ?, ?, ?, ?)`,
 			detectionID, ev.EventID, ev.Role, ev.Sequence, linkedAt,
 		)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (in RuntimeDetectionInput) toDetection(detectionID string) RuntimeDetection {
