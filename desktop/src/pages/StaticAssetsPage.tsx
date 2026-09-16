@@ -260,6 +260,9 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
   const [selectedType, setSelectedType] = useState<TypeFilter>("all");
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [exportAgentType, setExportAgentType] = useState("all");
+  const [exportStartTime, setExportStartTime] = useState("");
+  const [exportEndTime, setExportEndTime] = useState("");
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -623,21 +626,24 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
     [inTauri],
   );
 
-  const fetchAllResourcesForAgent = useCallback(async (agentId: string) => {
+  const fetchAllResourcesForAgent = useCallback(async (agentId: string, applyFilters = false) => {
     const pageSize = 200;
     let nextPage = 1;
     let total = Number.POSITIVE_INFINITY;
     const rows: StaticResourceListItem[] = [];
     while (rows.length < total) {
-      const response = await getStaticResources({ agentId, page: nextPage, pageSize });
+      const response = await getStaticResources({ agentId, resourceType: applyFilters && selectedType !== "all" ? DISPLAY_TYPE_TO_API[selectedType] : undefined, riskLevel: applyFilters && riskFilter !== "all" ? riskFilter : undefined, status: applyFilters && statusFilter !== "all" ? statusFilter : undefined, keyword: applyFilters ? debouncedQuery || undefined : undefined, page: nextPage, pageSize });
       const items = response.items ?? [];
       rows.push(...items);
       total = response.total ?? rows.length;
       if (!items.length || rows.length >= total) break;
       nextPage += 1;
     }
-    return rows;
-  }, []);
+    if (!applyFilters || (!exportStartTime && !exportEndTime)) return rows;
+    const start = exportStartTime ? new Date(exportStartTime).getTime() : Number.NEGATIVE_INFINITY;
+    const end = exportEndTime ? new Date(exportEndTime).getTime() : Number.POSITIVE_INFINITY;
+    return rows.filter(row => { const time = new Date(row.last_scan_at || row.updated_at).getTime(); return time >= start && time <= end; });
+  }, [debouncedQuery, exportEndTime, exportStartTime, riskFilter, selectedType, statusFilter]);
 
   const exportResourceSummary = async (resource: StaticResourceDetailResponse | StaticResourceListItem | undefined) => {
     if (!resource) return;
@@ -664,7 +670,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
     }
     setAgentReportExporting(true);
     try {
-      const resources = await fetchAllResourcesForAgent(selectedAgent.agent_id);
+      const resources = await fetchAllResourcesForAgent(selectedAgent.agent_id, true);
       const contentText = buildStaticResourcesReport([{ agent: selectedAgent, resources }]);
       const fileName = safeReportName(`${selectedAgent.name || selectedAgent.agent_id}-static-resources-${new Date().toISOString().slice(0, 10)}.md`);
       const path = await saveTextReport(contentText, fileName);
@@ -681,15 +687,16 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
   };
 
   const exportAllAgentResources = async () => {
-    if (!agents.length) {
+    const scopedAgents = exportAgentType === "all" ? agents : agents.filter(agent => agent.agent_type === exportAgentType);
+    if (!scopedAgents.length) {
       message.warning("当前没有可导出的 Agent 资源");
       return;
     }
     setAllReportExporting(true);
     try {
       const sections: Array<{ agent: StaticResourceAgentSummary; resources: StaticResourceListItem[] }> = [];
-      for (const agent of agents) {
-        const resources = await fetchAllResourcesForAgent(agent.agent_id);
+      for (const agent of scopedAgents) {
+        const resources = await fetchAllResourcesForAgent(agent.agent_id, true);
         sections.push({ agent, resources });
       }
       const contentText = buildStaticResourcesReport(sections);
@@ -806,6 +813,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
           <Text type="secondary">基于 Agent 资源规则发现并检测配置、技能、插件、MCP 服务、提示词、凭据与环境变量。</Text>
         </div>
         <div className="static-header-actions">
+          <Select value={exportAgentType} style={{ minWidth: 150 }} options={[{ value: "all", label: "全部 AgentType" }, ...[...new Set(agents.map(agent => agent.agent_type).filter(Boolean))].map(value => ({ value, label: value }))]} onChange={setExportAgentType} />
           <Button
             icon={<DownloadOutlined />}
             loading={allReportExporting}
@@ -939,6 +947,8 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
                       })),
                     ]}
                   />
+                  <Input aria-label="导出开始时间" type="datetime-local" title="导出开始时间" value={exportStartTime} onChange={event => setExportStartTime(event.target.value)} />
+                  <Input aria-label="导出结束时间" type="datetime-local" title="导出结束时间" value={exportEndTime} onChange={event => setExportEndTime(event.target.value)} />
                   <Select
               classNames={{ popup: { root: "static-detection-filter-popup" } }}
                     value={riskFilter}
@@ -971,7 +981,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
                         void exportCurrentAgentResources();
                       }}
                     >
-                      导出当前 Agent 资源
+                      导出筛选结果
                     </Button>
                   </Space>
                   <Text type="secondary">{listTotal} 项资源</Text>

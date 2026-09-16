@@ -4,6 +4,7 @@ import { Alert, Button, Card, ConfigProvider, Descriptions, Drawer, Empty, Input
 import { blockRuntimeDetection, createRuntimeEventReplay, exportPageReportPdf, getRuntimeDetectionAgentTypeSummaries, getRuntimeDetectionDetail, getRuntimeDetections, getRuntimeDecisions, getRuntimeDecisionDetail, getRuntimeSecurityAgents, getScanStatus } from "../bridge";
 import type { RuntimeDetection, RuntimeDetectionAgentTypeSummary, RuntimeDetectionDetail, RuntimeDetectionListQuery, RuntimeDecisionDetail, RuntimeEnforcementResult, RuntimeSecurityAgent } from "../types";
 import { formatTimestamp } from "../app/display";
+import { collectAllPages, exportTablePdf } from "../app/reportExport";
 
 const { Text, Title } = Typography;
 
@@ -126,9 +127,17 @@ export function EventsPage({ refreshNonce = 0 }: Props) {
     finally { setReplayBusy(false); }
   };
   const exportCurrentPage = async () => {
-    if (!rows.length) { message.warning("当前页没有可导出的异常事件"); return; }
+    if (!total) { message.warning("当前筛选条件下没有可导出的异常事件"); return; }
     setExportBusy(true);
     try {
+      const exportRows = await collectAllPages<RuntimeDetection>(async (page, pageSize) => {
+        const response = await getRuntimeDetections({ ...filters, page, pageSize });
+        return { items: response.items ?? response.detections ?? [], total: response.total };
+      });
+      const exportPath = await exportTablePdf({ title: "异常事件检测报告", fileName: `runtime-detections-${new Date().toISOString().slice(0, 10)}.pdf`, filters, columns: ["异常事件", "Agent", "AgentType", "类别", "风险", "状态", "来源", "最近发现", "Session", "Trace", "证据数"], rows: exportRows.map(row => [row.title || row.detectionType, row.agentName || row.agentId, agents.find(agent => agent.agentId === row.agentId)?.agentType, row.category, row.severity?.toUpperCase(), filterLabels[row.status] || row.status, row.source, formatTimestamp(row.lastSeenAt || row.createdAt || ""), row.sessionId, row.traceId, row.eventCount ?? 0]) });
+      if (exportPath) message.success(`PDF 已导出：${exportPath}`); else message.info("已取消导出");
+      return;
+      /* legacy current-page report retained below for layout reference */
       const filterEntries = Object.entries({ ...filters, page: paging.page, pageSize: paging.pageSize }).filter(([, value]) => value !== undefined && value !== "");
       const filterHtml = filterEntries.length
         ? filterEntries.map(([key, value]) => `<span class="filter"><b>${htmlEscape(key)}</b>: ${htmlEscape(value)}</span>`).join("")
@@ -158,7 +167,7 @@ export function EventsPage({ refreshNonce = 0 }: Props) {
   const record = detail?.detection;
   const info = record ? { "Detection ID": record.detectionId, "Agent 实例": `${record.agentName || detail?.agent?.name || ""} · ${record.agentId || detail?.agent?.agentId || "unknown"}`, "检测类型": record.detectionType, "规则 / 版本": `${record.ruleId || "—"} / ${record.ruleVersion || "—"}`, "来源": record.source || "—", "首次发现": formatTimestamp(record.firstSeenAt || ""), "最近发现": formatTimestamp(record.lastSeenAt || ""), "Session": record.sessionId || detail?.runtimeSession?.sessionId || "—", "Trace": record.traceId || detail?.trace?.traceId || "—", "置信度": record.confidence === undefined ? "—" : `${Math.round(record.confidence * 100)}%`, "处置建议": record.remediation || "—" } : {};
   return <ConfigProvider theme={{ algorithm: theme.defaultAlgorithm, token: { colorPrimary: "#1677ff", colorBgContainer: "#fff", colorText: "#16273e", colorTextSecondary: "#667085", colorTextPlaceholder: "#667085", colorBgElevated: "#ffffff", colorBorder: "#d9e1ee", borderRadius: 8 } }}><section className="event-page-workbench events-workbench">
-    <div className="event-page-workbench-heading"><div><Text className="eyebrow">ANOMALY DETECTION</Text><Title level={2}>异常事件检测</Title><Text type="secondary">追踪异常行为、核对证据与处置结果。</Text></div><Space wrap><Button icon={<DownloadOutlined />} loading={exportBusy} disabled={!rows.length} onClick={() => void exportCurrentPage()}>导出当前页</Button><Button loading={replayBusy} onClick={() => void rebuildDetections()}>重建检测结果</Button><Button icon={<ReloadOutlined />} loading={listBusy || summaryBusy} onClick={refresh}>刷新</Button></Space></div>
+    <div className="event-page-workbench-heading"><div><Text className="eyebrow">ANOMALY DETECTION</Text><Title level={2}>异常事件检测</Title><Text type="secondary">追踪异常行为、核对证据与处置结果。</Text></div><Space wrap><Button icon={<DownloadOutlined />} loading={exportBusy} disabled={!total} onClick={() => void exportCurrentPage()}>导出筛选结果</Button><Button loading={replayBusy} onClick={() => void rebuildDetections()}>重建检测结果</Button><Button icon={<ReloadOutlined />} loading={listBusy || summaryBusy} onClick={refresh}>刷新</Button></Space></div>
     {Object.entries(errors).filter(([, e]) => e).map(([key, e]) => <Alert key={key} type="error" showIcon title={e} action={<Button onClick={refresh}>重试</Button>} />)}
     <div className="event-page-workbench-metrics">{[["总异常事件", globalTotals.total], ["攻击事件", globalTotals.attack], ["高危及以上", globalTotals.high], ["高危及以上未解决", globalHighOpen]].map(([label, value], index) => <Card key={label} className={`event-page-workbench-metric metric-${index}`}><Text type="secondary">{label}</Text><strong>{globalReady ? value ?? "—" : "—"}</strong><Text type="secondary">所有 Agent 总体统计</Text></Card>)}</div>
     <div className="event-page-workbench-columns"><Card className="runtime-instance-list" title="Agents" extra={<Tag>{agents.length}</Tag>}><Input aria-label="搜索 Agent 实例" prefix={<SearchOutlined />} placeholder="搜索 Agent" value={agentSearch} onChange={e => setAgentSearch(e.target.value)} allowClear /><button type="button" className={!filters.agentId ? "selected" : ""} onClick={() => change({ agentId: undefined, agentTypeId: undefined })}><strong>全部 Agent 实例</strong></button>{agents.filter(a => `${a.agentName} ${a.agentId} ${a.agentType}`.toLowerCase().includes(agentSearch.toLowerCase())).map(a => <button type="button" key={a.agentId} className={filters.agentId === a.agentId ? "selected" : ""} onClick={() => change({ agentId: a.agentId, agentTypeId: undefined })}><strong>{a.agentName || a.agentId}</strong><span>{a.agentType}</span><code>{a.agentId}</code><div className="runtime-agent-counts"><Tag color="blue">{a.detectionCount} 个检测</Tag><Tag color={a.highOrAboveCount > 0 ? "red" : "default"}>高危 {a.highOrAboveCount}</Tag></div></button>)}{!agents.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 Agent 实例" />}</Card>

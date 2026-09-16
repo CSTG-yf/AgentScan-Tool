@@ -298,6 +298,7 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
   const [refreshing, setRefreshing] = useState(false);
   const [listRefreshing, setListRefreshing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [selectedExportIds, setSelectedExportIds] = useState<string[]>([]);
 
   const normalizedQuery = query.trim().toLowerCase();
   const filteredAgents = useMemo(() => {
@@ -522,8 +523,8 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
         </div>
         <div className="agent-header-actions">
           <Space>
-            <Button type="primary" icon={<DownloadOutlined />} loading={exporting} disabled={!agents.length} onClick={() => void exportReport(agents)}>
-              导出报告
+            <Button type="primary" icon={<DownloadOutlined />} loading={exporting} disabled={!selectedExportIds.length} onClick={() => void exportReport(agents.filter(agent => selectedExportIds.includes(agent.id)))}>
+              导出所选 Agent{selectedExportIds.length ? `（${selectedExportIds.length}）` : ""}
             </Button>
             <Tooltip title="重新读取数据库中的 Agent 列表，不执行扫描">
               <Button icon={<ReloadOutlined />} loading={listRefreshing} disabled={!onRefresh || loading || refreshing} onClick={() => void refreshAgentList()}>
@@ -646,6 +647,7 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
             loading={loading || refreshing || listRefreshing}
             columns={columns}
             dataSource={filteredAgents}
+            rowSelection={{ selectedRowKeys: selectedExportIds, preserveSelectedRowKeys: true, onChange: keys => setSelectedExportIds(keys.map(String)), onCell: () => ({ onClick: event => event.stopPropagation() }) }}
             pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `共 ${total} 条记录` }}
             locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前没有发现 Agent" /> }}
             scroll={{ x: 1320 }}

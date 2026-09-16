@@ -3,6 +3,7 @@ import { DownloadOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/ic
 import { Alert, Button, Card, ConfigProvider, Drawer, Empty, Input, Select, Space, Table, Tabs, Tag, Typography, message, theme } from "antd";
 import { createAttackChainRebuildJob, getAttackChainAgentTypeSummaries, getAttackChainDetail, getAttackChains, getRuntimeSecurityAgents, getScanStatus } from "../bridge";
 import { formatTimestamp } from "../app/display";
+import { collectAllPages, exportTablePdf } from "../app/reportExport";
 import type { AttackChain, AttackChainAgentTypeSummary, AttackChainDetail, AttackChainListQuery, AttackChainSnapshot, GatewayAuditSnapshot, RangeMode, RuntimeSecurityAgent } from "../types";
 import { attackChainDetailTabs } from "./AttackChainDetailContent";
 
@@ -34,6 +35,7 @@ export function AttackChainPage({ snapshot }: Props) {
   const [rows, setRows] = useState<AttackChain[]>([]);
   const [total, setTotal] = useState(0);
   const [listBusy, setListBusy] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
   const [summaryReady, setSummaryReady] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [advanced, setAdvanced] = useState(false);
@@ -133,6 +135,18 @@ export function AttackChainPage({ snapshot }: Props) {
       setJobId(job.scan_id); setJobStatus(job.status);
     } catch (error) { setError("job", error); setJobBusy(false); }
   };
+  const exportFiltered = async () => {
+    if (!total) return;
+    setExportBusy(true);
+    try {
+      const exportRows = await collectAllPages<AttackChain>(async (page, pageSize) => {
+        const response = await getAttackChains({ ...filters, page, pageSize });
+        return { items: response.chains ?? [], total: response.total };
+      });
+      const path = await exportTablePdf({ title: "攻击链报告", fileName: `attack-chains-${new Date().toISOString().slice(0, 10)}.pdf`, filters, columns: ["攻击链", "Agent", "AgentType", "攻击类型", "风险", "状态", "步骤", "证据", "开始时间", "结束时间", "Session", "Trace"], rows: exportRows.map(row => [row.id, row.agent || row.agentId, row.agentTypeName || typeOptions[row.agentTypeId || 0], row.category, row.rawSeverity || row.risk, row.rawStatus || row.status, row.stepCount, row.evidenceCount, formatTimestamp(row.startedAt), formatTimestamp(row.endedAt), row.sessionId, row.traceId]) });
+      if (path) message.success(`PDF 已导出：${path}`); else message.info("已取消导出");
+    } catch (error) { message.error(`导出失败：${errorText(error)}`); } finally { setExportBusy(false); }
+  };
   const raw = detail?.attack_chain;
   const responses = detail?.responses?.length ? detail.responses : detail?.response?.response_id ? [detail.response] : [];
   const riskOptions = [...new Set(["CRITICAL", "HIGH", "MEDIUM", "LOW", ...types.flatMap(type => Object.keys(type.severityCounts).map(value => value.toUpperCase()))])];
@@ -143,7 +157,7 @@ export function AttackChainPage({ snapshot }: Props) {
       <div className="chain-page-workbench-heading">
         <div><Text type="secondary">RUNTIME ATTACK CHAINS</Text><Title level={2}>攻击链</Title><Text type="secondary">按 Agent、类型与风险调查链路及关联证据</Text></div>
         <Space wrap>
-          <Button icon={<DownloadOutlined />} disabled={!rows.length} onClick={() => exportJSON({ filters, ...paging, total, chains: rows }, "attack-chains-page.json")}>导出当前页</Button>
+          <Button icon={<DownloadOutlined />} loading={exportBusy} disabled={!total} onClick={() => void exportFiltered()}>导出筛选结果</Button>
           <Button loading={jobBusy} onClick={() => void rebuild()}>重建攻击链</Button>
           <Button icon={<ReloadOutlined />} onClick={() => setRevision(value => value + 1)}>刷新结果</Button>
         </Space>
