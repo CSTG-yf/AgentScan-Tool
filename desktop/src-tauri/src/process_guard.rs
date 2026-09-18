@@ -692,7 +692,11 @@ mod tests {
         old.file_guard.blacklist.push(FileBlacklistRule {
             id: "file.legacy".to_owned(),
             enabled: true,
-            path: r"C:\Users\Public\sensitive.txt".to_owned(),
+            path: if cfg!(target_os = "linux") {
+                "/tmp/tracebastion-sensitive.txt".to_owned()
+            } else {
+                r"C:\Users\Public\sensitive.txt".to_owned()
+            },
             match_kind: "exact".to_owned(),
             access: vec!["read".to_owned()],
             action: "terminateAgentTree".to_owned(),

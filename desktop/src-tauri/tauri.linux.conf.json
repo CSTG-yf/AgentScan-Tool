@@ -7,11 +7,12 @@
       "resources/defenseclaw-gateway",
       "../../cli/defenseclaw/agentrange_sidecar.py",
       "../../task/agentrange-adapter/*",
-      "linux/*"
+      "linux/*",
+      "README-Linux.md"
     ],
     "linux": {
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "policykit-1", "systemd"]
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "policykit-1", "systemd", "fuse3"]
       }
     }
   }

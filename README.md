@@ -60,6 +60,8 @@ sudo apt install ./dist/linux/TraceBastion-Desktop-Setup-Linux-x86_64.deb
 
 Linux 进程发现和子进程监控读取 `/proc`，执行策略前校验进程启动标识，避免 PID 复用误杀。普通未受控进程的文件审计无法透明替换一次 `read(2)` 的内容；`returnEmptyContent` 仅在受控 Agent 文件代理路径上保证，其他路径会明确上报能力降级。
 
+Linux 的 FUSE + mount namespace 受控启动方法见 [Linux 发布版使用说明](desktop/src-tauri/README-Linux.md)。
+
 | 源码构建工具 | 要求 |
 | --- | --- |
 | Node.js | 20.19+；仓库 Windows 工作流使用 22.12.0 |

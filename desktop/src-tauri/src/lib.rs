@@ -10,6 +10,20 @@ mod trace_store;
 #[path = "platform/windows/process.rs"]
 mod windows_process;
 
+#[cfg(target_os = "linux")]
+pub fn run_empty_fuse_daemon(mountpoint: &std::path::Path) -> Result<(), String> {
+    platform::linux::empty_fuse::serve(mountpoint)
+}
+
+#[cfg(target_os = "linux")]
+pub fn run_controlled_agent(
+    policy_path: &std::path::Path,
+    program: &std::ffi::OsStr,
+    arguments: &[std::ffi::OsString],
+) -> Result<std::process::ExitStatus, String> {
+    platform::linux::controlled_agent::run(policy_path, program, arguments)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()

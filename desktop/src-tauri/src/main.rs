@@ -1,8 +1,42 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    let mut arguments = std::env::args().skip(1);
-    match arguments.next().as_deref() {
+    let mut arguments = std::env::args_os().skip(1);
+    let mode = arguments.next();
+    match mode.as_deref().and_then(std::ffi::OsStr::to_str) {
+        #[cfg(target_os = "linux")]
+        Some("--empty-fuse-daemon") => {
+            let Some(mountpoint) = arguments.next() else {
+                std::process::exit(2);
+            };
+            if defenseclaw_desktop_lib::run_empty_fuse_daemon(std::path::Path::new(&mountpoint))
+                .is_err()
+            {
+                std::process::exit(1);
+            }
+            return;
+        }
+        #[cfg(target_os = "linux")]
+        Some("--run-controlled-agent") => {
+            let Some(policy) = arguments.next() else {
+                std::process::exit(2);
+            };
+            let remaining = arguments.collect::<Vec<_>>();
+            let Some((program, agent_arguments)) = remaining.split_first() else {
+                std::process::exit(2);
+            };
+            match defenseclaw_desktop_lib::run_controlled_agent(
+                std::path::Path::new(&policy),
+                program,
+                agent_arguments,
+            ) {
+                Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Some("--process-guard-service") => {
             let _ = defenseclaw_desktop_lib::process_guard_service::dispatch();
             return;
