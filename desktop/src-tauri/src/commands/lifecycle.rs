@@ -28,26 +28,29 @@ pub(crate) fn gateway_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> 
         .path()
         .resource_dir()
         .map_err(|error| format!("resolve desktop resource directory: {error}"))?;
+    let binary_name = if cfg!(windows) {
+        "defenseclaw-gateway.exe"
+    } else {
+        "defenseclaw-gateway"
+    };
     let mut candidates = vec![
-        resource_dir
-            .join("resources")
-            .join("defenseclaw-gateway.exe"),
-        resource_dir.join("defenseclaw-gateway.exe"),
+        resource_dir.join("resources").join(binary_name),
+        resource_dir.join(binary_name),
     ];
     if let Ok(current) = std::env::current_exe() {
         if let Some(parent) = current.parent() {
-            candidates.push(parent.join("defenseclaw-gateway.exe"));
+            candidates.push(parent.join(binary_name));
         }
     }
     candidates.push(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
-            .join("defenseclaw-gateway.exe"),
+            .join(binary_name),
     );
     candidates
         .into_iter()
         .find(|path| path.is_file())
-        .ok_or_else(|| "bundled defenseclaw-gateway.exe was not found".to_owned())
+        .ok_or_else(|| format!("bundled {binary_name} was not found"))
 }
 
 pub(crate) fn desktop_defenseclaw_home(app: &tauri::AppHandle) -> Result<PathBuf, String> {

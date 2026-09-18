@@ -1,0 +1,15 @@
+[Unit]
+Description=TraceBastion Agent Process Guard
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/defenseclaw-desktop --process-guard-service
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/etc/defenseclaw /var/lib/defenseclaw /var/log/defenseclaw
+
+[Install]
+WantedBy=multi-user.target

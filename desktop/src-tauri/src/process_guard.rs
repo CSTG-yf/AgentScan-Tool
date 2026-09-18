@@ -263,10 +263,17 @@ pub(crate) fn terminate_agent_tree(agent: &ProcessInfo) -> Result<String, String
     }
 }
 
-fn valid_windows_path(value: &str) -> bool {
+fn valid_guard_path(value: &str) -> bool {
     let trimmed = value.trim();
     if trimmed.len() < 3 || trimmed.contains(['\0', '*', '?', '"']) {
         return false;
+    }
+    if cfg!(target_os = "linux") {
+        return trimmed.starts_with('/')
+            && !matches!(
+                trimmed.trim_end_matches('/'),
+                "" | "/etc" | "/usr" | "/var" | "/home"
+            );
     }
     let bytes = trimmed.as_bytes();
     let drive_absolute = bytes.len() >= 3
@@ -287,7 +294,7 @@ fn valid_windows_path(value: &str) -> bool {
 
 fn validate_file_rule(rule: &FileBlacklistRule) -> bool {
     !rule.id.trim().is_empty()
-        && valid_windows_path(&rule.path)
+        && valid_guard_path(&rule.path)
         && matches!(rule.match_kind.as_str(), "exact" | "subtree")
         && !rule.access.is_empty()
         && rule.access.iter().all(|access| {
@@ -333,7 +340,7 @@ pub fn validate_policy(policy: &GuardPolicy) -> Result<(), String> {
             .file_guard
             .audit_roots
             .iter()
-            .all(|path| valid_windows_path(path))
+            .all(|path| valid_guard_path(path))
         || !policy.file_guard.blacklist.iter().all(validate_file_rule)
     {
         return Err("file guard policy contains an unsafe path, access type, or action".to_owned());
@@ -390,7 +397,11 @@ fn audit_match(
         &crate::trace_store::default_database_path(),
         &crate::trace_store::NewTraceEvent {
             event_type: "processGuardRuleMatch",
-            source: "windows-process-guard",
+            source: if cfg!(target_os = "linux") {
+                "linux-process-guard"
+            } else {
+                "windows-process-guard"
+            },
             agent_pid: matched.agent.pid,
             agent_executable: &matched.agent.name,
             actor_pid: matched.child.pid,

@@ -527,6 +527,7 @@ name = "defenseclaw-desktop"
 version = "0.2.0"
 dependencies = [
  "chrono",
+ "libc",
  "quick-xml 0.37.5",
  "rusqlite",
  "serde",

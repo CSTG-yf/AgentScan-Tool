@@ -285,7 +285,22 @@ fn reveal_in_file_explorer(path: &str) -> Result<(), String> {
         .map_err(|error| format!("打开文件资源管理器失败：{error}"))
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn reveal_in_file_explorer(path: &str) -> Result<(), String> {
+    let target = std::path::Path::new(path);
+    let directory = if target.is_dir() {
+        target
+    } else {
+        target.parent().unwrap_or(target)
+    };
+    std::process::Command::new("xdg-open")
+        .arg(directory)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("打开文件管理器失败：{error}"))
+}
+
+#[cfg(all(not(windows), not(target_os = "linux")))]
 fn reveal_in_file_explorer(_path: &str) -> Result<(), String> {
     Err("当前平台不支持在文件资源管理器中定位文件".to_string())
 }

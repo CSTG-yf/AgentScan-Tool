@@ -75,7 +75,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: TraceBastion-Desktop-Windows-x64
-          path: dist/TraceBastion-Desktop-Setup-x64.exe
+          path: dist/windows/TraceBastion-Desktop-Setup-Windows-x64.exe
           if-no-files-found: error
 
   release:
@@ -89,7 +89,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: TraceBastion-Desktop-Windows-x64
-          path: dist
+          path: dist/windows
 
       - name: Publish GitHub Release
         shell: powershell
@@ -97,7 +97,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$env:GITHUB_REF_NAME" `
-            ".\dist\TraceBastion-Desktop-Setup-x64.exe#TraceBastion Desktop Setup (Windows x64)" `
+            ".\dist\windows\TraceBastion-Desktop-Setup-Windows-x64.exe#TraceBastion Desktop Setup (Windows x64)" `
             --repo "$env:GITHUB_REPOSITORY" `
             --verify-tag `
             --title "TraceBastion Desktop $($env:GITHUB_REF_NAME -replace '^tracebastion-desktop-', '')" `

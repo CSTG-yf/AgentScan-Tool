@@ -679,7 +679,11 @@ fn run_docker(
     compose_files: &[PathBuf],
     arguments: &[&str],
 ) -> Result<std::process::Output, String> {
-    let mut command = Command::new("docker.exe");
+    let mut command = Command::new(if cfg!(windows) {
+        "docker.exe"
+    } else {
+        "docker"
+    });
     command.arg("compose");
     for compose in compose_files {
         command.arg("-f").arg(compose);

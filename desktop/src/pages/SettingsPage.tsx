@@ -12,7 +12,7 @@ type SectionKey = "services" | "storage" | "privacy" | "notifications" | "update
 type GuardAction = "install" | "start" | "stop" | "apply" | "uninstall";
 
 const sections: Array<{ key: SectionKey; label: string; description: string; icon: React.ReactNode }> = [
-  { key: "services", label: "服务管理", description: "Gateway 与 Windows 守护", icon: <CloudServerOutlined /> },
+  { key: "services", label: "服务管理", description: "Gateway 与系统进程守护", icon: <CloudServerOutlined /> },
   { key: "storage", label: "数据与存储", description: "数据保留和本机容量", icon: <DatabaseOutlined /> },
   { key: "privacy", label: "隐私与脱敏", description: "敏感内容采集和导出", icon: <LockOutlined /> },
   { key: "notifications", label: "通知", description: "桌面安全通知", icon: <BellOutlined /> },
@@ -43,7 +43,7 @@ export function SettingsPage({ gatewayComponent, guardComponent, defenseMode, ga
   const abnormal = [gatewayComponent, guardComponent].filter(item => item && !["ready", "missing"].includes(item.state)).length;
 
   const uninstall = () => Modal.confirm({
-    title: "卸载 Windows 进程守护？",
+    title: "卸载系统进程守护？",
     icon: <WarningOutlined />,
     content: "卸载后系统级进程防护将停止，已有审计记录不会自动删除。",
     okText: "确认卸载", okButtonProps: { danger: true }, cancelText: "取消",
@@ -90,8 +90,8 @@ export function SettingsPage({ gatewayComponent, guardComponent, defenseMode, ga
           </Card>
           {defenseMode === "baseline" && <Alert showIcon type="info" message="Baseline 模式不启动 Gateway" description="请在顶部全局防护模式中切换为 Observe 或 Action 后再启动。" />}
           <ServiceCard
-            icon={<SafetyCertificateOutlined />} title="Windows 进程守护" state={guardComponent?.state} detail={guardComponent?.detail}
-            facts={[["Windows Service", "TraceBastionProcessGuard"], ["运行账户", "LocalSystem"], ["启动类型", guardMissing ? "未安装" : "自动"], ["防护模式", defenseMode === "action" ? "Enforce" : "Observe"]]}
+            icon={<SafetyCertificateOutlined />} title={guardComponent?.label || "系统进程守护"} state={guardComponent?.state} detail={guardComponent?.detail}
+            facts={[["系统服务", "DefenseClawProcessGuard / systemd"], ["运行账户", "系统服务账户"], ["启动类型", guardMissing ? "未安装" : "自动"], ["防护模式", defenseMode === "action" ? "Enforce" : "Observe"]]}
             actions={<>
               {!guardReady && <Button type="primary" loading={busy} onClick={() => onGuardAction(guardMissing ? "install" : "start")}>{guardMissing ? "安装 / 修复服务" : "启动服务"}</Button>}
               {guardReady && <Button loading={busy} onClick={() => onGuardAction("stop")}>停止服务</Button>}
@@ -99,7 +99,7 @@ export function SettingsPage({ gatewayComponent, guardComponent, defenseMode, ga
             </>}
           />
           <Card className="settings-danger-zone" title={<span><WarningOutlined /> 危险操作</span>}>
-            <div><div><Text strong>卸载 Windows 进程守护</Text><Text type="secondary">停止系统级防护并移除 Windows Service，审计数据仍会保留。</Text></div><Button danger disabled={guardMissing} onClick={uninstall}>卸载服务</Button></div>
+            <div><div><Text strong>卸载系统进程守护</Text><Text type="secondary">停止系统级防护并移除系统服务，审计数据仍会保留。</Text></div><Button danger disabled={guardMissing} onClick={uninstall}>卸载服务</Button></div>
           </Card>
         </>}
         {section !== "services" && <CapabilitySection section={section} />}
@@ -128,7 +128,7 @@ function CapabilitySection({ section }: { section: Exclude<SectionKey, "services
     privacy: { title: "隐私与脱敏", description: "控制敏感内容采集、持久化和导出。", items: ["日志敏感字段脱敏", "Prompt 与 Completion 持久化", "路径、用户名和凭据隐藏"], icon: <LockOutlined /> },
     notifications: { title: "通知", description: "配置本机 Critical、High 和服务异常通知。", items: ["风险和处置失败通知", "服务离线与磁盘通知", "免打扰和通知冷却"], icon: <BellOutlined /> },
     updates: { title: "更新与版本", description: "检查桌面端及安全组件兼容性。", items: ["TraceBastion Desktop 0.2.0", "Gateway 与进程守护版本", "规则包和检测签名版本"], icon: <DownloadOutlined /> },
-    diagnostics: { title: "诊断与高级设置", description: "检查服务、端口、数据库和策略同步状态。", items: ["Gateway API 与端口检查", "Windows Service 状态检查", "脱敏诊断包与修复建议"], icon: <ExperimentOutlined /> },
+    diagnostics: { title: "诊断与高级设置", description: "检查服务、端口、数据库和策略同步状态。", items: ["Gateway API 与端口检查", "系统守护服务状态检查", "脱敏诊断包与修复建议"], icon: <ExperimentOutlined /> },
   };
   const item = copy[section];
   return <><div className="settings-section-heading"><div><Title level={3}>{item.title}</Title><Text type="secondary">{item.description}</Text></div></div>

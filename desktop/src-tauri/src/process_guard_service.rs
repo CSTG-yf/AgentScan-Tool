@@ -6,21 +6,36 @@ const SERVICE_DISPLAY_NAME: &str = "TraceBastion Agent Process Guard";
 const SERVICE_MARKER: &str = "process-guard.installed";
 
 pub fn default_paths() -> (PathBuf, PathBuf) {
+    #[cfg(target_os = "linux")]
+    let root = PathBuf::from("/etc/defenseclaw");
+    #[cfg(target_os = "linux")]
+    return (
+        root.join("process-guard.json"),
+        PathBuf::from("/var/log/defenseclaw/process-guard.jsonl"),
+    );
+    #[cfg(not(target_os = "linux"))]
     let root = env::var_os("PROGRAMDATA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
         .join("DefenseClaw");
-    (
+    #[cfg(not(target_os = "linux"))]
+    return (
         root.join("process-guard.json"),
         root.join("audit").join("process-guard.jsonl"),
-    )
+    );
 }
 
 fn service_marker_path() -> PathBuf {
     let (policy, _) = default_paths();
     policy
         .parent()
-        .unwrap_or_else(|| Path::new(r"C:\ProgramData\DefenseClaw"))
+        .unwrap_or_else(|| {
+            Path::new(if cfg!(target_os = "linux") {
+                "/var/lib/defenseclaw"
+            } else {
+                r"C:\ProgramData\DefenseClaw"
+            })
+        })
         .join(SERVICE_MARKER)
 }
 
@@ -263,9 +278,39 @@ Set-Acl -LiteralPath $target -AclObject $acl
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "linux")))]
 fn configure_file_auditing(_policy: &crate::models::GuardPolicy) -> Result<(), String> {
     Err("Windows file auditing is available only on Windows".to_owned())
+}
+
+#[cfg(target_os = "linux")]
+fn configure_file_auditing(policy: &crate::models::GuardPolicy) -> Result<(), String> {
+    // Process enforcement is fully supported. File access replacement requires
+    // the managed Agent proxy; persist the roots for that component and expose
+    // the limitation in audit rather than pretending that inotify can replace bytes.
+    let manifest = policy
+        .file_guard
+        .audit_roots
+        .iter()
+        .chain(
+            policy
+                .file_guard
+                .blacklist
+                .iter()
+                .filter(|rule| rule.enabled)
+                .map(|rule| &rule.path),
+        )
+        .collect::<Vec<_>>();
+    let path = file_audit_manifest_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("create Linux file monitor directory: {error}"))?;
+    }
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| format!("write Linux file monitor manifest: {error}"))
 }
 
 #[cfg(not(windows))]
@@ -588,27 +633,129 @@ mod windows {
 #[cfg(windows)]
 pub use windows::{dispatch, install, start, stop, uninstall};
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::fs;
+    use std::path::Path;
+    use std::process::Command;
+
+    const UNIT_PATH: &str = "/etc/systemd/system/defenseclaw-process-guard.service";
+
+    fn systemctl(args: &[&str]) -> Result<(), String> {
+        let status = Command::new("systemctl")
+            .args(args)
+            .status()
+            .map_err(|error| format!("launch systemctl: {error}"))?;
+        status
+            .success()
+            .then_some(())
+            .ok_or_else(|| format!("systemctl {} failed with status {status}", args.join(" ")))
+    }
+
+    pub fn dispatch() -> Result<(), String> {
+        let (policy, audit) = super::default_paths();
+        crate::process_guard::run_console(&policy, &audit)
+    }
+
+    pub fn start() -> Result<(), String> {
+        systemctl(&["start", "defenseclaw-process-guard.service"])
+    }
+    pub fn stop() -> Result<(), String> {
+        systemctl(&["stop", "defenseclaw-process-guard.service"])
+    }
+
+    pub fn install() -> Result<(), String> {
+        let (policy, audit) = super::default_paths();
+        if let Some(parent) = policy.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        if let Some(parent) = audit.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        if !policy.exists() {
+            fs::write(&policy, crate::policy_defaults::default_policy_json()?)
+                .map_err(|error| format!("write default policy: {error}"))?;
+        }
+        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+        let unit = format!("[Unit]\nDescription=TraceBastion Agent Process Guard\nAfter=network.target\n\n[Service]\nType=simple\nExecStart={} --process-guard-service\nRestart=on-failure\nRestartSec=2\nNoNewPrivileges=true\nProtectSystem=strict\nReadWritePaths=/etc/defenseclaw /var/log/defenseclaw /var/lib/defenseclaw\n\n[Install]\nWantedBy=multi-user.target\n", executable.display());
+        fs::write(UNIT_PATH, unit).map_err(|error| format!("write systemd unit: {error}"))?;
+        systemctl(&["daemon-reload"])?;
+        systemctl(&["enable", "--now", "defenseclaw-process-guard.service"])?;
+        fs::create_dir_all("/var/lib/defenseclaw").map_err(|e| e.to_string())?;
+        fs::write(super::service_marker_path(), b"1\n").map_err(|e| e.to_string())
+    }
+
+    pub fn uninstall() -> Result<(), String> {
+        let _ = systemctl(&["disable", "--now", "defenseclaw-process-guard.service"]);
+        match fs::remove_file(UNIT_PATH) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("remove systemd unit: {error}")),
+        }
+        systemctl(&["daemon-reload"])?;
+        let _ = fs::remove_file(super::service_marker_path());
+        Ok(())
+    }
+
+    pub fn is_installed() -> bool {
+        Path::new(UNIT_PATH).is_file()
+    }
+    pub fn is_running() -> bool {
+        Command::new("systemctl")
+            .args(["is-active", "--quiet", "defenseclaw-process-guard.service"])
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub use linux::{dispatch, install, start, stop, uninstall};
+
+#[cfg(target_os = "linux")]
+pub fn service_status() -> (bool, bool) {
+    (linux::is_installed(), linux::is_running())
+}
+
+#[cfg(windows)]
+pub fn service_status() -> (bool, bool) {
+    use std::process::Command;
+    let output = Command::new("sc.exe")
+        .args(["query", SERVICE_NAME])
+        .output()
+        .ok();
+    let installed = output.as_ref().is_some_and(|o| o.status.success());
+    let running = output
+        .as_ref()
+        .is_some_and(|o| String::from_utf8_lossy(&o.stdout).contains("RUNNING"));
+    (installed, running)
+}
+
+#[cfg(all(not(windows), not(target_os = "linux")))]
 pub fn start() -> Result<(), String> {
     Err("Windows service startup is available only on Windows".to_owned())
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "linux")))]
 pub fn stop() -> Result<(), String> {
     Err("Windows service stop is available only on Windows".to_owned())
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "linux")))]
 pub fn dispatch() -> Result<(), String> {
     Err("Windows service mode is available only on Windows".to_owned())
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "linux")))]
 pub fn install() -> Result<(), String> {
     Err("Windows service installation is available only on Windows".to_owned())
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "linux")))]
 pub fn uninstall() -> Result<(), String> {
     Err("Windows service removal is available only on Windows".to_owned())
+}
+
+#[cfg(all(not(windows), not(target_os = "linux")))]
+pub fn service_status() -> (bool, bool) {
+    (false, false)
 }

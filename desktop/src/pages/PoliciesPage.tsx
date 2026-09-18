@@ -29,7 +29,7 @@ export function PoliciesPage({ policy, guardComponent, enabledRules, savingPolic
       </div>
       <Card bordered={false} className="policy-summary workspace-info-card">
         <div>
-          <Text strong>Windows 进程守护</Text>
+          <Text strong>系统进程守护</Text>
           <div><Text type="secondary">开启后规则进入工作集；只有已安装的管理员服务才能执行终止动作。</Text></div>
         </div>
         <Space>
@@ -49,7 +49,7 @@ export function PoliciesPage({ policy, guardComponent, enabledRules, savingPolic
       <Card bordered={false} className="workspace-form-card" title="文件访问监控范围">
         <Space direction="vertical" size="middle" style={{ width: "100%" }}>
           <Space><Switch checkedChildren="启用" unCheckedChildren="关闭" checked={policy?.trace.enabled} disabled={!policy} loading={savingPolicy} onChange={(enabled) => policy && onPersistPolicy({ ...policy, trace: { ...policy.trace, enabled } })} /><Text>启用 Go 后端行为追踪</Text></Space>
-          <Text type="secondary">每行一个绝对目录。应用到管理员服务时会启用 Windows 文件系统审计并写入 SACL；空列表时只记录进程行为。</Text>
+          <Text type="secondary">每行一个绝对目录。Windows 使用文件系统审计/SACL；Linux 将规则交给受控 Agent 文件代理和审计组件。空列表时只记录进程行为。</Text>
           <Input.TextArea rows={3} value={(policy?.fileGuard.auditRoots ?? []).join("\n")} placeholder={"C:\\Projects\\AgentWorkspace\nC:\\Users\\Public\\Documents"} onChange={(event) => policy && onSetPolicy({ ...policy, fileGuard: { ...policy.fileGuard, auditRoots: event.target.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean) } })} onBlur={() => policy && onPersistPolicy(policy)} />
         </Space>
       </Card>

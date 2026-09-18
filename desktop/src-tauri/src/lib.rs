@@ -2,10 +2,12 @@ mod commands;
 mod file_activity;
 mod knowledge;
 mod models;
+mod platform;
 mod policy_defaults;
 pub mod process_guard;
 pub mod process_guard_service;
 mod trace_store;
+#[path = "platform/windows/process.rs"]
 mod windows_process;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

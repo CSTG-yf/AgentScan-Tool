@@ -95,8 +95,27 @@ fn request_elevation(executable: &Path, arguments: &str) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-fn request_elevation(_executable: &Path, _arguments: &str) -> Result<(), String> {
-    Err("process guard service is supported only on Windows".to_owned())
+fn request_elevation(executable: &Path, arguments: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut command = std::process::Command::new("pkexec");
+        command.arg(executable);
+        if let Some(path) = arguments.strip_prefix("--apply-process-guard-policy ") {
+            command.arg("--apply-process-guard-policy");
+            command.arg(path.trim().trim_matches('"'));
+        } else {
+            command.arg(arguments);
+        }
+        let status = command
+            .status()
+            .map_err(|error| format!("启动 Linux 管理员操作失败：{error}"))?;
+        return status
+            .success()
+            .then_some(())
+            .ok_or_else(|| format!("Linux 管理员操作失败：{status}"));
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err("process guard service is not supported on this platform".to_owned())
 }
 
 fn current_executable() -> Result<std::path::PathBuf, String> {

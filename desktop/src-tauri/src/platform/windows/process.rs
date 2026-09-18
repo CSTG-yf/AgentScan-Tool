@@ -311,12 +311,24 @@ mod platform {
 mod platform {
     use super::ProcessInfo;
 
+    #[cfg(target_os = "linux")]
+    pub fn snapshot() -> Result<Vec<ProcessInfo>, String> {
+        crate::platform::linux::process::snapshot()
+    }
+
+    #[cfg(not(target_os = "linux"))]
     pub fn snapshot() -> Result<Vec<ProcessInfo>, String> {
         Ok(Vec::new())
     }
 
+    #[cfg(target_os = "linux")]
+    pub fn terminate_verified(pid: u32, expected_creation_ticks: u64) -> Result<(), String> {
+        crate::platform::linux::process::terminate_verified(pid, expected_creation_ticks)
+    }
+
+    #[cfg(not(target_os = "linux"))]
     pub fn terminate_verified(_pid: u32, _expected_creation_ticks: u64) -> Result<(), String> {
-        Err("process termination is supported only on Windows".to_owned())
+        Err("process termination is not supported on this platform".to_owned())
     }
 
     pub fn enable_debug_privilege() -> Result<(), String> {

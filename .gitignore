@@ -62,6 +62,7 @@ node_modules/
 # Rust / Tauri build artifacts
 target/
 desktop/src-tauri/resources/*.exe
+desktop/src-tauri/resources/defenseclaw-gateway
 desktop/src-tauri/gen/
 *.tsbuildinfo
 desktop/vite.config.js

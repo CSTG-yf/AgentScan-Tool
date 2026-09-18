@@ -2,7 +2,7 @@
 
 **面向本地 AI Agent 的资产治理、运行时防护与证据追踪平台。**
 
-TraceBastion 将 Agent 发现、静态资源扫描、运行时风险检测、策略执行和攻击链调查整合到 Windows 桌面控制台，同时提供 Python CLI/TUI、Go 网关和 Agent 连接器。项目基于 DefenseClaw 演进，保留 `defenseclaw` 命令、Python 包名、网关可执行文件名及服务标识，以兼容既有配置和安装。
+TraceBastion 将 Agent 发现、静态资源扫描、运行时风险检测、策略执行和攻击链调查整合到 Windows 与 Linux 桌面控制台，同时提供 Python CLI/TUI、Go 网关和 Agent 连接器。项目基于 DefenseClaw 演进，保留 `defenseclaw` 命令、Python 包名、网关可执行文件名及服务标识，以兼容既有配置和安装。
 
 [桌面端说明](desktop/README.md) · [文档索引](docs/README.md) · [API 参考](docs/API.md) · [测试指南](docs/TESTING.md) · [许可证](LICENSE)
 
@@ -27,7 +27,8 @@ CodeGuard 提供代码静态检查；Skills 和 MCP 扫描还会调用外部扫�
 
 | 需求 | 入口 | 条件 |
 | --- | --- | --- |
-| Windows 图形控制台 | 桌面安装包或桌面源码构建 | Windows 10/11 x64；WebView2 |
+| Windows 图形控制台 | NSIS 桌面安装包或桌面源码构建 | Windows 10/11 x64；WebView2 |
+| Linux 图形控制台 | DEB 或 AppImage 安装包 | Ubuntu 22.04/24.04、Debian 12 x86_64；WebKitGTK 4.1 |
 | 配置 Agent、扫描、终端界面 | Python CLI/TUI + Go Gateway | Windows、macOS 或 Linux；连接器能力依平台而异 |
 | OpenClaw / ZeptoClaw 代理连接器 | CLI + Gateway；OpenClaw 另需插件 | macOS / Linux；当前 Windows 使用 Hook 路径，不支持这两个代理连接器 |
 | AgentRange 场景验证 | 桌面“靶场控制”或 Compose overlay | Docker Compose 及原始靶场；回放另需 Python/uv |
@@ -47,6 +48,17 @@ cd AgentScan-Tool
 ### Windows 桌面端
 
 Windows 安装包的发布入口为本仓库的 [GitHub Releases](https://github.com/CSTG-yf/AgentScan-Tool/releases)，可用版本及附件以发布页为准。安装器支持选择目标目录；机器级安装和守护服务管理需要管理员权限。
+
+### Linux 桌面端
+
+Linux 发布产物位于 `dist/linux/`，包括 Debian 安装包和 AppImage。Debian/systemd 环境可在桌面“服务管理”中通过 PolicyKit 安装系统级进程守护；AppImage 可独立运行 UI 与 Gateway，但系统级守护仍需管理员授权安装。
+
+```bash
+bash desktop/scripts/linux/build.sh
+sudo apt install ./dist/linux/TraceBastion-Desktop-Setup-Linux-x86_64.deb
+```
+
+Linux 进程发现和子进程监控读取 `/proc`，执行策略前校验进程启动标识，避免 PID 复用误杀。普通未受控进程的文件审计无法透明替换一次 `read(2)` 的内容；`returnEmptyContent` 仅在受控 Agent 文件代理路径上保证，其他路径会明确上报能力降级。
 
 | 源码构建工具 | 要求 |
 | --- | --- |
@@ -247,7 +259,7 @@ flowchart TD
 
 | 目录 | 职责 |
 | --- | --- |
-| `desktop/` | Windows 桌面 UI、Tauri 宿主、守护服务、合同与构建脚本 |
+| `desktop/` | Windows/Linux 桌面 UI、Tauri 宿主、平台守护服务、合同与构建脚本 |
 | `cli/defenseclaw/` | Python CLI、Textual TUI、扫描器、注册表与靶场适配 |
 | `cmd/defenseclaw/` | Go 网关入口 |
 | `internal/gateway/`、`internal/inventory/` | API、代理、连接器、任务、治理与 Agent 发现 |
