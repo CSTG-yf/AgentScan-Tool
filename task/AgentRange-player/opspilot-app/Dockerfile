@@ -6,5 +6,7 @@ COPY opspilot-app/auth ./auth
 COPY opspilot-app/policy ./policy
 COPY opspilot-app/api ./api
 COPY skills ./skills
+COPY integrity ./integrity
+RUN python integrity/check.py
 EXPOSE 8000
 CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000"]

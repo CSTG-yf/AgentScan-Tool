@@ -1,0 +1,43 @@
+name: AgentRange integrity
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "task/AgentRange-player/**"
+      - "internal/watcher/**"
+      - "internal/audit/actions.go"
+      - ".github/workflows/agentrange-integrity.yml"
+  push:
+    branches: [main, qjq]
+    paths:
+      - "task/AgentRange-player/**"
+      - "internal/watcher/**"
+      - "internal/audit/actions.go"
+      - ".github/workflows/agentrange-integrity.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check and exercise fixture recovery
+        run: |
+          python -m unittest task/AgentRange-player/integrity/test_check.py
+          python task/AgentRange-player/integrity/check.py
+      - name: Test protected fixture enforcement
+        run: go test ./internal/watcher ./internal/audit
+      - name: Build and verify OpsPilot image
+        run: |
+          docker build -t agentrange-integrity-check -f task/AgentRange-player/opspilot-app/Dockerfile task/AgentRange-player
+          docker run --rm --entrypoint python agentrange-integrity-check /app/integrity/check.py
+          docker run --rm --entrypoint python agentrange-integrity-check -c "from api.app import loaded_skill_message; assert 'meeting-summary' in loaded_skill_message('meeting-summary')['content']"

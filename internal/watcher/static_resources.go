@@ -316,6 +316,23 @@ func (w *InstallWatcher) isAgentRangePath(path string) bool {
 	return root != "" && isPathWithin(path, root)
 }
 
+func (w *InstallWatcher) isProtectedRangeInput(path string) bool {
+	root := w.agentRangeRoot()
+	if root == "" || !isPathWithin(path, root) {
+		return false
+	}
+	resolvedRoot, rootErr := filepath.EvalSymlinks(root)
+	resolvedPath, pathErr := filepath.EvalSymlinks(path)
+	return rootErr == nil && pathErr == nil && isPathWithin(resolvedPath, resolvedRoot)
+}
+
+func (w *InstallWatcher) effectiveFileAction(path, action string) string {
+	if action == "quarantine" && w.isProtectedRangeInput(path) {
+		return "none"
+	}
+	return action
+}
+
 func looksLikeAgentRangeRoot(root string) bool {
 	root = cleanAbsPath(root)
 	if root == "" {

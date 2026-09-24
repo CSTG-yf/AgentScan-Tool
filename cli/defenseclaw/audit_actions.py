@@ -47,6 +47,7 @@ ACTION_WARN: Final[str]  = "warn"
 
 # Quarantine / runtime enforcement
 ACTION_QUARANTINE: Final[str] = "quarantine"
+ACTION_QUARANTINE_SKIPPED: Final[str] = "quarantine-skipped"
 ACTION_RESTORE: Final[str]    = "restore"
 ACTION_DISABLE: Final[str]    = "disable"
 ACTION_ENABLE: Final[str]     = "enable"

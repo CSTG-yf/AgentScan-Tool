@@ -69,6 +69,10 @@ make seed
 make smoke
 ```
 
+`make up` 会先校验 7 份 Skill 载荷，并从 `integrity/baseline/` 恢复缺失项，再执行 `docker compose up -d --build`。如需直接运行 Compose，先执行 `python integrity/check.py --repair`；若文件内容与基线不同，校验会报错且不会覆盖改动。Dockerfile 还会在构建时复查，阻止缺少 Skill 的镜像生成。桌面端“启动靶场”也会执行同一校验并重建镜像。
+
+如果本机留有隔离副本，可指定 `python integrity/check.py --repair --quarantine-root <隔离目录>/skills`；只有内容与固定基线一致时才会使用它。扫描仍会判定并阻断靶场内的恶意 Skill，但会保留原文件供靶场重建。
+
 可选：`make test` 运行全量单元测试（`pytest -q`）。
 
 启动后可访问：OpsPilot `http://localhost:8100`、Langflow `http://localhost:7860`。

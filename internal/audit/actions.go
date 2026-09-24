@@ -39,10 +39,11 @@ const (
 	ActionWarn  Action = "warn"
 
 	// Quarantine / runtime enforcement
-	ActionQuarantine Action = "quarantine"
-	ActionRestore    Action = "restore"
-	ActionDisable    Action = "disable"
-	ActionEnable     Action = "enable"
+	ActionQuarantine        Action = "quarantine"
+	ActionQuarantineSkipped Action = "quarantine-skipped"
+	ActionRestore           Action = "restore"
+	ActionDisable           Action = "disable"
+	ActionEnable            Action = "enable"
 
 	// Deploy / drift
 	ActionDeploy Action = "deploy"
@@ -320,6 +321,7 @@ func AllActions() []Action {
 		ActionAllow,
 		ActionWarn,
 		ActionQuarantine,
+		ActionQuarantineSkipped,
 		ActionRestore,
 		ActionDisable,
 		ActionEnable,

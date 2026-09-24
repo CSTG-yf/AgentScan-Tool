@@ -278,6 +278,64 @@ func TestAdmission_PostScanRulesMatchSeverityRiskCategoryAndScanner(t *testing.T
 	}
 }
 
+func TestAgentRangePostScanBlocksWithoutMovingFixture(t *testing.T) {
+	cfg, store, logger, skillDir := setupTestEnv(t)
+	root := filepath.Dir(skillDir)
+	cfg.Claw.WorkspaceDir = root
+	if err := os.WriteFile(filepath.Join(root, "docker-compose.yml"), []byte("services: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	skillPath := filepath.Join(skillDir, "meeting-summary")
+	if err := os.MkdirAll(skillPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join(skillPath, "SKILL.md")
+	if err := os.WriteFile(fixture, []byte("fixture payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := store.CreateGovernancePostScanProfile(audit.GovernancePostScanProfileInput{
+		ProfileKey: "protected-range-skill",
+		Name:       "Protected range skill",
+		Enabled:    true,
+		Rules: []audit.GovernancePostScanRuleInput{{
+			RuleName:      "critical injection",
+			Priority:      1,
+			ResourceType:  "skill",
+			Severity:      "HIGH",
+			RiskLevel:     "all",
+			Decision:      "block",
+			InstallAction: "block",
+			FileAction:    "quarantine",
+			RuntimeAction: "block",
+			Enabled:       true,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := New(cfg, []string{skillDir}, nil, store, logger,
+		sandbox.New(cfg.OpenShell.Binary, cfg.OpenShell.PolicyDir), nil, nil, nil)
+	w.scannerFactory = func(InstallEvent) scanner.Scanner {
+		return &countingScanner{name: "decision-scanner", findings: []scanner.Finding{{
+			Severity: scanner.SeverityHigh, Category: "prompt_injection", Title: "fixture injection",
+		}}}
+	}
+	result := w.runAdmission(context.Background(), InstallEvent{
+		Type: InstallSkill, Name: "meeting-summary", Path: skillPath,
+		PostScanProfileID: profile.ID, Timestamp: time.Now(),
+	})
+	if result.Verdict != VerdictRejected || result.InstallAction != "block" ||
+		result.RuntimeAction != "block" || result.FileAction != "none" {
+		t.Fatalf("unexpected protected fixture decision: %+v", result)
+	}
+	if data, err := os.ReadFile(fixture); err != nil || string(data) != "fixture payload" {
+		t.Fatalf("protected fixture changed: %q, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.QuarantineDir, "skills", "meeting-summary")); !os.IsNotExist(err) {
+		t.Fatalf("protected fixture was quarantined: %v", err)
+	}
+}
+
 func TestAdmission_PostScanDisabledAndDeletedRulesDoNotApply(t *testing.T) {
 	cfg, store, logger, _ := setupTestEnv(t)
 	shell := sandbox.New(cfg.OpenShell.Binary, cfg.OpenShell.PolicyDir)

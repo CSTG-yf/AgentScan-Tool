@@ -749,6 +749,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 	if dbPre, matched, err := w.evaluateResourcePreScanDecision(evt); err != nil {
 		fmt.Fprintf(os.Stderr, "[watch] evaluate pre-scan profile %d: %v\n", evt.PreScanProfileID, err)
 	} else if matched {
+		dbPre.FileAction = w.effectiveFileAction(evt.Path, dbPre.FileAction)
 		switch dbPre.Decision {
 		case "block", "reject", "rejected":
 			_ = w.logger.LogAction(string(audit.ActionInstallRejected), evt.Path,
@@ -959,6 +960,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 	if dbPost, matched, err := w.evaluateResourcePostScanDecision(evt, result, s.Name(), riskSummary); err != nil {
 		fmt.Fprintf(os.Stderr, "[watch] evaluate post-scan profile %d: %v\n", evt.PostScanProfileID, err)
 	} else if matched {
+		dbPost.FileAction = w.effectiveFileAction(evt.Path, dbPost.FileAction)
 		if w.otel != nil {
 			w.otel.EmitPolicyDecision("resource-post-scan", dbPost.Verdict, evt.Name, targetType, dbPost.Reason, map[string]string{
 				"scanner":      s.Name(),
@@ -997,6 +999,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 		}
 		out, evalErr := w.opa.Evaluate(ctx, input)
 		if evalErr == nil {
+			out.FileAction = w.effectiveFileAction(evt.Path, out.FileAction)
 			if w.otel != nil {
 				if out.Verdict == "rejected" || out.Verdict == "blocked" {
 					w.otel.EmitPolicyDecision("admission", out.Verdict, evt.Name, targetType, out.Reason, map[string]string{
@@ -1040,6 +1043,7 @@ func (w *InstallWatcher) runAdmission(ctx context.Context, evt InstallEvent) (re
 		AllowList:  allowList,
 		ScanResult: scanInput,
 	}, fallbackProfile)
+	out.FileAction = w.effectiveFileAction(evt.Path, out.FileAction)
 	w.applyPostScanEnforcement(ctx, pe, out, evt, targetType, result, s.Name())
 	w.logAdmissionScan(ctx, result, out.Verdict, evt)
 	w.recordAdmission(ctx, out.Verdict, targetType)
@@ -1222,6 +1226,13 @@ func (w *InstallWatcher) takeActionFor(evt InstallEvent) bool {
 }
 
 func (w *InstallWatcher) enforceBlock(ctx context.Context, evt InstallEvent) {
+	// AgentRange is a replay fixture. Keep the scan verdict and logical
+	// install/runtime block, but do not remove files that a rebuild copies.
+	if (evt.Type == InstallSkill || evt.Type == InstallPlugin) && w.isProtectedRangeInput(evt.Path) {
+		_ = w.logger.LogAction(string(audit.ActionQuarantineSkipped), evt.Path,
+			fmt.Sprintf("reason=protected-root type=%s verdict=blocked", evt.Type))
+		return
+	}
 	switch evt.Type {
 	case InstallSkill:
 		se := enforce.NewSkillEnforcer(w.cfg.QuarantineDir)

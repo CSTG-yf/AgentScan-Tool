@@ -391,7 +391,41 @@ fn uv_program_from_token(token: &str) -> String {
     if token.contains('\\') || token.contains('/') {
         return token.to_owned();
     }
-    "uv.exe".to_owned()
+    if cfg!(windows) {
+        "uv.exe".to_owned()
+    } else {
+        "uv".to_owned()
+    }
+}
+
+fn ensure_range_integrity(app: &tauri::AppHandle, root: &Path) -> Result<(), String> {
+    let script = root.join("integrity").join("check.py");
+    if !script.is_file() {
+        return Err(format!("靶场完整性校验脚本不存在：{}", script.display()));
+    }
+    let quarantine = desktop_defenseclaw_home(app)?
+        .join("quarantine")
+        .join("skills");
+    let mut command = Command::new(uv_program_from_token("uv"));
+    command
+        .args(["run", "--no-project", "--offline", "python"])
+        .arg(&script)
+        .arg("--repair")
+        .arg("--quarantine-root")
+        .arg(quarantine)
+        .current_dir(root);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let output = command
+        .output()
+        .map_err(|error| format!("执行靶场完整性校验失败：{error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "靶场完整性校验失败：{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
 }
 
 struct ReplayCommand {
@@ -795,6 +829,7 @@ pub fn start_range_replay(
     command: String,
 ) -> Result<RangeReplayStatus, String> {
     let replay = resolve_replay_command(&app, &command)?;
+    ensure_range_integrity(&app, &replay.cwd)?;
     let state = replay_state();
     {
         let inner = state.lock().expect("range replay state poisoned");
@@ -1035,6 +1070,7 @@ fn change_range_state(
     let baseline_files = vec![compose_path(&root)?];
     let mode_files = compose_files(app, &root, mode)?;
     let output = if running {
+        ensure_range_integrity(app, &root)?;
         let _ = run_docker(&mode_files, &["down"]);
         let _ = run_docker(&baseline_files, &["down"]);
         if mode.requires_adapter() {
@@ -1043,7 +1079,7 @@ fn change_range_state(
                 return Err(result.message);
             }
         }
-        run_docker(&mode_files, &["up", "-d", "--no-build"])?
+        run_docker(&mode_files, &["up", "-d", "--build"])?
     } else {
         let _ = run_docker(&mode_files, &["down"]);
         run_docker(&baseline_files, &["down"])?

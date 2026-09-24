@@ -340,6 +340,42 @@ func TestFullQuarantineFlow_Skill(t *testing.T) {
 	}
 }
 
+func TestAgentRangeFixtureBlockKeepsSourceForRebuild(t *testing.T) {
+	cfg, store, logger, skillDir := setupTestEnv(t)
+	root := filepath.Dir(skillDir)
+	cfg.Claw.WorkspaceDir = root
+	if err := os.WriteFile(filepath.Join(root, "docker-compose.yml"), []byte("services: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	skillPath := filepath.Join(skillDir, "meeting-summary")
+	if err := os.MkdirAll(skillPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join(skillPath, "SKILL.md")
+	if err := os.WriteFile(fixture, []byte("fixture payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetActionField("skill", "meeting-summary", "install", "block", "critical scan finding"); err != nil {
+		t.Fatal(err)
+	}
+	w := New(cfg, []string{skillDir}, nil, store, logger, sandbox.New(cfg.OpenShell.Binary, cfg.OpenShell.PolicyDir), nil, nil, nil)
+	if got := w.effectiveFileAction(skillPath, "quarantine"); got != "none" {
+		t.Fatalf("protected fixture file action = %q, want none", got)
+	}
+	result := w.runAdmission(context.Background(), InstallEvent{
+		Type: InstallSkill, Name: "meeting-summary", Path: skillPath, Timestamp: time.Now(),
+	})
+	if result.Verdict != VerdictBlocked {
+		t.Fatalf("expected blocked verdict, got %s", result.Verdict)
+	}
+	if data, err := os.ReadFile(fixture); err != nil || string(data) != "fixture payload" {
+		t.Fatalf("protected fixture was changed: %q, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.QuarantineDir, "skills", "meeting-summary")); !os.IsNotExist(err) {
+		t.Fatalf("protected fixture was copied into quarantine: %v", err)
+	}
+}
+
 func TestFullQuarantineFlow_Plugin(t *testing.T) {
 	cfg, store, logger, skillDir := setupTestEnv(t)
 	shell := sandbox.New(cfg.OpenShell.Binary, cfg.OpenShell.PolicyDir)

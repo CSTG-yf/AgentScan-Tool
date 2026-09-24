@@ -25,6 +25,7 @@
             "allow",
             "warn",
             "quarantine",
+            "quarantine-skipped",
             "restore",
             "disable",
             "enable",
