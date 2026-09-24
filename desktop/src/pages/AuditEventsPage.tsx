@@ -5,7 +5,7 @@ import { Button, Card, ConfigProvider, DatePicker, Descriptions, Drawer, Empty, 
 import type { ColumnsType } from "antd/es/table";
 import { getAuditEventAgents, getAuditEventDetail, getAuditEventFacets, getAuditEvents, getAuditEventSummary } from "../bridge";
 import type { AuditEventFacets, AuditEventQuery, AuditEventRecord, AuditEventSummary, EventAgentSummary } from "../types";
-import { collectAllPages, exportTablePdf } from "../app/reportExport";
+import { chooseExportDirectory, collectAllPages, exportTablePdf } from "../app/reportExport";
 
 const { Text, Title } = Typography;
 const ALL = "__all__";
@@ -56,10 +56,12 @@ export function AuditEventsPage({ onOpenTrace, refreshNonce = 0 }: { onOpenTrace
   const exportFiltered = async () => {
     setExporting(true);
     try {
+      const directory = await chooseExportDirectory("选择事件审计报告导出文件夹");
+      if (directory === null) { message.info("已取消导出"); return; }
       const base = { ...query, page: undefined, pageSize: undefined };
       const rows = await collectAllPages<AuditEventRecord>((nextPage, nextSize) => getAuditEvents({ ...base, page: nextPage, pageSize: nextSize }));
-      const path = await exportTablePdf({ title: "事件审计报告", fileName: `audit-events-${new Date().toISOString().slice(0, 10)}.pdf`, filters: base, columns: ["时间", "Agent", "AgentType", "主体", "动作", "目标/工具", "风险", "状态", "Connector", "Session", "Trace"], rows: rows.map(row => [fmt(row.timestamp), row.agentName || row.canonicalAgentId, agents.find(agent => agent.agentId === (row.agentId || row.canonicalAgentId))?.agentType, row.actor, row.action, row.target || row.toolName, row.severity, row.enforced ? "已强制阻断" : "未强制阻断", row.connector, row.sessionId, row.traceId]) });
-      if (path) message.success(`PDF 已导出：${path}`); else message.info("已取消导出");
+      const path = await exportTablePdf({ directory, title: "事件审计报告", fileName: `audit-events-${new Date().toISOString().slice(0, 10)}.pdf`, filters: base, columns: ["时间", "Agent", "AgentType", "主体", "动作", "目标/工具", "风险", "状态", "Connector", "Session", "Trace"], rows: rows.map(row => [fmt(row.timestamp), row.agentName || row.canonicalAgentId, agents.find(agent => agent.agentId === (row.agentId || row.canonicalAgentId))?.agentType, row.actor, row.action, row.target || row.toolName, row.severity, row.enforced ? "已强制阻断" : "未强制阻断", row.connector, row.sessionId, row.traceId]) });
+      message.success(`PDF 已导出：${path}`);
     } catch (error) { message.error(`导出失败：${String(error)}`); } finally { setExporting(false); }
   };
   const reset = () => { setKeyword(""); setAction(undefined); setSeverity(undefined); setConnector(undefined); setEnforced(undefined); setActor(undefined); setTool(undefined); setPolicyId(""); setRequestId(""); setSessionId(""); setTraceId(""); setTimes([]); setDateRange(null); setPage(1); };
@@ -76,7 +78,7 @@ export function AuditEventsPage({ onOpenTrace, refreshNonce = 0 }: { onOpenTrace
   ];
 
   return <ConfigProvider theme={{ inherit: false, algorithm: theme.defaultAlgorithm }}><section className="workspace-page event-inventory-page">
-    <div className="event-inventory-heading"><div><Text className="eyebrow">SECURITY EVENT AUDIT</Text><Title level={2}>事件审计</Title><Text type="secondary">审阅系统检查、策略判断、接入来源及实际强制阻断记录。</Text></div><Space><Button icon={<DownloadOutlined />} loading={exporting} disabled={!total} onClick={() => void exportFiltered()}>导出筛选结果</Button><Button icon={<ReloadOutlined />} loading={loading} onClick={() => { void loadGlobals(); void loadList(); }}>刷新数据</Button></Space></div>
+    <div className="event-inventory-heading"><div><Text className="eyebrow">SECURITY EVENT AUDIT</Text><Title level={2}>事件审计</Title><Text type="secondary">审阅系统检查、策略判断、接入来源及实际强制阻断记录。</Text></div><Space><Button icon={<DownloadOutlined />} loading={exporting} disabled={!total} onClick={() => void exportFiltered()}>导出事件审计检测报告</Button><Button icon={<ReloadOutlined />} loading={loading} onClick={() => { void loadGlobals(); void loadList(); }}>刷新数据</Button></Space></div>
     <div className="event-summary-grid">{[["审计记录总数", summary.totalEvents, "blue"], ["涉及 Agent 数", summary.relatedAgentCount, "green"], ["高危及以上记录", summary.highOrAboveCount, "orange"], ["已强制阻断记录", summary.enforcedCount, "red"]].map(([label, value, tone]) => <Card key={String(label)} className={`event-summary-card ${tone}`}><Text type="secondary">{label}</Text><strong>{value}</strong><Text type="secondary">当前时间范围 · 全部 Agent</Text></Card>)}</div>
     <div className="event-inventory-layout"><Card className="event-agent-panel" title={<>Agents <Tag>{agents.length}</Tag></>}><Input allowClear prefix={<SearchOutlined />} placeholder="搜索 Agent" value={agentSearch} onChange={event => setAgentSearch(event.target.value)} /><div className="event-agent-list"><button className={selectedAgent === ALL ? "active" : ""} onClick={() => setSelectedAgent(ALL)}><strong>全部 Agent</strong><span>{summary.totalEvents} 条审计</span></button>{visibleAgents.map(agent => <button key={agent.agentId} className={selectedAgent === agent.agentId ? "active" : ""} onClick={() => setSelectedAgent(agent.agentId)}><strong>{agent.agentName || "未关联 Agent"}</strong><em>{agent.agentType || agent.agentId}</em><span>{agent.eventCount} 条 · 高危 {agent.highOrAboveCount ?? 0}</span><span>{fmt(agent.latestEventAt)}</span></button>)}</div></Card>
       <div className="event-inventory-main"><Card><div className="event-context"><div><Text type="secondary">当前范围</Text><Title level={3}>{selectedAgent === ALL ? "全部 Agent" : agents.find(agent => agent.agentId === selectedAgent)?.agentName || "未关联 Agent"}</Title></div><strong>匹配 {total} 条</strong></div>

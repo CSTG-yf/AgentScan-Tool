@@ -899,7 +899,7 @@ export interface StaticResourceListItem {
 export interface StaticResourceListResponse {
   total: number;
   page: number;
-  page_size: number;
+  pageSize: number;
   items: StaticResourceListItem[];
 }
 

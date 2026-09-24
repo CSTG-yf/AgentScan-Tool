@@ -1368,6 +1368,8 @@ body { min-height: 100vh; background: #f5f8fc; }
 .event-filters.advanced { grid-template-columns: repeat(6,minmax(140px,1fr)); }
 .event-filters .ant-select,
 .event-filters .ant-picker { width: 100%; background: #fff; }
+.event-filters :is(.ant-input,.ant-input-affix-wrapper,.ant-select-selector,.ant-picker,.ant-btn) { min-height: 38px; border-radius: 6px; }
+.runtime-filter-summary { display: flex; justify-content: flex-end; margin: -2px 0 12px; }
 .event-inventory-page :is(.ant-input,.ant-input-affix-wrapper,.ant-select-selector,.ant-picker) { color: #14213a !important; background: #fff !important; border-color: #d9e1ee !important; }
 .event-inventory-page .ant-btn:not(.ant-btn-primary) { color: #175cd3; background: #fff; border-color: #b2ccff; }
 .event-inventory-page .ant-tag { color: #fff !important; background: #64748b !important; border-color: transparent !important; }
@@ -1890,3 +1892,72 @@ body { min-height: 100vh; background: #f5f8fc; }
 .static-current-metrics .risk strong { color:#c2410c !important; }
 .static-current-metrics .critical strong { color:#dc2626 !important; }
 @media(max-width:800px) { .static-assets-page .static-summary-grid.static-global-summary,.static-current-metrics { grid-template-columns:1fr; } .static-current-heading { align-items:flex-start; flex-direction:column; } }
+
+/* Keep resource/detection/attack-chain filters visually identical to the
+   event-audit filter area, regardless of each workbench's local theme. */
+.standard-filter-bar {
+  align-items: center;
+}
+.standard-filter-bar.static-resource-filters {
+  grid-template-columns: minmax(240px, 2fr) minmax(140px, 1fr) minmax(280px, 2fr) auto auto;
+}
+.standard-filter-bar.standard-filter-advanced {
+  padding-top: 2px;
+  border-top: 1px solid #edf1f7;
+}
+.standard-filter-bar .ant-select,
+.standard-filter-bar .ant-picker {
+  width: 100%;
+  min-width: 0;
+}
+.standard-filter-bar :is(.ant-input,.ant-input-affix-wrapper,.ant-select-selector,.ant-picker) {
+  min-height: 38px !important;
+  color: #14213a !important;
+  background: #fff !important;
+  border-color: #d9e1ee !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+.standard-filter-bar :is(.ant-input,.ant-input-affix-wrapper,.ant-select-selector,.ant-picker):hover,
+.standard-filter-bar :is(.ant-input-affix-wrapper-focused,.ant-select-focused .ant-select-selector,.ant-picker-focused) {
+  border-color: #69aef7 !important;
+}
+.standard-filter-bar .ant-btn:not(.ant-btn-primary) {
+  min-height: 38px;
+  color: #175cd3 !important;
+  background: #fff !important;
+  border-color: #b2ccff !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+.standard-filter-bar .ant-btn:not(.ant-btn-primary):hover {
+  color: #0958d9 !important;
+  background: #f0f6ff !important;
+  border-color: #1677ff !important;
+}
+@media (max-width: 1200px) {
+  .standard-filter-bar.static-resource-filters { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+}
+@media (max-width: 600px) {
+  .standard-filter-bar.static-resource-filters { grid-template-columns: 1fr; }
+}
+
+/* Select v6 draws its border on the root; include both markup variants.
+   Popup colours come from the attack-chain ConfigProvider so body portals
+   (including the date/time picker) share the same light theme. */
+.chain-page-workbench .standard-filter-bar :is(.ant-input,.ant-input-affix-wrapper,.ant-select,.ant-select-selector,.ant-picker,.ant-btn) {
+  color: #1f2937 !important;
+  background: #fff !important;
+  border-color: #d1d5db !important;
+  border-radius: 6px !important;
+}
+.chain-page-workbench .standard-filter-bar :is(.ant-input,.ant-input-affix-wrapper,.ant-select,.ant-select-selector,.ant-picker,.ant-btn):hover {
+  border-color: #9ca3af !important;
+}
+.chain-page-workbench .standard-filter-bar :is(.ant-input-affix-wrapper-focused,.ant-select-focused,.ant-picker-focused,.ant-btn:focus-visible) {
+  outline: 2px solid #bfdbfe;
+  outline-offset: 1px;
+}
+.chain-page-workbench .standard-filter-bar :is(.ant-select-selection-placeholder,.ant-select-placeholder,.ant-select-arrow,.ant-picker-suffix,.ant-picker-separator) {
+  color: #6b7280;
+}

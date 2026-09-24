@@ -11,6 +11,7 @@ pub(crate) mod knowledge;
 pub(crate) mod lifecycle;
 pub(crate) mod policy;
 pub(crate) mod range;
+pub(crate) mod report_export;
 pub(crate) mod runtime_decisions;
 pub(crate) mod runtime_detection_settings;
 pub(crate) mod settings;

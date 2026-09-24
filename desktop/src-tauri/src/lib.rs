@@ -34,6 +34,8 @@ pub fn run() {
             commands::agents::get_agent_detail,
             commands::agents::export_agents_report_pdf,
             commands::agents::export_page_report_pdf,
+            commands::report_export::select_export_directory,
+            commands::report_export::export_text_file_to_directory,
             commands::agent_governance::agent_governance_get,
             commands::agent_governance::agent_governance_post,
             commands::agent_governance::agent_governance_patch,

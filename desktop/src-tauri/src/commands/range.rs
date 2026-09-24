@@ -22,6 +22,7 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 const RANGE_REPLAY_LOG_LIMIT: usize = 160;
+const RANGE_BASELINE_ENV: &str = "DEFENSECLAW_AGENTRANGE_BASELINE";
 const RANGE_REPLAY_WRAPPER: &str = r##"
 import importlib.util
 import json
@@ -309,6 +310,179 @@ fn default_development_root() -> Option<PathBuf> {
         .join("task")
         .join("AgentRange-player");
     path.join("docker-compose.yml").is_file().then_some(path)
+}
+
+fn agentrange_baseline_root(root: &Path) -> Result<PathBuf, String> {
+    let candidate = std::env::var_os(RANGE_BASELINE_ENV)
+        .map(PathBuf::from)
+        .or_else(|| {
+            root.parent()
+                .map(|parent| parent.join("AgentRange-player-full"))
+        })
+        .ok_or_else(|| "无法确定完整版靶场目录".to_owned())?;
+    if !candidate.join("docker-compose.yml").is_file() {
+        return Err(format!(
+            "完整版靶场目录无效：{}（可通过 {} 指定）",
+            candidate.display(),
+            RANGE_BASELINE_ENV
+        ));
+    }
+    Ok(candidate)
+}
+
+fn normalized_text(bytes: &[u8]) -> Option<String> {
+    std::str::from_utf8(bytes)
+        .ok()
+        .map(|text| text.replace("\r\n", "\n").replace('\r', "\n"))
+}
+
+fn baseline_content_matches(expected: &[u8], current: &[u8]) -> bool {
+    if expected == current {
+        return true;
+    }
+    matches!(
+        (normalized_text(expected), normalized_text(current)),
+        (Some(expected), Some(current)) if expected == current
+    )
+}
+
+#[derive(Default)]
+struct RangeRestoreSummary {
+    restored_missing: usize,
+    restored_changed: usize,
+    missing_paths: Vec<String>,
+    changed_paths: Vec<String>,
+}
+
+fn restore_baseline_tree(
+    baseline_root: &Path,
+    current_root: &Path,
+    backup_root: &Path,
+) -> Result<RangeRestoreSummary, String> {
+    fn visit(
+        baseline_root: &Path,
+        current_root: &Path,
+        backup_root: &Path,
+        directory: &Path,
+        summary: &mut RangeRestoreSummary,
+    ) -> Result<(), String> {
+        let entries = fs::read_dir(directory)
+            .map_err(|error| format!("读取完整版靶场 {} 失败：{error}", directory.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|error| format!("读取完整版靶场目录项失败：{error}"))?;
+            let source = entry.path();
+            let file_type = entry
+                .file_type()
+                .map_err(|error| format!("读取 {} 类型失败：{error}", source.display()))?;
+            if file_type.is_symlink() {
+                return Err(format!(
+                    "完整版靶场包含不支持的符号链接：{}",
+                    source.display()
+                ));
+            }
+            let relative = source
+                .strip_prefix(baseline_root)
+                .map_err(|error| format!("计算完整版靶场相对路径失败：{error}"))?;
+            let destination = current_root.join(relative);
+            if file_type.is_dir() {
+                fs::create_dir_all(&destination)
+                    .map_err(|error| format!("创建 {} 失败：{error}", destination.display()))?;
+                visit(baseline_root, current_root, backup_root, &source, summary)?;
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+
+            let expected = fs::read(&source)
+                .map_err(|error| format!("读取完整版文件 {} 失败：{error}", source.display()))?;
+            match fs::read(&destination) {
+                Ok(current) if baseline_content_matches(&expected, &current) => continue,
+                Ok(_) => {
+                    let backup = backup_root.join(relative);
+                    if let Some(parent) = backup.parent() {
+                        fs::create_dir_all(parent).map_err(|error| {
+                            format!("创建备份目录 {} 失败：{error}", parent.display())
+                        })?;
+                    }
+                    fs::copy(&destination, &backup).map_err(|error| {
+                        format!(
+                            "备份被修改文件 {} 到 {} 失败：{error}",
+                            destination.display(),
+                            backup.display()
+                        )
+                    })?;
+                    summary.restored_changed += 1;
+                    summary
+                        .changed_paths
+                        .push(relative.to_string_lossy().into_owned());
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    summary.restored_missing += 1;
+                    summary
+                        .missing_paths
+                        .push(relative.to_string_lossy().into_owned());
+                }
+                Err(error) => {
+                    return Err(format!(
+                        "读取当前靶场文件 {} 失败：{error}",
+                        destination.display()
+                    ));
+                }
+            }
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| format!("创建 {} 失败：{error}", parent.display()))?;
+            }
+            fs::copy(&source, &destination).map_err(|error| {
+                format!(
+                    "从完整版靶场恢复 {} 到 {} 失败：{error}",
+                    source.display(),
+                    destination.display()
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    let mut summary = RangeRestoreSummary::default();
+    visit(
+        baseline_root,
+        current_root,
+        backup_root,
+        baseline_root,
+        &mut summary,
+    )?;
+    Ok(summary)
+}
+
+fn verify_and_restore_range(
+    app: &tauri::AppHandle,
+    root: &Path,
+) -> Result<RangeRestoreSummary, String> {
+    let baseline = agentrange_baseline_root(root)?;
+    let timestamp = Utc::now().format("%Y%m%dT%H%M%S%.3fZ").to_string();
+    let backup = desktop_defenseclaw_home(app)?
+        .join("agentrange-recovery")
+        .join(timestamp);
+    let summary = restore_baseline_tree(&baseline, root, &backup)?;
+    if summary.restored_missing > 0 || summary.restored_changed > 0 {
+        fs::create_dir_all(&backup)
+            .map_err(|error| format!("创建恢复报告目录 {} 失败：{error}", backup.display()))?;
+        let report = serde_json::json!({
+            "baseline_root": baseline,
+            "current_root": root,
+            "restored_missing": &summary.missing_paths,
+            "restored_changed": &summary.changed_paths,
+            "created_at": Utc::now().to_rfc3339(),
+        });
+        fs::write(
+            backup.join("recovery-report.json"),
+            serde_json::to_vec_pretty(&report).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| format!("写入靶场恢复报告失败：{error}"))?;
+    }
+    Ok(summary)
 }
 
 pub(crate) fn configured_root(app: &tauri::AppHandle) -> Option<PathBuf> {
@@ -1073,6 +1247,20 @@ fn change_range_state(
         ensure_range_integrity(app, &root)?;
         let _ = run_docker(&mode_files, &["down"]);
         let _ = run_docker(&baseline_files, &["down"]);
+        let restored = verify_and_restore_range(app, &root)?;
+        if restored.restored_missing > 0 || restored.restored_changed > 0 {
+            eprintln!(
+                "[agentrange] restored {} missing and {} changed baseline file(s)",
+                restored.restored_missing, restored.restored_changed
+            );
+        }
+        let build = run_docker(&mode_files, &["build"])?;
+        if !build.status.success() {
+            return Err(format!(
+                "重新构建靶场镜像失败：{}",
+                String::from_utf8_lossy(&build.stderr).trim()
+            ));
+        }
         if mode.requires_adapter() {
             let result = run_gateway_action_for_mode(app, "restart", mode.as_str())?;
             if !result.success {
@@ -1100,4 +1288,67 @@ pub fn start_range(app: tauri::AppHandle) -> Result<RangeStatus, String> {
 pub fn stop_range(app: tauri::AppHandle) -> Result<RangeStatus, String> {
     let mode = configured_mode(&app);
     change_range_state(&app, false, mode)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{baseline_content_matches, restore_baseline_tree};
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn test_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "defenseclaw-range-{name}-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ))
+    }
+
+    #[test]
+    fn baseline_comparison_ignores_text_line_endings() {
+        assert!(baseline_content_matches(b"one\ntwo\n", b"one\r\ntwo\r\n"));
+        assert!(!baseline_content_matches(b"one\ntwo\n", b"one\nchanged\n"));
+        assert!(!baseline_content_matches(&[0xff, 0x00], &[0xff, 0x01]));
+    }
+
+    #[test]
+    fn restore_recovers_missing_and_changed_files_without_deleting_extras() {
+        let root = test_root("restore");
+        let baseline = root.join("baseline");
+        let current = root.join("current");
+        let backup = root.join("backup");
+        fs::create_dir_all(baseline.join("skills/meeting-summary")).unwrap();
+        fs::create_dir_all(current.join("skills/meeting-summary")).unwrap();
+        fs::write(
+            baseline.join("skills/meeting-summary/SKILL.md"),
+            "official\n",
+        )
+        .unwrap();
+        fs::write(baseline.join("docker-compose.yml"), "services:\n").unwrap();
+        fs::write(current.join("docker-compose.yml"), "changed\n").unwrap();
+        fs::write(current.join(".env"), "keep-me\n").unwrap();
+
+        let summary = restore_baseline_tree(&baseline, &current, &backup).unwrap();
+
+        assert_eq!(summary.restored_missing, 1);
+        assert_eq!(summary.restored_changed, 1);
+        assert_eq!(
+            fs::read_to_string(current.join("skills/meeting-summary/SKILL.md")).unwrap(),
+            "official\n"
+        );
+        assert_eq!(
+            fs::read_to_string(current.join("docker-compose.yml")).unwrap(),
+            "services:\n"
+        );
+        assert_eq!(
+            fs::read_to_string(current.join(".env")).unwrap(),
+            "keep-me\n"
+        );
+        assert_eq!(
+            fs::read_to_string(backup.join("docker-compose.yml")).unwrap(),
+            "changed\n"
+        );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
 }

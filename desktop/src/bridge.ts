@@ -84,6 +84,17 @@ import type {
 } from "./types";
 
 const inTauri = (): boolean => "__TAURI_INTERNALS__" in window;
+export const isDesktopRuntime = (): boolean => inTauri();
+
+export async function selectExportDirectory(title = "选择导出文件夹"): Promise<string | null> {
+  if (!inTauri()) return null;
+  return invoke<string | null>("select_export_directory", { title });
+}
+
+export async function exportTextFileToDirectory(directory: string, content: string, defaultFileName: string): Promise<string> {
+  if (!inTauri()) throw new Error("仅桌面应用可以将文件写入所选目录");
+  return invoke<string>("export_text_file_to_directory", { directory, content, defaultFileName });
+}
 
 const defaultScanScheduleSettings = (): ScanScheduleSettings => ({
   version: 1,
@@ -164,7 +175,7 @@ const emptySummary = (agentId: string): StaticResourceSummaryResponse => ({
   critical_resource_count: 0,
   by_type: [],
 });
-const emptyList = (): StaticResourceListResponse => ({ total: 0, page: 1, page_size: 20, items: [] });
+const emptyList = (): StaticResourceListResponse => ({ total: 0, page: 1, pageSize: 20, items: [] });
 
 export async function getStaticResourceAgents(): Promise<StaticResourceAgentsResponse> {
   return inTauri() ? invoke<StaticResourceAgentsResponse>("get_static_resource_agents") : emptyAgents();
@@ -182,6 +193,8 @@ export interface StaticResourceListQuery {
   scanStatus?: string;
   status?: string;
   keyword?: string;
+  startTime?: string;
+  endTime?: string;
   page?: number;
   pageSize?: number;
 }
@@ -196,6 +209,8 @@ export async function getStaticResources(query: StaticResourceListQuery): Promis
     scanStatus: query.scanStatus,
     status: query.status,
     keyword: query.keyword,
+    startTime: query.startTime,
+    endTime: query.endTime,
     page: query.page,
     pageSize: query.pageSize,
   });
@@ -331,9 +346,9 @@ export async function getStaticResourceScans(resourceId: string, limit = 50): Pr
   return invoke<StaticResourceScanHistoryResponse>("get_static_resource_scans", { resourceId, limit });
 }
 
-export async function exportStaticResourceTextReport(content: string, defaultFileName?: string): Promise<string | null> {
-  if (!inTauri()) throw new Error("仅桌面应用可以选择路径并导出静态资源报告");
-  return invoke<string | null>("export_static_resource_text_report", { content, defaultFileName });
+export async function exportStaticResourceTextReport(content: string, defaultFileName: string, directory: string): Promise<string> {
+  if (!inTauri()) throw new Error("仅桌面应用可以将静态资源报告写入所选目录");
+  return invoke<string>("export_static_resource_text_report", { content, defaultFileName, directory });
 }
 
 export async function updateStaticResourceStatus(resourceId: string, status: string): Promise<StaticResourceStatusUpdateResponse> {
@@ -921,14 +936,14 @@ export async function getAgentDetail(agentId: string): Promise<AgentInventory> {
   return invoke<AgentInventory>("get_agent_detail", { agentId });
 }
 
-export async function exportAgentsReportPdf(agents: AgentInventory[], defaultFileName?: string): Promise<string | null> {
-  if (!inTauri()) throw new Error("仅桌面应用可以选择路径并导出 PDF 报告");
-  return invoke<string | null>("export_agents_report_pdf", { agents, defaultFileName });
+export async function exportAgentsReportPdf(agents: AgentInventory[], defaultFileName: string, directory: string): Promise<string> {
+  if (!inTauri()) throw new Error("仅桌面应用可以将 PDF 报告写入所选目录");
+  return invoke<string>("export_agents_report_pdf", { agents, defaultFileName, directory });
 }
 
-export async function exportPageReportPdf(html: string, defaultFileName?: string): Promise<string | null> {
-  if (!inTauri()) throw new Error("仅桌面应用可以选择路径并导出 PDF 报告");
-  return invoke<string | null>("export_page_report_pdf", { html, defaultFileName });
+export async function exportPageReportPdf(html: string, defaultFileName: string, directory: string): Promise<string> {
+  if (!inTauri()) throw new Error("仅桌面应用可以将 PDF 报告写入所选目录");
+  return invoke<string>("export_page_report_pdf", { html, defaultFileName, directory });
 }
 
 export async function getAgentRuntimeCatalog(): Promise<AgentRuntimeCatalog> {
