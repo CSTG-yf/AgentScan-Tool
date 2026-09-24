@@ -32,6 +32,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/defenseclaw/defenseclaw/internal/gateway/notifier"
+	"github.com/defenseclaw/defenseclaw/internal/procattr"
 	"github.com/defenseclaw/defenseclaw/internal/redaction"
 	"github.com/defenseclaw/defenseclaw/internal/scanner"
 )
@@ -713,6 +714,7 @@ func safeGitEnv() []string {
 
 func runGitList(ctx context.Context, cwd string, args ...string) ([]string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
+	procattr.Apply(cmd)
 	cmd.Dir = cwd
 	cmd.Env = safeGitEnv()
 
@@ -857,6 +859,7 @@ func gitRootForCWD(cwd string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
+	procattr.Apply(cmd)
 	cmd.Dir = safeCwd
 	cmd.Env = safeGitEnv()
 	out, err := cmd.Output()

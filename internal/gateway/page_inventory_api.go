@@ -22,6 +22,7 @@ import (
 	"github.com/defenseclaw/defenseclaw/internal/audit"
 	"github.com/defenseclaw/defenseclaw/internal/config"
 	"github.com/defenseclaw/defenseclaw/internal/inventory"
+	"github.com/defenseclaw/defenseclaw/internal/procattr"
 )
 
 type pageAgentSnapshot struct {
@@ -2288,6 +2289,7 @@ func pageAgentRangeRunningServices(cfg *config.Config) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", compose, "ps", "--services", "--filter", "status=running")
+	procattr.Apply(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil

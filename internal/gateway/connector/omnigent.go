@@ -25,6 +25,8 @@ import (
 	"sync"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/defenseclaw/defenseclaw/internal/procattr"
 )
 
 const (
@@ -483,6 +485,7 @@ func omnigentSitePackages(ctx context.Context) (string, error) {
 		return "", err
 	}
 	cmd := exec.CommandContext(ctx, pythonPath, "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+	procattr.Apply(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	output, err := cmd.Output()

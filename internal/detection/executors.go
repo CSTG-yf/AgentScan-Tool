@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/defenseclaw/defenseclaw/internal/audit"
+	"github.com/defenseclaw/defenseclaw/internal/procattr"
 )
 
 // RuntimeExecutionRequest is the narrow contract between the policy engine
@@ -67,6 +68,7 @@ func (ProcessExecutor) Execute(ctx context.Context, req RuntimeExecutionRequest)
 	defer cancel()
 	for _, pid := range pids {
 		cmd := exec.CommandContext(deadlineCtx, "taskkill.exe", "/PID", strconv.FormatUint(uint64(pid), 10), "/T", "/F")
+		procattr.Apply(cmd)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			message := strings.TrimSpace(string(output))
 			if message == "" {
