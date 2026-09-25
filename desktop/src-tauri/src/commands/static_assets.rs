@@ -250,7 +250,7 @@ pub fn update_static_resource_status(
 }
 
 #[tauri::command]
-pub fn reveal_static_resource_path(path: String) -> Result<(), String> {
+pub async fn reveal_static_resource_path(path: String) -> Result<(), String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err("资源路径为空".to_string());
@@ -258,7 +258,10 @@ pub fn reveal_static_resource_path(path: String) -> Result<(), String> {
     if trimmed.contains("://") {
         return Err("虚拟资源（运行时快照）没有对应的磁盘路径".to_string());
     }
-    reveal_in_file_explorer(trimmed)
+    let path = trimmed.to_owned();
+    tauri::async_runtime::spawn_blocking(move || reveal_in_file_explorer(&path))
+        .await
+        .map_err(|error| format!("打开文件管理器任务失败：{error}"))?
 }
 
 #[cfg(windows)]
@@ -283,17 +286,7 @@ fn reveal_in_file_explorer(path: &str) -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn reveal_in_file_explorer(path: &str) -> Result<(), String> {
-    let target = std::path::Path::new(path);
-    let directory = if target.is_dir() {
-        target
-    } else {
-        target.parent().unwrap_or(target)
-    };
-    std::process::Command::new("xdg-open")
-        .arg(directory)
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("打开文件管理器失败：{error}"))
+    crate::resource_opener::reveal(path)
 }
 
 #[cfg(all(not(windows), not(target_os = "linux")))]

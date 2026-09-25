@@ -4,9 +4,13 @@ mod knowledge;
 mod models;
 mod platform;
 mod policy_defaults;
+#[cfg(target_os = "linux")]
+mod resource_opener;
 pub mod process_guard;
 pub mod process_guard_service;
 mod trace_store;
+#[cfg(target_os = "linux")]
+mod wsl_pdf;
 #[path = "platform/windows/process.rs"]
 mod windows_process;
 

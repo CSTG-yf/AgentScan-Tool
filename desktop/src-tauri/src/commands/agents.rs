@@ -72,7 +72,19 @@ pub fn get_agent_detail(app: tauri::AppHandle, agent_id: String) -> Result<Agent
 }
 
 #[tauri::command]
-pub fn export_agents_report_pdf(
+pub async fn export_agents_report_pdf(
+    agents: Vec<AgentInventory>,
+    default_file_name: Option<String>,
+    directory: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        export_agents_report_pdf_impl(agents, default_file_name, directory)
+    })
+    .await
+    .map_err(|error| format!("PDF 导出任务失败：{error}"))?
+}
+
+fn export_agents_report_pdf_impl(
     agents: Vec<AgentInventory>,
     default_file_name: Option<String>,
     directory: String,
@@ -85,11 +97,7 @@ pub fn export_agents_report_pdf(
         &["pdf"],
     )?;
 
-    let temp_dir = env::temp_dir().join(format!(
-        "defenseclaw-agent-report-{}",
-        Utc::now().timestamp_millis()
-    ));
-    fs::create_dir_all(&temp_dir).map_err(|err| format!("创建临时目录失败：{err}"))?;
+    let temp_dir = create_report_temp_dir("agent-report")?;
     let html_path = temp_dir.join("report.html");
     let pdf_path = temp_dir.join("report.pdf");
     fs::write(&html_path, build_agents_report_html(&agents))
@@ -113,7 +121,19 @@ pub fn export_agents_report_pdf(
 /// is produced by trusted application code and printed through the same local
 /// Edge/Chrome pipeline used by the Agent report.
 #[tauri::command]
-pub fn export_page_report_pdf(
+pub async fn export_page_report_pdf(
+    html: String,
+    default_file_name: Option<String>,
+    directory: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        export_page_report_pdf_impl(html, default_file_name, directory)
+    })
+    .await
+    .map_err(|error| format!("PDF 导出任务失败：{error}"))?
+}
+
+fn export_page_report_pdf_impl(
     html: String,
     default_file_name: Option<String>,
     directory: String,
@@ -130,11 +150,7 @@ pub fn export_page_report_pdf(
         &["pdf"],
     )?;
 
-    let temp_dir = env::temp_dir().join(format!(
-        "defenseclaw-page-report-{}",
-        Utc::now().timestamp_millis()
-    ));
-    fs::create_dir_all(&temp_dir).map_err(|err| format!("创建临时目录失败：{err}"))?;
+    let temp_dir = create_report_temp_dir("page-report")?;
     let html_path = temp_dir.join("report.html");
     let pdf_path = temp_dir.join("report.pdf");
     fs::write(&html_path, html).map_err(|err| format!("写入临时报告失败：{err}"))?;
@@ -204,18 +220,32 @@ fn agent_list_path(query: Option<&AgentListQuery>) -> String {
     format!("/api/v1/agents?{query}")
 }
 
+fn create_report_temp_dir(kind: &str) -> Result<PathBuf, String> {
+    static NEXT_REPORT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let id = NEXT_REPORT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = env::temp_dir().join(format!(
+        "defenseclaw-{kind}-{}-{}-{id}",
+        std::process::id(),
+        Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    ));
+    fs::create_dir(&path).map_err(|error| format!("创建报告临时目录失败：{error}"))?;
+    Ok(path)
+}
+
 fn print_html_to_pdf(html_path: &Path, output_path: &Path) -> Result<(), String> {
-    let browser = find_pdf_browser().ok_or_else(|| {
-        "未找到 Microsoft Edge、Chrome 或 Chromium，无法导出 PDF 报告".to_string()
-    })?;
+    let browser = match find_pdf_browser() {
+        Some(browser) => browser,
+        None => {
+            #[cfg(target_os = "linux")]
+            return crate::wsl_pdf::print_html_to_pdf(html_path, output_path);
+            #[cfg(not(target_os = "linux"))]
+            return Err("未找到 Microsoft Edge、Chrome 或 Chromium，请安装浏览器后重试导出 PDF".to_owned());
+        }
+    };
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent).map_err(|err| format!("创建导出目录失败：{err}"))?;
     }
-    let profile_dir = env::temp_dir().join(format!(
-        "defenseclaw-agent-report-profile-{}",
-        Utc::now().timestamp_millis()
-    ));
-    fs::create_dir_all(&profile_dir).map_err(|err| format!("创建浏览器临时目录失败：{err}"))?;
+    let profile_dir = create_report_temp_dir("report-profile")?;
     let target = output_path.to_string_lossy().to_string();
     let source = file_url(html_path);
 
@@ -662,4 +692,31 @@ fn quiet_command(program: &str) -> Command {
         command.creation_flags(CREATE_NO_WINDOW);
     }
     command
+}
+
+#[cfg(test)]
+mod pdf_tests {
+    use super::*;
+
+    #[test]
+    fn agent_report_preserves_linux_paths_and_escapes_names() {
+        let agent: AgentInventory = serde_json::from_value(serde_json::json!({
+            "id": "pdf-test-agent",
+            "product": "AgentRange / OpsPilot <测试>",
+            "vendor": "TraceBastion Lab",
+            "kind": "Agent Platform",
+            "runtimeStatus": "running",
+            "primaryPath": "/home/用户/AgentScan-Tool-linux/task/AgentRange-player",
+            "staticResourceCount": 17,
+            "riskResourceCount": 2,
+            "description": "Linux / WSL PDF 导出验证（测试数据）"
+        })).unwrap();
+        let html = build_agents_report_html(&[agent]);
+        assert!(html.contains("OpsPilot &lt;测试&gt;"));
+        assert!(html.contains("/home/用户/AgentScan-Tool-linux/task/AgentRange-player"));
+        // Optional artifact for manual rendering QA; normal test runs write nothing.
+        if let Some(path) = env::var_os("DEFENSECLAW_TEST_REPORT_HTML") {
+            fs::write(path, html).unwrap();
+        }
+    }
 }
