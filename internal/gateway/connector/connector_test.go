@@ -151,11 +151,7 @@ func TestAtomicWriteFile_PreservesSymlinkedDotfile(t *testing.T) {
 	if string(got) != "new" {
 		t.Fatalf("target contents = %q, want new", got)
 	}
-	if info, err := os.Stat(target); err != nil {
-		t.Fatalf("stat target: %v", err)
-	} else if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Fatalf("target mode = %#o, want 0600", mode)
-	}
+	assertConnectorFileSecurity(t, target, 0o600)
 }
 
 func TestExtractBearerKey(t *testing.T) {
@@ -2100,16 +2096,8 @@ env_key = "OPENAI_API_KEY"
 		t.Fatalf("Setup: %v", err)
 	}
 
-	info, err := os.Stat(configPath)
-	if err != nil {
-		t.Fatalf("stat config.toml: %v", err)
-	}
-	// Mask off the file-type bits — only the permission bits matter
-	// here. We assert exactly 0o600: any group/world bit means a
-	// shared-host user can read provider env-var names + base URLs.
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Errorf("config.toml mode = %#o, want 0o600", mode)
-	}
+	// Unix mode bits and Windows owner/DACL must both exclude other users.
+	assertConnectorFileSecurity(t, configPath, 0o600)
 }
 
 // TestCodex_Setup_RegistersHooksInline verifies the Codex connector
@@ -2152,8 +2140,14 @@ func TestCodex_Setup_RegistersHooksInline(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(content, "codex-hook.sh") {
-		t.Errorf("config.toml [hooks] missing codex-hook.sh reference\nfile:\n%s", content)
+	hookPath := filepath.Join(dir, "hooks", "codex-hook.sh")
+	hookCommand := hookInvocationCommand("codex", filepath.ToSlash(hookPath))
+	wiringMarker := "codex-hook.sh"
+	if runtime.GOOS == "windows" {
+		wiringMarker = nativeHookFlag + "codex"
+	}
+	if !strings.Contains(content, wiringMarker) {
+		t.Errorf("config.toml [hooks] missing command %q\nfile:\n%s", hookCommand, content)
 	}
 
 	// Re-parse to ensure it's valid TOML and codex's expected shape
@@ -2173,7 +2167,6 @@ func TestCodex_Setup_RegistersHooksInline(t *testing.T) {
 	if !ok {
 		t.Fatalf("hooks.state missing — Codex would ask the user to review DefenseClaw hooks")
 	}
-	hookPath := filepath.Join(dir, "hooks", "codex-hook.sh")
 	for _, tc := range []struct {
 		eventType string
 		eventKey  string
@@ -2193,7 +2186,7 @@ func TestCodex_Setup_RegistersHooksInline(t *testing.T) {
 			t.Fatalf("hooks.state missing trusted entry for %s (%s); state=%v", tc.eventType, key, state)
 		}
 		gotHash, _ := entry["trusted_hash"].(string)
-		wantHash := codexCommandHookHash(tc.eventKey, tc.matcher, hookPath, tc.timeout)
+		wantHash := codexCommandHookHash(tc.eventKey, tc.matcher, hookCommand, tc.timeout)
 		if gotHash != wantHash {
 			t.Errorf("trusted_hash for %s = %q, want %q", tc.eventType, gotHash, wantHash)
 		}
@@ -2661,13 +2654,7 @@ func TestCodex_Setup_WiresNotifyBridge(t *testing.T) {
 	}
 
 	bridgePath := filepath.Join(dir, "notify-bridge.sh")
-	info, err := os.Stat(bridgePath)
-	if err != nil {
-		t.Fatalf("notify-bridge.sh missing — agent-turn-complete telemetry won't fire: %v", err)
-	}
-	if info.Mode().Perm() != 0o700 {
-		t.Errorf("notify-bridge.sh mode = %v, want 0o700 (operator-only — token is baked in)", info.Mode().Perm())
-	}
+	assertConnectorFileSecurity(t, bridgePath, 0o700)
 	bridge, err := os.ReadFile(bridgePath)
 	if err != nil {
 		t.Fatal(err)
@@ -2695,8 +2682,8 @@ func TestCodex_Setup_WiresNotifyBridge(t *testing.T) {
 	if first, _ := notify[0].(string); first != "bash" {
 		t.Errorf("notify[0] = %q, want \"bash\"", first)
 	}
-	if second, _ := notify[1].(string); !strings.HasSuffix(second, "/notify-bridge.sh") {
-		t.Errorf("notify[1] = %q, want path ending in /notify-bridge.sh", second)
+	if second, _ := notify[1].(string); filepath.Clean(second) != bridgePath {
+		t.Errorf("notify[1] = %q, want %q", second, bridgePath)
 	}
 }
 
