@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from agentrange_benchmark import prepare_run, score_run
+    from agentrange_benchmark import prepare_all, prepare_run, score_run
 except ImportError:  # pragma: no cover - package import when called as bench module
-    from bench.agentrange_benchmark import prepare_run, score_run
+    from bench.agentrange_benchmark import prepare_all, prepare_run, score_run
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORTS = ROOT / "integration" / "reports"
@@ -185,6 +185,12 @@ def main() -> int:
     prepare_parser.add_argument("--range-root", type=Path, default=ROOT / "task" / "AgentRange-player")
     score_parser = subparsers.add_parser("score", help="Score per-instance observations after side-effect probes")
     score_parser.add_argument("--run-dir", type=Path, required=True)
+    prepare_all_parser = subparsers.add_parser("prepare-all", help="Prepare identical baseline/observe/action runs")
+    prepare_all_parser.add_argument("--output-root", type=Path, required=True)
+    prepare_all_parser.add_argument("--seed", type=int, default=1337)
+    prepare_all_parser.add_argument("--total", type=int, default=5200)
+    prepare_all_parser.add_argument("--malicious-target", type=int, default=80)
+    prepare_all_parser.add_argument("--range-root", type=Path, default=ROOT / "task" / "AgentRange-player")
     args = parser.parse_args()
     if args.command == "prepare":
         report = prepare_run(
@@ -199,6 +205,9 @@ def main() -> int:
         return 0
     if args.command == "score":
         print(json.dumps(score_run(args.run_dir), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "prepare-all":
+        print(json.dumps(prepare_all(args.output_root, seed=args.seed, total=args.total, malicious_target=args.malicious_target, range_root=args.range_root), ensure_ascii=False, indent=2))
         return 0
     if args.command in {None, "summarize"}:
         summarize(

@@ -109,6 +109,10 @@ def prepare_run(
         row["mode"] = mode
     write_jsonl(output_dir / "public-corpus.jsonl", public_rows)
     write_jsonl(output_dir / "gt.jsonl", ground_truth)
+    semantic_ground_truth = "\n".join(
+        json.dumps({key: value for key, value in row.items() if key not in {"run_id", "mode"}}, ensure_ascii=False, sort_keys=True)
+        for row in ground_truth
+    ).encode("utf-8")
     manifest = {
         "schema_version": 1,
         "run_id": run_id,
@@ -122,11 +126,40 @@ def prepare_run(
         "arena_sha256": sha256_tree(range_root),
         "public_corpus_sha256": sha256_file(output_dir / "public-corpus.jsonl"),
         "ground_truth_sha256": sha256_file(output_dir / "gt.jsonl"),
+        "ground_truth_semantic_sha256": hashlib.sha256(semantic_ground_truth).hexdigest(),
         "forbidden_detector_inputs": ["/admin/trajectories", "scenario_id", "label", "gt.jsonl"],
         "detection_input_contract": "public-corpus.jsonl plus application/system observations only",
     }
     (output_dir / "run.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return manifest
+
+
+def prepare_all(
+    output_root: Path,
+    *,
+    seed: int = 1337,
+    total: int = 5200,
+    malicious_target: int = 80,
+    range_root: Path = RANGE_ROOT,
+) -> dict[str, Any]:
+    """Prepare identical corpus/GT inputs for all evaluation modes."""
+    manifests = {}
+    for mode in ("baseline", "observe", "action"):
+        manifests[mode] = prepare_run(
+            output_root / mode,
+            seed=seed,
+            total=total,
+            malicious_target=malicious_target,
+            mode=mode,
+            range_root=range_root,
+        )
+    semantic_hashes = {manifest["ground_truth_semantic_sha256"] for manifest in manifests.values()}
+    return {
+        "schema_version": 1,
+        "output_root": str(output_root.resolve()),
+        "ground_truth_semantic_sha256": semantic_hashes.pop() if len(semantic_hashes) == 1 else None,
+        "runs": manifests,
+    }
 
 
 def _as_bool(value: Any) -> bool | None:
@@ -326,11 +359,20 @@ def main() -> int:
     prepare.add_argument("--malicious-target", type=int, default=80)
     prepare.add_argument("--mode", choices=("baseline", "observe", "action"), default="action")
     prepare.add_argument("--range-root", type=Path, default=RANGE_ROOT)
+    prepare_all_parser = subparsers.add_parser("prepare-all", help="Prepare identical baseline/observe/action runs")
+    prepare_all_parser.add_argument("--output-root", type=Path, required=True)
+    prepare_all_parser.add_argument("--seed", type=int, default=1337)
+    prepare_all_parser.add_argument("--total", type=int, default=5200)
+    prepare_all_parser.add_argument("--malicious-target", type=int, default=80)
+    prepare_all_parser.add_argument("--range-root", type=Path, default=RANGE_ROOT)
     score = subparsers.add_parser("score")
     score.add_argument("--run-dir", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "prepare":
         print(json.dumps(prepare_run(args.output_dir, seed=args.seed, total=args.total, malicious_target=args.malicious_target, mode=args.mode, range_root=args.range_root), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "prepare-all":
+        print(json.dumps(prepare_all(args.output_root, seed=args.seed, total=args.total, malicious_target=args.malicious_target, range_root=args.range_root), ensure_ascii=False, indent=2))
         return 0
     report = score_run(args.run_dir)
     print(json.dumps(report, ensure_ascii=False, indent=2))

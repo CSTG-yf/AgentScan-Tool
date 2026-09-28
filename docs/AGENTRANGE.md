@@ -85,6 +85,11 @@ python .\task\AgentRange-player\scenario-runner\runner.py
 python .\bench\agentrange_benchmark.py score --run-dir .\bench\runs\action-<run-id>
 ```
 
+To create comparable inputs for every mode in one step, use
+`python .\bench\agentrange_benchmark.py prepare-all --output-root .\bench\runs\<run-id>`;
+the three subdirectories share the same public-corpus hash and semantic Ground
+Truth hash (the per-mode file hash also includes its mode metadata).
+
 The live runner records request status and timing. Use
 `bench/side_effect_probes.py` from an evaluation wrapper to capture C2
 receipts and container file markers, then merge those results into

@@ -4,12 +4,23 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from bench.agentrange_benchmark import prepare_run, score_run
+from bench.agentrange_benchmark import prepare_all, prepare_run, score_run
 from bench.resource_sampler import docker_stats
 from bench.side_effect_probes import c2_delta, evaluate_side_effects
 
 
 class AgentRangeBenchmarkTest(unittest.TestCase):
+    def test_prepare_all_reuses_identical_public_corpus(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "runs"
+            result = prepare_all(root, total=12, malicious_target=3)
+            self.assertEqual(set(result["runs"]), {"baseline", "observe", "action"})
+            hashes = {item["public_corpus_sha256"] for item in result["runs"].values()}
+            self.assertEqual(len(hashes), 1)
+            truth_hashes = {item["ground_truth_semantic_sha256"] for item in result["runs"].values()}
+            self.assertEqual(len(truth_hashes), 1)
+            self.assertEqual(result["ground_truth_semantic_sha256"], truth_hashes.pop())
+
     @patch("bench.resource_sampler.subprocess.run")
     def test_resource_sampler_parses_docker_stats(self, run):
         run.return_value.returncode = 0
