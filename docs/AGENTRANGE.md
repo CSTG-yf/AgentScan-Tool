@@ -60,6 +60,24 @@ python .\dashboard\build_dashboard.py
 Start-Process .\dashboard\index.html
 ```
 
+Before a live replay, prepare an isolated benchmark run. The generated
+`gt.jsonl` stays in the run directory and must not be mounted into the
+detector or sent to `/admin/trajectories`:
+
+```powershell
+python .\bench\agentrange_benchmark.py prepare --output-dir .\bench\runs\action-<run-id> --mode action
+$env:AGENTRANGE_RUN_DIR = ".\bench\runs\action-<run-id>"
+# 在另一终端与回放并行采样，不能在回放结束后用单个快照代替窗口采样：
+# python .\bench\resource_sampler.py --output "$env:AGENTRANGE_RUN_DIR\resources.jsonl" --mode action --samples 20 --interval-ms 250
+python .\task\AgentRange-player\scenario-runner\runner.py
+python .\bench\agentrange_benchmark.py score --run-dir .\bench\runs\action-<run-id>
+```
+
+The live runner records request status and timing. Side-effect probes (C2
+receipts, database rows, file/cron markers, and command markers) must be
+added to `observations.jsonl` before scoring. Missing probes remain
+`unknown`; they are never treated as a successful block.
+
 | 产物 | 含义 |
 | --- | --- |
 | `integration/reports/static-scan.json` | 合同资产覆盖、静态风险命中及良性对照结果 |

@@ -46,6 +46,7 @@ cli/defenseclaw/_data/
 .venv/
 .defenseclaw-home/
 bench/results/
+bench/runs/
 integration/reports/
 dashboard/index.html
 

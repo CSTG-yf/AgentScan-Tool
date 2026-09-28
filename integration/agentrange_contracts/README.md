@@ -31,3 +31,23 @@ Metrics are joined by `instance_id`, never by individual HTTP request:
 
 The default corpus is generated with `seed=1337`, `total=5200`, and
 `malicious_target=80`.
+
+## Post-run benchmark files
+
+`bench/agentrange_benchmark.py prepare` writes three separate inputs under a
+run directory:
+
+- `run.json`: mode, seed, commit, arena hash, corpus hashes, and forbidden
+  detector inputs.
+- `public-corpus.jsonl`: replay data. It contains no scenario, label, or
+  ground-truth evidence.
+- `gt.jsonl`: private instance labels and expected side-effect probes. This
+  file is consumed only by the post-run scorer.
+
+The runner writes `observations.jsonl` with one or more rows per instance.
+Each row must include the decision, validity/timeout status, end-to-end
+latency, business outcome, and a side-effect probe result. A successful HTTP
+response is not sufficient evidence that a dangerous action was prevented.
+`bench/agentrange_benchmark.py score` joins these files by `instance_id` and
+marks missing or incomplete evidence as `unknown` instead of silently
+counting it as a pass.

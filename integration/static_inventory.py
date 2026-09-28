@@ -18,7 +18,19 @@ DEFAULT_TAXONOMY = PROJECT_ROOT / "integration" / "risk_taxonomy.yaml"
 DEFAULT_OUTPUT = PROJECT_ROOT / "integration" / "reports" / "static-scan.json"
 
 TEXT_SUFFIXES = {".py", ".md", ".yaml", ".yml", ".env", ".example", ".json", ".toml"}
-SCAN_ROOTS = ("skills", "mcp", "opspilot-app", "langflow", "docker-compose.yml", ".env.example")
+SCAN_ROOTS = (
+    "skills",
+    "mcp",
+    "opspilot-app",
+    "llm-stub",
+    "langflow",
+    "backends",
+    "attack",
+    "scenario-runner",
+    "corpus-generator",
+    "docker-compose.yml",
+    ".env.example",
+)
 
 
 def load_yaml(path: Path) -> dict:
@@ -89,6 +101,16 @@ def scan(
                     )
 
     existing_assets = [asset for asset in assets if (range_root / asset["source"]).exists()]
+    asset_observations = [
+        {
+            "asset_id": asset["id"],
+            "type": asset.get("type", ""),
+            "source": asset["source"],
+            "source_exists": (range_root / asset["source"]).exists(),
+            "observed_by_source_probe": any(item["asset_id"] == asset["id"] for item in findings),
+        }
+        for asset in assets
+    ]
     required = {tuple(item) for item in taxonomy["acceptance"]["required_rule_assets"]}
     detected = {(item["rule_id"], item["asset_id"]) for item in findings}
     benign = set(taxonomy["acceptance"]["benign_controls"])
@@ -105,11 +127,18 @@ def scan(
             "asset_expected": len(assets),
             "asset_found": len(existing_assets),
             "asset_coverage": round(len(existing_assets) / len(assets), 6) if assets else 1.0,
+            "contract_asset_coverage": round(len(existing_assets) / len(assets), 6) if assets else 1.0,
+            "asset_precision": None,
+            "asset_recall": None,
+            "asset_metric_status": "requires_independent_asset_ground_truth",
             "required_risks": len(required),
             "required_risks_detected": len(required & detected),
             "risk_recall": round(len(required & detected) / len(required), 6) if required else 1.0,
+            "risk_precision": None,
+            "risk_metric_status": "contract_rule_coverage_only",
             "high_risk_benign_findings": len(high_risk_benign),
         },
+        "asset_observations": asset_observations,
         "missing_required_risks": sorted([list(item) for item in required - detected]),
         "benign_control_violations": high_risk_benign,
     }

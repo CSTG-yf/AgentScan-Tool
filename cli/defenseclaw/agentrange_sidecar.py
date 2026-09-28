@@ -115,6 +115,27 @@ def extract_trace(headers: Any) -> str:
     return f"trace-{uuid4()}"
 
 
+def extract_authorization_context(headers: Any) -> dict[str, Any] | None:
+    """Read adapter-supplied authenticated scope for downstream policy checks.
+
+    The application adapter has already validated the JWT before these
+    headers are emitted.  The sidecar only transports the normalized shape;
+    it never uses scenario labels or trajectory data to construct it.
+    """
+    subject = str(headers.get("X-Acting-User") or "").strip()
+    role = str(headers.get("X-Acting-Role") or "").strip()
+    raw_scope = str(headers.get("X-Acting-Scope") or "").strip()
+    if not subject and not raw_scope:
+        return None
+    try:
+        scope = json.loads(raw_scope) if raw_scope else {}
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(scope, dict):
+        return None
+    return {"principal": {"sub": subject, "role": role, "scope": scope}}
+
+
 def authed_request(url: str, payload: dict[str, Any], *, timeout: float) -> Request:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = Request(url, data=body, method="POST")
@@ -214,6 +235,9 @@ def emit_audit_event(
     decision = verdict_action(verdict, error)
     severity = verdict_severity(verdict, error)
     structured = {
+        # AgentRange's runner uses X-Instance-Id as the stable benchmark key;
+        # keep it explicit so post-run scoring never guesses from trace data.
+        "instance_id": session_id,
         "session_id": session_id,
         "trace_id": trace_id,
         "stage": stage,
@@ -249,6 +273,7 @@ def emit_audit_event(
         "severity": severity,
         "trace_id": trace_id,
         "session_id": session_id,
+        "instance_id": session_id,
         "agent_name": "AgentRange",
         "connector": connector_name(),
         "destination_app": structured["destination"],
@@ -268,7 +293,7 @@ def emit_runtime_result(outcome: str, status: int = 0) -> None:
     state = _runtime_request.get()
     if not state:
         return
-    context = dict(state["context"], phase="result", event_id=state["result_id"])
+    context = dict(state["context"], instance_id=state["context"].get("instance_id", state["context"]["session_id"]), phase="result", event_id=state["result_id"])
     payload = {"runtime_context": context, "outcome": outcome,
                "http_status": status, "inspection_event_ids": state["inspection_ids"]}
     # Result delivery is independent of audit and happens after response delivery.
@@ -324,6 +349,9 @@ def inspect_tool(
     }
     if mcp_server:
         payload["mcp_server_name"] = mcp_server
+    state = _runtime_request.get()
+    if state and state.get("authorization_context"):
+        payload["context"] = state["authorization_context"]
     return inspect_call("/api/v1/inspect/tool", payload)
 
 
@@ -521,9 +549,10 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
             return
 
         meta = request_event_meta(self, body, target_url)
+        authorization_context = extract_authorization_context(self.headers)
         _runtime_request.set({
             "context": {
-                "connector": connector_name(), "session_id": session_id, "trace_id": trace_id,
+                "connector": connector_name(), "instance_id": session_id, "session_id": session_id, "trace_id": trace_id,
                 "call_id": str(uuid4()), "event_id": str(uuid4()), "phase": "pre",
                 "proxy_kind": getenv("DC_PROXY_KIND"), "operation": "http.request",
                 "tool_name": meta.get("tool_name", ""), "mcp_server": meta.get("mcp_server", ""),
@@ -531,6 +560,7 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
                 "target": str(meta.get("target") or getenv("DC_PROXY_KIND")),
             },
             "result_id": str(uuid4()), "inspection_ids": [], "pending_checks": [],
+            "authorization_context": authorization_context,
         })
         started = time.monotonic()
         verdict, inspect_error = self._pre_inspect(session_id, body)

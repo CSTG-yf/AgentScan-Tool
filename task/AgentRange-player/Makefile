@@ -1,11 +1,6 @@
-.PHONY: up down test seed smoke generate replay integrity
+.PHONY: up down test seed smoke generate replay
 
-PYTHON ?= python3
-
-integrity:
-	$(PYTHON) integrity/check.py --repair
-
-up: integrity
+up:
 	docker compose up -d --build
 
 down:

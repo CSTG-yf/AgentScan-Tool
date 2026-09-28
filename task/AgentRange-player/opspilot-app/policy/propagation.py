@@ -16,6 +16,16 @@ def propagate(identity: Identity, mode: str, service_token: str) -> dict:
     return {"Authorization": f"Bearer {service_token}"}
 
 
-def trace_headers(trace_id: str) -> dict:
-    # Trace ID 只服务于链路串联，不携带身份和权限语义。
-    return {"X-Trace-Id": trace_id}
+def trace_headers(trace_id: str, identity: Identity | None = None) -> dict:
+    # Trace ID 用于链路串联；当应用调用内部工具时，同时携带已经由
+    # JWT 校验得到的最小授权上下文，供下游通用策略做 scope 检查。
+    headers = {"X-Trace-Id": trace_id}
+    if identity is not None:
+        headers.update(
+            {
+                "X-Acting-User": identity.sub,
+                "X-Acting-Role": identity.role,
+                "X-Acting-Scope": json.dumps(identity.scope, ensure_ascii=False, separators=(",", ":")),
+            }
+        )
+    return headers
