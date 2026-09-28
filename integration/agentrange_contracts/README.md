@@ -12,6 +12,8 @@ from `/admin/trajectories` as a feature.
   evidence, and success/block criteria.
 - `range-event.schema.json`: normalized runtime evidence event.
 - `ground-truth.schema.json`: instance-level benchmark labels.
+- `observation.schema.json`: per-instance runtime outcome and probe evidence.
+- `resource.schema.json`: timestamped CPU/memory samples.
 - `decision.schema.json`: normalized allow/block decision.
 - `attack-chain.schema.json`: explainable attack-chain DAG.
 - `examples.jsonl`: one public contract example for each scored scenario.

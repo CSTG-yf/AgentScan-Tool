@@ -88,6 +88,7 @@ def _observation(action: dict, *, status: int | None, body: bytes = b"", started
     blocked = status == 403
     return {
         "instance_id": action["instance_id"],
+        "mode": os.getenv("AGENTRANGE_MODE", "action"),
         "request_id": action["instance_id"],
         "status": status,
         "valid": error is None,
