@@ -2,6 +2,18 @@
 
 本文所有命令均从仓库根目录执行。返回 [项目 README](../README.md)。
 
+## 赛题边界
+
+群公告（2026-07-03）确认：靶场将以 Docker 镜像发布到官网附件，题目考察
+通用 AI Agent 风险检测与阻断算法，覆盖越全面越好；允许选手自由选择资产
+采集/分析方式，也允许外部 API 辅助，但核心检测算法必须自主实现并满足检测
+时效性等评估指标。参赛队伍可以用自己的环境演示，网络环境不受限制。
+
+公告没有给出具体数值门槛。仓库 `task/AgentRange-player/docs/README.md` 中的
+95%/99%、<5%、<1 秒、CPU 5% 和业务零中断，是当前分支用于自测的工作目标，
+不能替代官网正式 Docker 靶场上线后的评分说明。评测工具因此会把缺失证据标为
+`unknown`，不会在本地样例结果上宣称官方达标。
+
 行为、审计、异常的接入流程、去重机制与更新步骤见 [AgentRange 运行时事件接入](AGENTRANGE_RUNTIME_EVENTS.md)。
 
 `task/AgentRange-player/` 是原始靶场。适配器在项目侧生成 overlay，将 OpsPilot 入口、LLM、MCP 与 Langflow 流量送入检查 sidecar，不修改靶场源码。其 Compose 文件使用 `!reset []` 重置入口端口，需使用支持该语法的 Docker Compose 版本。
@@ -73,10 +85,12 @@ python .\task\AgentRange-player\scenario-runner\runner.py
 python .\bench\agentrange_benchmark.py score --run-dir .\bench\runs\action-<run-id>
 ```
 
-The live runner records request status and timing. Side-effect probes (C2
-receipts, database rows, file/cron markers, and command markers) must be
-added to `observations.jsonl` before scoring. Missing probes remain
-`unknown`; they are never treated as a successful block.
+The live runner records request status and timing. Use
+`bench/side_effect_probes.py` from an evaluation wrapper to capture C2
+receipts and container file markers, then merge those results into
+`observations.jsonl`; database response markers can be passed as the response
+probe. Missing probes remain `unknown`; they are never treated as a
+successful block.
 
 | 产物 | 含义 |
 | --- | --- |

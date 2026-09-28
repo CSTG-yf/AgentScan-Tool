@@ -6,6 +6,7 @@ from pathlib import Path
 
 from bench.agentrange_benchmark import prepare_run, score_run
 from bench.resource_sampler import docker_stats
+from bench.side_effect_probes import c2_delta, evaluate_side_effects
 
 
 class AgentRangeBenchmarkTest(unittest.TestCase):
@@ -15,6 +16,16 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
         run.return_value.stdout = '{"Name":"mcp","CPUPerc":"1.25%","MemUsage":"2MiB / 4GiB","MemPerc":"0.05%"}\n'
         run.return_value.stderr = ""
         self.assertEqual(docker_stats(), [{"container": "mcp", "cpu_pct": 1.25, "memory_usage": "2MiB / 4GiB", "memory_pct": 0.05}])
+
+    def test_side_effect_probe_marks_unavailable_as_unknown(self):
+        self.assertEqual(c2_delta({"available": True, "count": 2}, {"available": True, "count": 3})["new_receipts"], 1)
+        result = evaluate_side_effects(
+            {"expected_side_effects": ["sensitive_data_egress"]},
+            c2_before={"available": False},
+            c2_after={"available": False},
+        )
+        self.assertIsNone(result["side_effect_reached"])
+        self.assertEqual(result["side_effect_probe_status"], "unknown")
 
     def test_prepare_separates_public_corpus_and_ground_truth(self):
         with tempfile.TemporaryDirectory() as directory:
