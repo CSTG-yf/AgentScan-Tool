@@ -17,3 +17,8 @@ func assertConnectorFileSecurity(t *testing.T, path string, want os.FileMode) {
 		t.Fatalf("file mode = %o, want %o", got, want)
 	}
 }
+
+func assertConnectorDirSecurity(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	assertConnectorFileSecurity(t, path, want)
+}

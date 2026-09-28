@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -134,7 +135,7 @@ func installFakeClaude(t *testing.T, dir string) {
 	t.Helper()
 	binDir := filepath.Join(dir, "bin")
 	script := filepath.Join(binDir, "claude")
-	writeTestFile(t, script, `#!/bin/sh
+	body := `#!/bin/sh
 printf '%s\n' "$*" >> "$DEFENSECLAW_FAKE_CLAUDE_LOG"
 if [ "$1" = "plugin" ] && [ "$2" = "list" ]; then
   if [ -n "$DEFENSECLAW_FAKE_CLAUDE_LIST" ]; then
@@ -143,7 +144,13 @@ if [ "$1" = "plugin" ] && [ "$2" = "list" ]; then
   exit 0
 fi
 exit 0
-`)
+`
+	if runtime.GOOS == "windows" {
+		script += ".cmd"
+		body = "@echo off\r\necho %*>>\"%DEFENSECLAW_FAKE_CLAUDE_LOG%\"\r\n" +
+			"if \"%1\"==\"plugin\" if \"%2\"==\"list\" if not \"%DEFENSECLAW_FAKE_CLAUDE_LIST%\"==\"\" echo %DEFENSECLAW_FAKE_CLAUDE_LIST%\r\nexit /b 0\r\n"
+	}
+	writeTestFile(t, script, body)
 	if err := os.Chmod(script, 0o755); err != nil {
 		t.Fatalf("chmod fake claude: %v", err)
 	}

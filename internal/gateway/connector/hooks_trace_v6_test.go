@@ -31,6 +31,7 @@ import (
 // and Go-side validators would let one half emit headers the other
 // half ignores, which is harder to debug than a 415.
 func TestHardening_ValidateTraceparent(t *testing.T) {
+	requirePOSIXHookScriptExecution(t)
 	helperPath := materializeHardeningHelper(t)
 
 	cases := []struct {
@@ -73,6 +74,7 @@ func TestHardening_ValidateTraceparent(t *testing.T) {
 // env it emits nothing. Hostile env values are silently dropped (the
 // hook still posts; trace propagation just skips).
 func TestHardening_ExtractTraceContext(t *testing.T) {
+	requirePOSIXHookScriptExecution(t)
 	helperPath := materializeHardeningHelper(t)
 
 	cases := []struct {

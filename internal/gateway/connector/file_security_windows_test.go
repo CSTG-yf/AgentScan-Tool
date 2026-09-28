@@ -17,3 +17,10 @@ func assertConnectorFileSecurity(t *testing.T, path string, _ os.FileMode) {
 		t.Fatalf("file owner/DACL is not private: %v", err)
 	}
 }
+
+func assertConnectorDirSecurity(t *testing.T, path string, _ os.FileMode) {
+	t.Helper()
+	if err := hookAPIValidateDirectoryElement(path); err != nil {
+		t.Fatalf("directory owner/DACL is not private: %v", err)
+	}
+}

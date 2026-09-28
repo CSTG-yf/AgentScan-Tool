@@ -420,6 +420,7 @@ func TestHookContractLockEntryIncludesResolvedLocations(t *testing.T) {
 	home := filepath.Join(dir, "home")
 	workspace := filepath.Join(dir, "repo")
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	conn := NewOpenHandsConnector()
 	opts := SetupOpts{
 		DataDir:      filepath.Join(dir, "dc"),

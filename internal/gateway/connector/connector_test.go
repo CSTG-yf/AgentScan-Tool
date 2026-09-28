@@ -1386,7 +1386,7 @@ func TestClaudeCode_Teardown_WritesDisabledHookForCachedProcesses(t *testing.T) 
 	if err != nil {
 		t.Fatalf("disabled hook missing after teardown: %v", err)
 	}
-	if info.Mode()&0o111 == 0 {
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 		t.Fatalf("disabled hook is not executable: mode %v", info.Mode())
 	}
 
@@ -1600,7 +1600,7 @@ func TestEveryHookOwner_TeardownLeavesTombstone(t *testing.T) {
 			if err != nil {
 				t.Fatalf("tombstone missing after Teardown — cached host PIDs would hit exit-127: %v", err)
 			}
-			if info.Mode()&0o111 == 0 {
+			if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 				t.Errorf("tombstone is not executable: mode %v — cached PIDs would still hit a fork/exec failure", info.Mode())
 			}
 
@@ -2006,7 +2006,7 @@ func TestCodex_Setup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hook script not created: %v", err)
 	}
-	if info.Mode()&0o111 == 0 {
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 		t.Error("hook script not executable")
 	}
 	data, _ := os.ReadFile(hookPath)
@@ -2943,7 +2943,7 @@ func TestCodex_Teardown_WritesDisabledHookForCachedProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("disabled hook missing after teardown: %v", err)
 	}
-	if info.Mode()&0o111 == 0 {
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 		t.Fatalf("disabled hook is not executable: mode %v", info.Mode())
 	}
 
@@ -3468,7 +3468,25 @@ func TestZeptoClaw_Route_SkipsEntriesWithNoAPIKey(t *testing.T) {
 	}
 }
 
+func requireZeptoProxyHost(t *testing.T) {
+	t.Helper()
+	if !ConnectorSupportedOnHostOS("zeptoclaw") {
+		t.Skip("ZeptoClaw requires the guardrail proxy, which is unavailable on this host OS")
+	}
+}
+
+func TestZeptoClaw_SetupRejectsUnsupportedWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific capability rejection")
+	}
+	err := NewZeptoClawConnector().Setup(context.Background(), SetupOpts{DataDir: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "not supported on windows") {
+		t.Fatalf("Setup error = %v, want explicit unsupported capability", err)
+	}
+}
+
 func TestZeptoClaw_Setup_IsIdempotent(t *testing.T) {
+	requireZeptoProxyHost(t)
 	// On every sidecar boot, Setup runs. If it overwrites the backup each
 	// time, the second boot captures the already-patched api_base (the
 	// proxy URL) as the "original", losing the user's real upstream. The
@@ -3515,6 +3533,7 @@ func TestZeptoClaw_Setup_IsIdempotent(t *testing.T) {
 }
 
 func TestZeptoClaw_Setup_UsesHookFailMode(t *testing.T) {
+	requireZeptoProxyHost(t)
 	if runtime.GOOS == "windows" {
 		t.Skip("shell scripts not supported on windows")
 	}
@@ -3551,6 +3570,7 @@ func TestZeptoClaw_Setup_UsesHookFailMode(t *testing.T) {
 }
 
 func TestZeptoClaw_Setup_LoadsProviderSnapshot(t *testing.T) {
+	requireZeptoProxyHost(t)
 	// After Setup(), the connector must retain the user's provider table
 	// in memory so Route() can look up upstreams. Otherwise we'd have to
 	// re-read the (already-patched) config file on every request.
@@ -3617,7 +3637,7 @@ func TestWriteShimScripts(t *testing.T) {
 			t.Errorf("shim %s not created: %v", name, err)
 			continue
 		}
-		if info.Mode()&0o111 == 0 {
+		if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 			t.Errorf("shim %s not executable", name)
 		}
 	}
@@ -3664,7 +3684,7 @@ func TestWriteHookScript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hook script not created: %v", err)
 	}
-	if info.Mode()&0o111 == 0 {
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 		t.Error("hook script not executable")
 	}
 }
@@ -3705,7 +3725,7 @@ func TestWriteAllHookScripts_CreatesAllFour(t *testing.T) {
 			t.Errorf("hook %s not created: %v", name, err)
 			continue
 		}
-		if info.Mode()&0o111 == 0 {
+		if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 			t.Errorf("hook %s not executable", name)
 		}
 		data, _ := os.ReadFile(path)
@@ -3782,6 +3802,7 @@ func TestOpenClawHookWriter_WritesGenericHooksOnly(t *testing.T) {
 }
 
 func TestWriteHookScriptsWithToken_InjectsBearerHeader(t *testing.T) {
+	requirePOSIXHookScriptExecution(t)
 	// The claude-code hook posts to /api/v1/claude-code/hook, which the API
 	// server's auth middleware guards with a bearer token. Without the
 	// header the request is 401'd, the hook script fails-open, and no
@@ -3800,6 +3821,7 @@ func TestWriteHookScriptsWithToken_InjectsBearerHeader(t *testing.T) {
 }
 
 func TestWriteHookScriptsWithToken_EmptyTokenOmitsHeader(t *testing.T) {
+	requirePOSIXHookScriptExecution(t)
 	// Operators who never set DEFENSECLAW_GATEWAY_TOKEN rely on the
 	// loopback fallback; emitting an empty Authorization header would
 	// make the API middleware reject with "invalid_token" instead of
@@ -3817,6 +3839,7 @@ func TestWriteHookScriptsWithToken_EmptyTokenOmitsHeader(t *testing.T) {
 }
 
 func TestWriteHookScriptsWithToken_EnvVarOverridesBakedToken(t *testing.T) {
+	requirePOSIXHookScriptExecution(t)
 	// If the operator rotates DEFENSECLAW_GATEWAY_TOKEN without
 	// regenerating hook scripts, the env var must win so the hook keeps
 	// working across rotations. ${DEFENSECLAW_GATEWAY_TOKEN:-<baked>} in
@@ -3834,6 +3857,7 @@ func TestWriteHookScriptsWithToken_EnvVarOverridesBakedToken(t *testing.T) {
 }
 
 func TestConnectorScopedHookTokenOverridesGenericEnv(t *testing.T) {
+	requirePOSIXHookScriptExecution(t)
 	dir := t.TempDir()
 	if err := WriteHookScriptsForConnectorObject(dir, "127.0.0.1:18970", "scoped-token", NewCodexConnector()); err != nil {
 		t.Fatalf("WriteHookScriptsForConnectorObject: %v", err)
@@ -3850,6 +3874,7 @@ func TestConnectorScopedHookTokenOverridesGenericEnv(t *testing.T) {
 }
 
 func TestConnectorScopedHookReadFailureClearsGenericEnv(t *testing.T) {
+	requirePOSIXHookScriptExecution(t)
 	for _, tc := range []struct {
 		name   string
 		mutate func(string) error
@@ -4618,11 +4643,7 @@ func TestClaudeCode_Setup_WritesOtelEnv(t *testing.T) {
 	if env["OTEL_SERVICE_NAME"] != "claudecode" {
 		t.Errorf("OTEL_SERVICE_NAME = %v, want \"claudecode\"", env["OTEL_SERVICE_NAME"])
 	}
-	if info, err := os.Stat(settingsPath); err != nil {
-		t.Fatalf("stat settings.json: %v", err)
-	} else if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Errorf("settings.json mode = %#o, want 0600 because OTel headers include the gateway token", mode)
-	}
+	assertConnectorFileSecurity(t, settingsPath, 0o600)
 }
 
 func TestClaudeCode_Setup_RawModeEnablesPromptLoggingAndTeardownRestores(t *testing.T) {
@@ -4884,6 +4905,7 @@ func TestClaudeCode_Teardown_RestoresPreExistingOtelEnvKeys(t *testing.T) {
 }
 
 func TestZeptoClaw_Setup_Surface1_PatchesConfig(t *testing.T) {
+	requireZeptoProxyHost(t)
 	dir := t.TempDir()
 
 	configDir := filepath.Join(dir, "zeptoclaw-config")
@@ -4958,6 +4980,7 @@ func TestZeptoClaw_Setup_Surface1_PatchesConfig(t *testing.T) {
 }
 
 func TestZeptoClaw_Setup_PreservesExistingHooks(t *testing.T) {
+	requireZeptoProxyHost(t)
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "zeptoclaw-config.json")
 	// ZeptoClaw's real hooks schema: before_tool/after_tool are arrays.
@@ -5059,6 +5082,7 @@ func TestZeptoClaw_Teardown_Surface1_RestoresConfig(t *testing.T) {
 }
 
 func TestZeptoClaw_Setup_ProducesValidZeptoClawConfig(t *testing.T) {
+	requireZeptoProxyHost(t)
 	// Regression test: before the fix, Setup wrote config["hooks"] as
 	// {before_tool: <string path>, ...}, which ZeptoClaw rejected with
 	// "expected a sequence" because its HooksConfig defines before_tool as
@@ -5978,6 +6002,7 @@ func TestPatchOpenClawConfig_Concurrent(t *testing.T) {
 }
 
 func TestZeptoClaw_Setup_EmptyProviders_Fails(t *testing.T) {
+	requireZeptoProxyHost(t)
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "zeptoclaw-config.json")
 	os.WriteFile(configPath, []byte(`{}`), 0o644)
@@ -6677,6 +6702,7 @@ func TestWriteHookScriptsForConnectorObject_HonoursInterface(t *testing.T) {
 // ${DEFENSECLAW_HOME}/hook-tmp.<PID>) on a long-running host
 // accumulates orphans forever.
 func TestHardening_SweepStaleHookDirs(t *testing.T) {
+	requirePOSIXHookScriptExecution(t)
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
 	}
@@ -6975,6 +7001,7 @@ func TestZeptoClawConfigPath_ZEPTOCLAW_HOME(t *testing.T) {
 	t.Run("falls back to HOME/.zeptoclaw when ZEPTOCLAW_HOME unset", func(t *testing.T) {
 		t.Setenv("ZEPTOCLAW_HOME", "")
 		t.Setenv("HOME", "/home/testuser")
+		t.Setenv("USERPROFILE", "/home/testuser")
 		got := zeptoClawConfigPath()
 		want := filepath.Join("/home/testuser", ".zeptoclaw", "config.json")
 		if got != want {
@@ -7005,6 +7032,7 @@ func TestZeptoClawHomeDir(t *testing.T) {
 	t.Run("falls back to HOME/.zeptoclaw", func(t *testing.T) {
 		t.Setenv("ZEPTOCLAW_HOME", "")
 		t.Setenv("HOME", "/home/testuser")
+		t.Setenv("USERPROFILE", "/home/testuser")
 		got := zeptoClawHomeDir()
 		want := filepath.Join("/home/testuser", ".zeptoclaw")
 		if got != want {
