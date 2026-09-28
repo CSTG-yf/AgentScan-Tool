@@ -1,6 +1,6 @@
 # DefenseClaw OpenTelemetry — Implementation Status
 
-> Audit of `OTEL.md` spec vs actual implementation as of **2026-04-21** (v7 closeout).
+> Original v7 audit: **2026-04-21**. Gateway emitted-counter wiring rechecked **2026-09-28**.
 
 ---
 
@@ -11,7 +11,7 @@
 - **SLO histograms:** `defenseclaw.slo.block.latency` (admission enforce path) and `defenseclaw.slo.tui.refresh` include multi-second upper buckets (e.g. 2000ms / 5000ms targets per product SLOs).
 - **Sampling / exporters:** Controlled by `config.OTel` — traces, metrics, logs independently toggled; OTLP gRPC/HTTP supported (`internal/telemetry/provider.go`). When OTel is disabled, structured gateway events still flow to JSONL + SQLite-relevant paths.
 - **Connector dimension (multi-connector):** one gateway can enforce guardrail policy for N hook connectors at once (`guardrail.connectors.<name>`), so telemetry carries a connector dimension on every rail — the OTel metric label `connector` (e.g. `defenseclaw.connector.hook.invocations{connector=...}`), the span/log attribute `defenseclaw.connector.source`, and the first-class `connector` field on audit rows / Splunk HEC / OTLP-ingest audit rows (plus `structured.connector` on hook rows). The OTel **resource** attribute `defenseclaw.claw.mode` is set to the sentinel value `multi` whenever more than one connector is active (otherwise the single connector name), so a fan-out gateway is distinguishable at the resource level. The egress firewall remains global (one host-wide ruleset), not part of this per-connector surface. See `docs/OBSERVABILITY-CONTRACT.md` → Connector dimension fields and `schemas/otel/resource.schema.json`.
-- **Known limitations:** `telemetry.RecordGatewayEventEmitted` exists but is not yet invoked from `gatewaylog.Writer` (rate comparison helper for Track 10); lifecycle/diagnostic events rely on log body + JSONL for observability. See `docs/OBSERVABILITY-CONTRACT.md` and `test/e2e/v7_observability_test.go` TODOs.
+- **Gateway event volume counter:** `gatewaylog.Writer.WithFanoutContext` is registered in `internal/gateway/sidecar.go` with `telemetry.Provider.EmitGatewayEventWithContext`. That method calls `RecordGatewayEventEmitted` once per fanout event before checking whether log export is enabled. The call is intentionally in the telemetry sink, not in `gatewaylog.Writer` itself. `internal/telemetry/track7_test.go` checks the counter. Lifecycle/diagnostic log-body and JSONL coverage, exporter-mode combinations, and any remaining OCSF Event Framework work are separate verification items; the emitted-counter wiring is no longer a missing feature. See `docs/OBSERVABILITY-CONTRACT.md`.
 
 Downstream contract: **[OBSERVABILITY-CONTRACT.md](./OBSERVABILITY-CONTRACT.md)**.
 

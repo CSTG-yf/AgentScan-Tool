@@ -25,12 +25,36 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
+	"github.com/defenseclaw/defenseclaw/internal/audit"
 	"github.com/defenseclaw/defenseclaw/internal/config"
+	"github.com/defenseclaw/defenseclaw/internal/detection"
 	"github.com/defenseclaw/defenseclaw/internal/enforce"
 )
+
+func TestRuntimeDecisionMCPExecutorBlocksNextToolCall(t *testing.T) {
+	api, store := toolPolicyAPI(t, "action")
+	engine := detection.NewPolicyEngine(store)
+	decision := audit.RuntimeDecision{DecisionID: "D-mcp-gate", EnforcementPoint: audit.EnforcementPointMCP}
+	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
+		MCPServer: "jira", Attributes: map[string]any{"connector": "codex"},
+	}}}
+	status, _, _ := engine.ExecuteNonProxy(context.Background(), decision, "MCP_BLOCK", evidence, true)
+	if status != audit.ResponseStatusExecuted {
+		t.Fatalf("MCP executor status = %s", status)
+	}
+	_, blocked := postInspect(t, api, `{"tool":"mcp__jira__createIssue","connector":"codex","args":{}}`)
+	if blocked.Action != "block" {
+		t.Fatalf("next MCP call action = %s; expected block", blocked.Action)
+	}
+	_, allowed := postInspect(t, api, `{"tool":"mcp__jira__createIssue","connector":"claudecode","args":{}}`)
+	if allowed.Action == "block" {
+		t.Fatal("connector-scoped block leaked to another connector")
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Hook lane (inspectToolPolicy)
