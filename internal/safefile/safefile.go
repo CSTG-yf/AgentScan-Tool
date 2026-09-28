@@ -39,6 +39,15 @@ import (
 // a same-name swap race against another local user.
 var ErrSymlinkRefused = errors.New("safefile: refusing to write through symlink")
 
+// ProtectPath restricts an existing file or directory to the current user
+// (plus SYSTEM and Administrators on Windows). Call it before writing data.
+func ProtectPath(path string, mode os.FileMode) error {
+	if err := os.Chmod(path, mode); err != nil {
+		return err
+	}
+	return securePrivateFile(path)
+}
+
 // Write atomically writes data to path with mode 0600. The write
 // strategy:
 //

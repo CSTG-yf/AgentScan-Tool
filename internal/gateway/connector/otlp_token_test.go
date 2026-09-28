@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/defenseclaw/defenseclaw/internal/safefile"
 )
 
 // TestIsValidOTLPScope_NegativeCases protects the lazy-reload path
@@ -79,9 +81,7 @@ func TestLoadOTLPPathToken_RejectsUnsafeFiles(t *testing.T) {
 			name: "wide_mode",
 			setup: func(t *testing.T, path string) {
 				t.Helper()
-				if err := os.WriteFile(path, []byte(token), 0o644); err != nil {
-					t.Fatal(err)
-				}
+				writeUnsafeOTLPTokenFile(t, path, []byte(token))
 			},
 		},
 		{
@@ -148,7 +148,7 @@ func TestLoadOTLPPathToken_AcceptsStrictTokenFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := strings.Repeat("b", 64)
-	if err := os.WriteFile(path, []byte(want+"\n"), 0o600); err != nil {
+	if err := safefile.Write(path, []byte(want+"\n")); err != nil {
 		t.Fatal(err)
 	}
 	got, err := LoadOTLPPathToken(dir, OTLPScopeGeminiCLI)

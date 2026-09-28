@@ -6,7 +6,6 @@ package sandbox
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,12 +18,11 @@ import (
 )
 
 func TestOpenShell_ReloadPolicyExitRecordsMetric(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	dir := t.TempDir()
-	script := filepath.Join(dir, "fake-openshell")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 7\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	script := writeOpenShellTestBinary(t, "#!/bin/sh\nexit 7\n", "@echo off\r\nexit /b 7\r\n")
 	r := sdkmetric.NewManualReader()
 	p, err := telemetry.NewProviderForTest(r)
 	if err != nil {
@@ -68,11 +66,11 @@ func TestOpenShell_ReloadPolicyExitRecordsMetric(t *testing.T) {
 func TestOpenShell_StartNonZeroExitEmitted(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	dir := t.TempDir()
-	script := filepath.Join(dir, "fake-openshell")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nif [ \"$1\" = start ]; then echo fail >&2; exit 127; fi\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	script := writeOpenShellTestBinary(t,
+		"#!/bin/sh\nif [ \"$1\" = start ]; then echo fail >&2; exit 127; fi\nexit 0\n",
+		"@echo off\r\nif \"%1\"==\"start\" (echo fail 1>&2 & exit /b 127)\r\nexit /b 0\r\n")
 	r := sdkmetric.NewManualReader()
 	p, err := telemetry.NewProviderForTest(r)
 	if err != nil {

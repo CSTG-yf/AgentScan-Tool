@@ -206,13 +206,7 @@ func TestRestoreConfigAfterFailedMigrationPreservesConfigMode(t *testing.T) {
 	if err := restoreConfigAfterFailedMigration(configPath, []byte(original), 0o640, true); err != nil {
 		t.Fatalf("restoreConfigAfterFailedMigration: %v", err)
 	}
-	info, err := os.Stat(configPath)
-	if err != nil {
-		t.Fatalf("stat config: %v", err)
-	}
-	if got := info.Mode().Perm(); got != 0o640 {
-		t.Fatalf("config mode = %o, want 640", got)
-	}
+	assertRestoredConfigSecurity(t, configPath, 0o640)
 }
 
 func TestLoadFromFile_IgnoresGuardrailRuntime(t *testing.T) {
