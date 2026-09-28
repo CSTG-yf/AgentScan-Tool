@@ -181,13 +181,11 @@ func TestRepairPairing_FailsClosedOnCorruptPairedJSON(t *testing.T) {
 			if string(b) != string(original) {
 				t.Fatalf("backup contents differ from original\nwant: %s\ngot:  %s", original, b)
 			}
-			info, err := os.Stat(filepath.Join(devicesDir, e.Name()))
-			if err != nil {
+			backupPath := filepath.Join(devicesDir, e.Name())
+			if _, err := os.Stat(backupPath); err != nil {
 				t.Fatalf("stat backup: %v", err)
 			}
-			if info.Mode().Perm() != 0o600 {
-				t.Errorf("backup perm = %v, want 0600", info.Mode().Perm())
-			}
+			assertPrivateDeviceFile(t, backupPath)
 		}
 	}
 	if !foundBackup {
@@ -210,13 +208,10 @@ func TestRepairPairing_AtomicWriteAndPerms(t *testing.T) {
 		t.Fatalf("repair pairing: %v", err)
 	}
 	pairedPath := filepath.Join(home, ".openclaw", "devices", "paired.json")
-	info, err := os.Stat(pairedPath)
-	if err != nil {
+	if _, err := os.Stat(pairedPath); err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("paired.json perm = %v, want 0600 (no longer world-readable)", info.Mode().Perm())
-	}
+	assertPrivateDeviceFile(t, pairedPath)
 
 	// No temp-file remnants beside the destination.
 	entries, _ := os.ReadDir(filepath.Dir(pairedPath))

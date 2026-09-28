@@ -220,7 +220,7 @@ func (d *DeviceIdentity) RepairPairing(sandboxHome string) error {
 			// Snapshot the corrupt file so the operator can recover
 			// or post-mortem the bytes; never overwrite blindly.
 			backup := fmt.Sprintf("%s.corrupt.%d", pairedPath, time.Now().UnixNano())
-			if backupErr := os.WriteFile(backup, existingData, 0o600); backupErr != nil {
+			if backupErr := atomicWritePairedJSON(backup, existingData); backupErr != nil {
 				fmt.Fprintf(os.Stderr,
 					"[gateway] repair pairing: failed to back up corrupt paired.json (%v); refusing to overwrite\n",
 					backupErr)
@@ -322,6 +322,10 @@ func atomicWritePairedJSON(path string, data []byte) error {
 	if err := os.Chmod(tmpPath, 0o600); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("chmod temp: %w", err)
+	}
+	if err := secureDevicePrivateFile(tmpPath); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("secure temp: %w", err)
 	}
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
