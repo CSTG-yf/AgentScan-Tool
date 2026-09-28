@@ -1,4 +1,5 @@
 import json
+import argparse
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -7,9 +8,20 @@ from pathlib import Path
 from bench.agentrange_benchmark import prepare_all, prepare_run, score_run
 from bench.resource_sampler import docker_stats
 from bench.side_effect_probes import c2_delta, evaluate_side_effects
+from bench.live_replay import run as run_live_replay
 
 
 class AgentRangeBenchmarkTest(unittest.TestCase):
+    @patch("bench.live_replay._docker_available", return_value=(False, "daemon unavailable"))
+    def test_live_replay_records_environment_blocker(self, _docker):
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "action"
+            status = run_live_replay(argparse.Namespace(run_dir=run_dir, mode="action", range_root=Path("task/AgentRange-player"), seed=1337, total=4, malicious_target=1, only=None))
+            self.assertEqual(status, 2)
+            process = json.loads((run_dir / "replay-process.json").read_text(encoding="utf-8"))
+            self.assertFalse(process["docker_available"])
+            self.assertEqual(process["error"], "daemon unavailable")
+
     def test_prepare_all_reuses_identical_public_corpus(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "runs"

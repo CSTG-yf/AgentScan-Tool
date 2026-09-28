@@ -85,6 +85,11 @@ python .\task\AgentRange-player\scenario-runner\runner.py
 python .\bench\agentrange_benchmark.py score --run-dir .\bench\runs\action-<run-id>
 ```
 
+For a durable single-mode replay invocation, use
+`python .\bench\live_replay.py --run-dir .\bench\runs\action-<run-id> --mode action`.
+It records `replay-process.json` and stdout/stderr; it exits with an explicit
+environment error when Docker is unavailable.
+
 To create comparable inputs for every mode in one step, use
 `python .\bench\agentrange_benchmark.py prepare-all --output-root .\bench\runs\<run-id>`;
 the three subdirectories share the same public-corpus hash and semantic Ground

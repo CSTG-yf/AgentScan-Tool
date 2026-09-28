@@ -201,6 +201,19 @@ def fire_opspilot(client: httpx.Client, action: dict, tokens: dict):
 
 
 if __name__ == "__main__":
-    import sys
+    import argparse
 
-    replay_generated(only=sys.argv[1] if len(sys.argv) > 1 else None)
+    parser = argparse.ArgumentParser(description="Replay the deterministic AgentRange corpus.")
+    parser.add_argument("only", nargs="?", help="legacy scenario filter; generated public runs use all")
+    parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument("--total", type=int, default=5200)
+    parser.add_argument("--malicious-target", type=int, default=80)
+    parser.add_argument("--output-dir", default=None)
+    args = parser.parse_args()
+    replay_generated(
+        only=args.only,
+        seed=args.seed,
+        total=args.total,
+        malicious_target=args.malicious_target,
+        output_dir=args.output_dir,
+    )
