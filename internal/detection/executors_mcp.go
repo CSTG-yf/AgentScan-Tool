@@ -23,6 +23,17 @@ func (e MCPBlockExecutor) Execute(ctx context.Context, req RuntimeExecutionReque
 	if e.Store == nil {
 		return "", "", fmt.Errorf("MCP policy store unavailable")
 	}
+	if req.Decision.DetectionID == "" {
+		return "", "", fmt.Errorf("MCP risk detection is required for a persistent server block")
+	}
+	detection, _, err := e.Store.GetRuntimeDetectionDetail(req.Decision.DetectionID)
+	if err != nil {
+		return "", "", fmt.Errorf("load detection for MCP block: %w", err)
+	}
+	if detection.Attributes["blacklist_target_type"] != "mcp" &&
+		!(detection.DetectionType == "known_malicious_resource_invocation" && detection.Attributes["resource_type"] == "mcp") {
+		return "", "", fmt.Errorf("only an explicit MCP blacklist or known-malicious MCP resource can justify a persistent server block")
+	}
 	var server, connector string
 	for _, evidence := range req.Evidence {
 		name := strings.TrimSpace(evidence.Event.MCPServer)
@@ -46,13 +57,18 @@ func (e MCPBlockExecutor) Execute(ctx context.Context, req RuntimeExecutionReque
 	if server == "" {
 		return "", "", fmt.Errorf("no explicit MCP server in detection evidence")
 	}
+	if detection.DetectionType == "known_malicious_resource_invocation" {
+		resource, _ := detection.Attributes["resource_name"].(string)
+		if resource == "" || !strings.EqualFold(strings.TrimSpace(resource), server) {
+			return server, "", fmt.Errorf("MCP evidence does not match the known-malicious resource")
+		}
+	}
+	if connector == "" {
+		return "", "", fmt.Errorf("no connector identity in MCP evidence; refusing a global block")
+	}
 	policy := enforce.NewPolicyEngine(e.Store)
 	reason := "runtime decision " + req.Decision.DecisionID
-	if connector != "" {
-		if err := policy.BlockForConnector("mcp", server, connector, reason); err != nil {
-			return server, "", err
-		}
-	} else if err := policy.Block("mcp", server, reason); err != nil {
+	if err := policy.BlockForConnector("mcp", server, connector, reason); err != nil {
 		return server, "", err
 	}
 	blocked, err := policy.IsBlockedForConnector("mcp", server, connector)

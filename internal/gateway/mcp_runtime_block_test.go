@@ -38,7 +38,13 @@ import (
 func TestRuntimeDecisionMCPExecutorBlocksNextToolCall(t *testing.T) {
 	api, store := toolPolicyAPI(t, "action")
 	engine := detection.NewPolicyEngine(store)
-	decision := audit.RuntimeDecision{DecisionID: "D-mcp-gate", EnforcementPoint: audit.EnforcementPointMCP}
+	d, err := store.RecordRuntimeDetection(audit.RuntimeDetectionInput{
+		DetectionType: "configured_blacklist", Attributes: map[string]any{"blacklist_target_type": "mcp"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision := audit.RuntimeDecision{DecisionID: "D-mcp-gate", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointMCP}
 	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
 		MCPServer: "jira", Attributes: map[string]any{"connector": "codex"},
 	}}}

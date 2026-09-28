@@ -62,6 +62,7 @@ func NewPolicyEngine(store *audit.Store) *PolicyEngine {
 	p.blocklist.setPersistTarget(store)
 	p.RegisterExecutor(ProcessExecutor{})
 	p.RegisterExecutor(MCPBlockExecutor{Store: store})
+	p.RegisterExecutor(AgentHookBlockExecutor{Store: store})
 	p.reloadMode()
 	return p
 }

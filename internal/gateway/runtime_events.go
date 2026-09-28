@@ -191,6 +191,7 @@ func (a *APIServer) recordHookRuntimeEvent(ctx context.Context, req agentHookReq
 		TraceID:     firstNonEmpty(env.TraceID, TraceIDFromContext(ctx)),
 		AgentName:   firstNonEmpty(req.AgentName, identity.AgentName, req.ConnectorName),
 		ToolName:    req.ToolName,
+		MCPServer:   payloadString(req.Payload, "mcp_server_name"),
 		Target:      hookToolTargetText(req.ToolName, req.ToolArgs),
 		Operation:   firstNonEmpty(req.ToolName, req.HookEventName),
 		Severity:    resp.Severity,

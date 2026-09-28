@@ -3292,7 +3292,7 @@ func projectRootForManifest(path string) string {
 			return strings.Join(parts[:i], "/")
 		}
 	}
-	return dir
+	return filepath.ToSlash(dir)
 }
 
 // shouldSkipDiscoveryDir is the universal "do not descend" rule used
