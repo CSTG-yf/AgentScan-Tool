@@ -66,12 +66,18 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
                 for row in truth
             ]
             (run_dir / "observations.jsonl").write_text("\n".join(json.dumps(row) for row in observations) + "\n", encoding="utf-8")
+            resources = [
+                {"timestamp": "2026-09-28T00:00:00Z", "mode": "baseline", "container": "mcp", "cpu_pct": 0.5},
+                {"timestamp": "2026-09-28T00:00:01Z", "mode": "action", "container": "mcp", "cpu_pct": 2.0},
+            ]
+            (run_dir / "resources.jsonl").write_text("\n".join(json.dumps(row) for row in resources) + "\n", encoding="utf-8")
             report = score_run(run_dir)
             self.assertEqual(report["overall"]["counts"]["tp"], 4)
             self.assertEqual(report["overall"]["counts"]["tn"], 12)
             self.assertEqual(report["overall"]["counts"]["unknown"], 0)
             self.assertEqual(report["overall"]["metrics"]["recall"], 1.0)
             self.assertEqual(report["overall"]["normal_business"]["success_rate"], 1.0)
+            self.assertEqual(report["resources"]["cpu_increment_by_container"]["mcp"], 1.5)
 
 
 if __name__ == "__main__":

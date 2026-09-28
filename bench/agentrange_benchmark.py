@@ -323,18 +323,32 @@ def score_run(run_dir: Path) -> dict[str, Any]:
     resources = read_jsonl(run_dir / "resources.jsonl")
     cpu_samples = [_number(row.get("cpu_pct")) for row in resources]
     cpu_samples = [value for value in cpu_samples if value is not None]
-    baseline = [_number(row.get("baseline_cpu_pct")) for row in resources]
-    baseline = [value for value in baseline if value is not None]
-    cpu_increment = None
-    if cpu_samples and baseline:
-        cpu_increment = max(cpu_samples) - sum(baseline) / len(baseline)
+    by_container: dict[str, dict[str, list[float]]] = defaultdict(lambda: {"baseline": [], "action": []})
+    for row in resources:
+        container = str(row.get("container") or "unknown")
+        cpu = _number(row.get("cpu_pct"))
+        if cpu is None:
+            continue
+        baseline_value = _number(row.get("baseline_cpu_pct"))
+        if baseline_value is not None:
+            by_container[container]["baseline"].append(baseline_value)
+        mode = str(row.get("mode") or "action")
+        if mode == "baseline":
+            by_container[container]["baseline"].append(cpu)
+        elif mode == "action":
+            by_container[container]["action"].append(cpu)
+    cpu_increment_by_container: dict[str, float] = {}
+    for container, windows in by_container.items():
+        if windows["baseline"] and windows["action"]:
+            cpu_increment_by_container[container] = round(max(windows["action"]) - (sum(windows["baseline"]) / len(windows["baseline"])), 3)
+    cpu_increment = max(cpu_increment_by_container.values()) if cpu_increment_by_container else None
     report = {
         "schema_version": 1,
         "run_id": run_dir.name,
         "generated_at": datetime.now(UTC).isoformat(),
         "overall": {key: value for key, value in overall.items() if key != "scored_instances"},
         "by_scenario": {key: {item: value for item, value in result.items() if item != "scored_instances"} for key, result in by_scenario.items()},
-        "resources": {"samples": len(cpu_samples), "cpu_max_pct": max(cpu_samples) if cpu_samples else None, "cpu_p95_pct": _percentile(cpu_samples, 0.95), "cpu_increment_pct": cpu_increment},
+        "resources": {"samples": len(cpu_samples), "cpu_max_pct": max(cpu_samples) if cpu_samples else None, "cpu_p95_pct": _percentile(cpu_samples, 0.95), "cpu_increment_pct": cpu_increment, "cpu_increment_by_container": cpu_increment_by_container},
         "acceptance": {
             "recall_gte_0_95": (overall["metrics"]["recall"] or 0) >= 0.95,
             "precision_gte_0_95": (overall["metrics"]["precision"] or 0) >= 0.95,
