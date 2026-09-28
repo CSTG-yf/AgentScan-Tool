@@ -35,13 +35,7 @@ func TestWriteCreatesFile0600(t *testing.T) {
 	if !bytes.Equal(got, want) {
 		t.Errorf("contents mismatch: got %q want %q", got, want)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Errorf("file mode = %o; want 0600", mode)
-	}
+	assertPrivateFile(t, path)
 }
 
 func TestWriteOverwritesExisting(t *testing.T) {
@@ -57,10 +51,7 @@ func TestWriteOverwritesExisting(t *testing.T) {
 	if string(got) != "new" {
 		t.Errorf("got %q; want %q", got, "new")
 	}
-	info, _ := os.Stat(path)
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Errorf("file mode = %o; want 0600", mode)
-	}
+	assertPrivateFile(t, path)
 }
 
 func TestWriteRefusesSymlink(t *testing.T) {
@@ -106,8 +97,5 @@ func TestCreateExclusiveCreates0600(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	info, _ := os.Stat(path)
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Errorf("file mode = %o; want 0600", mode)
-	}
+	assertPrivateFile(t, path)
 }

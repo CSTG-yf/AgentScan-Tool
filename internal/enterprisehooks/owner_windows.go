@@ -15,6 +15,8 @@ import (
 
 var errEnterpriseHooksUnsupportedWindows = fmt.Errorf("enterprise hook guardian is unsupported on Windows until SID impersonation, DACL validation, and reparse-safe writes are implemented")
 
+func validateInstallerPlatform() error { return errEnterpriseHooksUnsupportedWindows }
+
 func resolveOwner(_ string, uid, gid int) (int, int, error) {
 	return uid, gid, errEnterpriseHooksUnsupportedWindows
 }
