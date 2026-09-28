@@ -46,6 +46,7 @@ LANGFLOW_SERVICE_CANDIDATES = ("langflow",)
 LLM_ENV_KEYS = ("LLM_BASE", "OPENAI_API_BASE", "OPENAI_BASE_URL")
 
 EVENT_MODEL_FIELDS = [
+    "instance_id",
     "session_id",
     "trace_id",
     "stage",
