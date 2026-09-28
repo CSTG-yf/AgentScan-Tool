@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -5239,13 +5240,18 @@ func TestHandleGuardrailEvaluate_BothScanners(t *testing.T) {
 func TestHandleGuardrailConfig_PatchRollbackOnWriteFailure(t *testing.T) {
 	store, logger := testStoreAndLogger(t)
 	const tok = "patch-config-tok-abc"
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("blocker"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	api := &APIServer{
 		health: NewSidecarHealth(),
 		logger: logger,
 		store:  store,
 		scannerCfg: &config.Config{
-			DataDir: "/nonexistent/path/that/will/fail",
-			Gateway: config.GatewayConfig{Token: tok},
+			ConfigFilePath: filepath.Join(blocker, config.DefaultConfigName),
+			DataDir:        t.TempDir(),
+			Gateway:        config.GatewayConfig{Token: tok},
 			Guardrail: config.GuardrailConfig{
 				Mode:        "observe",
 				ScannerMode: "local",
@@ -5255,8 +5261,7 @@ func TestHandleGuardrailConfig_PatchRollbackOnWriteFailure(t *testing.T) {
 	api.SetConfigRuntime(func(context.Context, string) error { return nil }, nil)
 
 	body, _ := json.Marshal(map[string]string{
-		"mode":         "action",
-		"scanner_mode": "both",
+		"mode": "action",
 	})
 	req := httptest.NewRequest(http.MethodPatch, "/v1/guardrail/config", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -5300,12 +5305,16 @@ func TestPatchGuardrailConfigFile_RestoresInvalidPatch(t *testing.T) {
 	if !bytes.Equal(got, original) {
 		t.Fatalf("restored config = %q, want %q", got, original)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat restored config: %v", err)
-	}
-	if gotMode := info.Mode().Perm(); gotMode != 0o640 {
-		t.Fatalf("restored config mode = %o, want 640", gotMode)
+	if runtime.GOOS == "windows" {
+		assertPrivateDeviceFile(t, path)
+	} else {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat restored config: %v", err)
+		}
+		if gotMode := info.Mode().Perm(); gotMode != 0o640 {
+			t.Fatalf("restored config mode = %o, want 640", gotMode)
+		}
 	}
 }
 

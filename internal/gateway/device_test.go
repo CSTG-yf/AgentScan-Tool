@@ -350,7 +350,12 @@ func TestReadZeptoClawProviderKeys_FromConfigJSON(t *testing.T) {
 		APIAddr:   "127.0.0.1:18970",
 		APIToken:  "tok",
 	}
-	if err := c.Setup(context.Background(), opts); err != nil {
+	if err := c.Setup(context.Background(), opts); runtime.GOOS == "windows" {
+		if err == nil || !strings.Contains(err.Error(), "not supported on windows") {
+			t.Fatalf("Windows must report the ZeptoClaw capability boundary, got %v", err)
+		}
+		return
+	} else if err != nil {
 		t.Fatalf("zeptoclaw Setup: %v", err)
 	}
 
@@ -474,13 +479,15 @@ func TestPersistRefreshedToken(t *testing.T) {
 		if err := persistRefreshedToken(dir, "brand-new-token"); err != nil {
 			t.Fatalf("persistRefreshedToken: %v", err)
 		}
-		content, err := os.ReadFile(filepath.Join(dir, ".env"))
+		envPath := filepath.Join(dir, ".env")
+		content, err := os.ReadFile(envPath)
 		if err != nil {
 			t.Fatalf(".env not created: %v", err)
 		}
 		if !containsLine(string(content), "OPENCLAW_GATEWAY_TOKEN=brand-new-token\n") {
 			t.Errorf(".env content: %s", content)
 		}
+		assertPrivateDeviceFile(t, envPath)
 	})
 
 	t.Run("rewrites hooks/.token with new value", func(t *testing.T) {
@@ -500,13 +507,10 @@ func TestPersistRefreshedToken(t *testing.T) {
 			t.Errorf("hooks/.token content:\n%s", s)
 		}
 
-		info, err := os.Stat(tokenPath)
-		if err != nil {
+		if _, err := os.Stat(tokenPath); err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm() != 0o600 {
-			t.Errorf("hooks/.token perm = %v, want 0600", info.Mode().Perm())
-		}
+		assertPrivateDeviceFile(t, tokenPath)
 	})
 
 	t.Run("silently skips hooks/.token when hooks dir missing", func(t *testing.T) {

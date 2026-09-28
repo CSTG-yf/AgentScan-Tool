@@ -306,6 +306,12 @@ func (d *DeviceIdentity) RepairPairing(sandboxHome string) error {
 // The temp file is created with O_EXCL so a stale tmp from a prior
 // crash does not silently get reused.
 func atomicWritePairedJSON(path string, data []byte) error {
+	return atomicWritePrivateFile(path, data)
+}
+
+// atomicWritePrivateFile writes a secret without ever exposing its bytes
+// under inherited Windows ACLs or a partially written destination.
+func atomicWritePrivateFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".paired.json.tmp-*")
 	if err != nil {
