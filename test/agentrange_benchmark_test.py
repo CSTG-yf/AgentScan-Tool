@@ -59,6 +59,8 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
                 {
                     "instance_id": row["instance_id"],
                     "decision": "block" if row["label"] == "malicious" else "allow",
+                    "valid": True,
+                    "timeout": False,
                     "side_effect_reached": False,
                     "business_success": row["label"] == "benign",
                     "e2e_latency_ms": 12,

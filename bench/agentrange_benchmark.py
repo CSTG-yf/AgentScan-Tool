@@ -22,6 +22,15 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[1]
 RANGE_ROOT = ROOT / "task" / "AgentRange-player"
 DEFAULT_RUNS = ROOT / "bench" / "runs"
+OBSERVATION_REQUIRED_FIELDS = {
+    "instance_id",
+    "decision",
+    "valid",
+    "timeout",
+    "business_success",
+    "side_effect_reached",
+    "e2e_latency_ms",
+}
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -197,7 +206,8 @@ def _is_block(row: dict[str, Any]) -> bool:
 
 
 def _instance_outcome(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    valid_rows = [row for row in rows if row.get("valid", True) is not False and row.get("timeout") is not True]
+    structurally_valid = [OBSERVATION_REQUIRED_FIELDS.issubset(row) for row in rows]
+    valid_rows = [row for row, structural in zip(rows, structurally_valid) if structural and row.get("valid") is not False and row.get("timeout") is not True]
     invalid = len(valid_rows) != len(rows)
     blocked = any(_is_block(row) for row in valid_rows)
     side_effect_values = [_as_bool(row.get("side_effect_reached")) for row in valid_rows]
