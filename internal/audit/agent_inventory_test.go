@@ -93,3 +93,64 @@ func TestAgentInventoryCanonicalizesScansAndEvents(t *testing.T) {
 		t.Fatalf("event agent = (%q,%q), want codex/OpenAI Codex", events[0].CanonicalAgentID, events[0].AgentName)
 	}
 }
+
+func TestAuditAgentBackfillSkipsBoundEvents(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Init(); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"already-bound", "missing-binding"} {
+		if err := store.LogEvent(Event{Action: action, AgentName: "codex", Connector: "codex"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.db.Exec(`UPDATE audit_events SET agent_name = 'custom display' WHERE action = 'already-bound'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`UPDATE audit_events SET canonical_agent_id = NULL WHERE action = 'missing-binding'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.backfillAuditEventAgents(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ action, agentID, agentName string }{
+		{"already-bound", "codex", "custom display"},
+		{"missing-binding", "codex", "OpenAI Codex"},
+	} {
+		var agentID, agentName string
+		if err := store.db.QueryRow(`SELECT canonical_agent_id, agent_name FROM audit_events WHERE action = ?`, tc.action).Scan(&agentID, &agentName); err != nil {
+			t.Fatal(err)
+		}
+		if agentID != tc.agentID || agentName != tc.agentName {
+			t.Errorf("%s: got (%q, %q), want (%q, %q)", tc.action, agentID, agentName, tc.agentID, tc.agentName)
+		}
+	}
+}
+
+func TestEnsureAgentRollsBackWhenAliasWriteFails(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "audit.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`DROP TABLE agent_aliases`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.EnsureAgent(AgentIdentityInput{AgentName: "unique-transaction-agent"}); err == nil {
+		t.Fatal("expected alias write to fail")
+	}
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM agents WHERE id = 'unique-transaction-agent'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("agent upsert was committed without its aliases")
+	}
+}

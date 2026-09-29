@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"strings"
 	"time"
 
@@ -136,6 +137,12 @@ type RuntimeEventInput struct {
 
 const runtimeEventRawMaxBytes = 16 * 1024
 
+func logSlowRuntimeEventStage(stage string, started time.Time) {
+	if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+		log.Printf("[runtime-event] slow stage=%s elapsed=%s", stage, elapsed)
+	}
+}
+
 // RecordRuntimeEvent normalizes one runtime event, ensures the Agent
 // Inventory binding and the runtime session row exist, and appends the
 // unified event to behavior_events. It returns the inserted
@@ -166,6 +173,7 @@ func (s *Store) RecordRuntimeEvent(in RuntimeEventInput) (int64, error) {
 		in.SpanID = uuid.NewString()
 	}
 
+	started := time.Now()
 	agent, err := s.EnsureAgent(AgentIdentityInput{
 		AgentID:    in.CanonicalAgentID,
 		AgentName:  firstNonEmpty(in.AgentName, in.AgentExecutable),
@@ -173,6 +181,7 @@ func (s *Store) RecordRuntimeEvent(in RuntimeEventInput) (int64, error) {
 		Status:     "running",
 		ObservedAt: in.Timestamp,
 	})
+	logSlowRuntimeEventStage("ensure-agent", started)
 	if err != nil {
 		return 0, err
 	}
@@ -186,13 +195,16 @@ func (s *Store) RecordRuntimeEvent(in RuntimeEventInput) (int64, error) {
 	// A runtime event that carries a session id implies the session is
 	// (or was) live for this agent. Upsert keeps started_at stable.
 	if in.SessionID != "" && in.CanonicalAgentID != "" {
+		started = time.Now()
 		if err := s.EnsureRuntimeSession(EnsureRuntimeSessionInput{
 			SessionID:        in.SessionID,
 			CanonicalAgentID: in.CanonicalAgentID,
 			StartedAt:        in.Timestamp,
 		}); err != nil {
+			logSlowRuntimeEventStage("ensure-session", started)
 			return 0, err
 		}
+		logSlowRuntimeEventStage("ensure-session", started)
 	}
 
 	attrsJSON := ""
@@ -266,14 +278,18 @@ ON CONFLICT(ingest_key) DO NOTHING`
 		query = strings.Replace(query, "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?", "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?", 1)
 		args = append(args[:8], args[9:]...)
 	}
+	started = time.Now()
 	result, err := s.execDB(context.Background(), "runtime_event_insert", query, args...)
+	logSlowRuntimeEventStage("insert", started)
 
 	if err != nil {
 		return 0, err
 	}
 	if in.IngestKey != "" {
 		var id int64
+		started = time.Now()
 		err := s.db.QueryRowContext(context.Background(), `SELECT id FROM behavior_events WHERE ingest_key = ?`, in.IngestKey).Scan(&id)
+		logSlowRuntimeEventStage("lookup", started)
 		return id, err
 	}
 	id, _ := result.LastInsertId()

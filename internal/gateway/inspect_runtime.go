@@ -80,6 +80,12 @@ func (c *InspectRuntimeContext) key() string {
 	return "inspect:agentrange:" + c.ProxyKind + ":" + c.EventID
 }
 
+func logSlowInspectRuntime(callID, stage string, started time.Time) {
+	if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+		log.Printf("[inspect-runtime] slow call=%s stage=%s elapsed=%s", callID, stage, elapsed)
+	}
+}
+
 func (a *APIServer) beginInspectRuntime(w http.ResponseWriter, r *http.Request, c *InspectRuntimeContext, session string) (int64, bool) {
 	if c == nil {
 		return 0, true
@@ -119,6 +125,7 @@ func (a *APIServer) beginInspectRuntime(w http.ResponseWriter, r *http.Request, 
 			tool = "langflow.validate_code"
 		}
 	}
+	started := time.Now()
 	id, err := a.store.RecordRuntimeEvent(audit.RuntimeEventInput{
 		IngestKey: c.key(), EventType: kind, EventSource: audit.RuntimeSourceGuardrail,
 		// Agent identity is server-owned; request context cannot impersonate
@@ -129,12 +136,15 @@ func (a *APIServer) beginInspectRuntime(w http.ResponseWriter, r *http.Request, 
 		Outcome: "observed", Timestamp: time.Now().UTC(),
 		Attributes: map[string]any{"connector": "agentrange", "call_id": c.CallID, "phase": c.Phase, "proxy_kind": c.ProxyKind, "inspection_status": "pending", "http_method": c.HTTPMethod, "http_path": redaction.ForSinkMessageContent(strings.Split(c.HTTPPath, "?")[0])},
 	})
+	logSlowInspectRuntime(c.CallID, "record", started)
 	if err != nil {
 		w.Header().Set("X-DefenseClaw-Runtime-Status", "failed")
 		log.Printf("[inspect-runtime] begin call=%s: %v", c.CallID, err)
 		return 0, true
 	}
+	started = time.Now()
 	existing, exists, readErr := a.store.GetRuntimeEvent(id)
+	logSlowInspectRuntime(c.CallID, "read", started)
 	if readErr != nil || !exists {
 		w.Header().Set("X-DefenseClaw-Runtime-Status", "failed")
 		log.Printf("[inspect-runtime] begin read failed event=%d: %v", id, readErr)
@@ -162,16 +172,24 @@ func (a *APIServer) completeInspectRuntime(w http.ResponseWriter, id int64, v *T
 	if len(findings) > 0 {
 		outcome = "flagged"
 	}
+	started := time.Now()
 	err := a.store.CompleteRuntimeInspection(id, outcome, v.Severity, v.Confidence, map[string]any{
 		"inspection_status": "complete", "inspect_findings": findings, "action": v.Action,
 		"raw_action": v.RawAction, "inspection_mode": v.Mode, "would_block": v.WouldBlock,
 	})
+	if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+		log.Printf("[inspect-runtime] slow event=%d stage=complete elapsed=%s", id, elapsed)
+	}
 	if err == nil {
+		started = time.Now()
 		engine := activeDetectionEngine()
 		if engine == nil || activeRuntimeEventStore() != a.store {
 			err = fmt.Errorf("runtime engine unavailable for inspect store")
 		} else {
 			err = engine.EvaluateEventWithError(id)
+		}
+		if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+			log.Printf("[inspect-runtime] slow event=%d stage=evaluate elapsed=%s", id, elapsed)
 		}
 	}
 	if err != nil {
@@ -203,11 +221,15 @@ func (a *APIServer) logInspectAudit(r *http.Request, c *InspectRuntimeContext, i
 	}
 	var ev audit.BehaviorEvent
 	if a.store != nil && id > 0 {
+		started := time.Now()
 		ev, _, _ = a.store.GetRuntimeEvent(id)
+		logSlowInspectRuntime(c.CallID, "audit-read", started)
 	}
+	started := time.Now()
 	err := persistAuditEvent(a.logger, a.store, audit.Event{Action: action, Target: safeRuntimeLabel(target), Actor: "inspect", Details: details,
 		AgentName: "AgentRange / OpsPilot", CanonicalAgentID: ev.CanonicalAgentID, Connector: "agentrange", SessionID: c.SessionID, TraceID: c.TraceID,
 		Severity: v.Severity, Structured: map[string]any{"call_id": c.CallID, "behavior_event_id": id, "stage": c.Phase, "decision": v.Action, "raw_action": v.RawAction, "mode": v.Mode, "would_block": v.WouldBlock, "reason": redaction.ForSinkReason(v.Reason)}})
+	logSlowInspectRuntime(c.CallID, "audit-write", started)
 	if err != nil {
 		log.Printf("[inspect-audit] call=%s write failed: %v", c.CallID, err)
 	}

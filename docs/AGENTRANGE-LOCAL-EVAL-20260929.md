@@ -5,23 +5,23 @@ not an official hidden-set result. The arena SHA-256 manifest is
 `bcd51ef41b2bfd2871a06e03e6835d26c41e45436e86121c722981b06dcc5d5b`.
 Ground truth was used by the offline scorer, not the online detector.
 
-| Measure | Full matched-rate pair (latest) | Earlier natural-rate action | 1,000-event matched-rate pair |
-| --- | ---: | ---: | ---: |
-| Events / attacks | 5,200 / 80 | 5,200 / 80 | 1,000 / 16 |
-| True positives / false negatives / unknown | 80 / 0 / 0 | 80 / 0 / 0 | 16 / 0 / 0 |
-| False positives | 0 | 0 | 0 |
-| Normal business successes | 5,120 / 5,120 | 5,120 / 5,120 | 984 / 984 |
-| Inspection p95 | 157 ms (5,200/5,200) | 175 ms | 115 ms |
-| End-to-end p95 | 955.270 ms | 1,003.966 ms | 861.870 ms |
-| Per-container CPU p95 increment | 1.45 percentage points | Unverified | 1.14 percentage points |
-| Host Gateway plus defense containers CPU p95 | 4.867% | Unverified | Unverified |
-| Inspection unavailable events / affected instances | 1,582 / 1,190 | Unmeasured | Unmeasured |
+| Measure | Pooled retry full action | Earlier full matched-rate pair | Earlier natural-rate action | 1,000-event matched-rate pair |
+| --- | ---: | ---: | ---: | ---: |
+| Events / attacks | 5,200 / 80 | 5,200 / 80 | 5,200 / 80 | 1,000 / 16 |
+| True positives / false negatives / unknown | 80 / 0 / 0 | 80 / 0 / 0 | 80 / 0 / 0 | 16 / 0 / 0 |
+| False positives | 0 | 0 | 0 | 0 |
+| Normal business successes | 5,120 / 5,120 | 5,120 / 5,120 | 5,120 / 5,120 | 984 / 984 |
+| Inspection p95 | 128 ms (5,200/5,200) | 157 ms (5,200/5,200) | 175 ms | 115 ms |
+| End-to-end p95 | 548.247 ms | 955.270 ms | 1,003.966 ms | 861.870 ms |
+| Per-container CPU p95 increment | Unverified against same code | 1.45 percentage points | Unverified | 1.14 percentage points |
+| Host Gateway plus defense containers CPU p95 | 4.240% | 4.867% | Unverified | Unverified |
+| Inspection unavailable events / affected instances | 8 / 6 | 1,582 / 1,190 | Unmeasured | Unmeasured |
 
-The latest full pair uses the same 5,200-event public corpus and semantic
+The earlier full pair uses the same 5,200-event public corpus and semantic
 ground truth (seed 1337, 80 attacks, arena hash above) in baseline and action,
 both capped at 1.5 events/second. Measured throughput ratio is 1.000 and all
 19 containers match. Only benchmark scripts, tests, and documentation changed
-between the baseline and latest action commits; detector and sidecar runtime
+between that baseline and its paired action commit; detector and sidecar runtime
 code did not. Both replays exited 0 with 5,200 valid observations and
 no timeouts. The action audit join found all 5,200 instances, and every attack
 had enforced-block and side-effect evidence. The host Gateway sample covers
@@ -67,14 +67,35 @@ p95. Raising only the timeout to 400 ms left 1 unavailable inspection and
 541.990 ms end-to-end p95. Prewarming four connections per sidecar still left
 1 unavailable inspection, so that extra startup behavior was removed.
 
-The current candidate keeps connection reuse and retries an unanswered inspect
+The pooled-retry candidate kept connection reuse and retried an unanswered inspect
 request once using the same runtime event ID, within a 400 ms total deadline.
 Its matched-input 1,000-event action replay had 16/16 confirmed blocks,
 0 false positives, 984/984 normal successes, 0 unavailable inspections,
 109 ms inspection p95, 562.734 ms end-to-end p95, and 4.205% combined CPU
 p95. It is at `bench/runs/20260929-pooled-retry400-rate150-1k/action`.
-The 5,200-event paired run and same-code CPU baseline remain to be verified;
-these 1,000-event results do not supersede the failing full result above.
+The pooled-retry 5,200-event action replay subsequently confirmed 80/80 blocks,
+0 false positives, 5,120/5,120 normal successes, 548.247 ms end-to-end p95,
+and 4.240% combined defense CPU p95. Eight inspections were unavailable across
+six benign instances, so the availability gate still failed. Its scorer reports
+a 0.38-point CPU increment against an older full baseline, but that baseline
+ran before the connection-pool changes and does not establish a same-code CPU
+comparison. The run is at
+`bench/runs/20260929-pooled-retry400-full-rate150-v1/action`.
+
+A diagnostic replay on the same 1,000-event corpus found one unavailable
+inspection. Gateway timing logs tied a failed request to 508 ms spent recording
+the runtime event, almost entirely in repeated Agent identity updates, before
+the rule scan began. Startup also revisited roughly 770,000 audit rows even
+though only 34 lacked a canonical Agent ID. The current candidate limits that
+backfill to unbound rows, skips unnecessary alias lookup for explicit Agent
+identity, and writes the Agent and aliases in one transaction. Its same-input
+1,000-event action replay confirmed 16/16 blocks, 0 false positives,
+984/984 normal successes, 0 unavailable inspections, 554.221 ms end-to-end
+p95, 124 ms inspection p95, and 4.147% combined defense CPU p95. The diagnostic
+and candidate runs are at `bench/runs/20260929-diagnostic-backfill-1k-v1/action`
+and `bench/runs/20260929-agent-tx-rate150-1k/action`. The latter has complete
+host and container CPU samples, but no same-code baseline. A new 5,200-event
+action replay and matched-rate, same-code baseline are still required.
 
 The earlier natural-rate action replay had an end-to-end p95 that exceeded
 the local 1,000 ms gate by 3.966 ms, even though its inspection p95 is below
