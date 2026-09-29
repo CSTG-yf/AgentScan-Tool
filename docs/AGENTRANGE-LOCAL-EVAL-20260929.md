@@ -15,6 +15,7 @@ Ground truth was used by the offline scorer, not the online detector.
 | End-to-end p95 | 955.270 ms | 1,003.966 ms | 861.870 ms |
 | Per-container CPU p95 increment | 1.45 percentage points | Unverified | 1.14 percentage points |
 | Host Gateway plus defense containers CPU p95 | 4.867% | Unverified | Unverified |
+| Inspection unavailable events / affected instances | 1,582 / 1,190 | Unmeasured | Unmeasured |
 
 The latest full pair uses the same 5,200-event public corpus and semantic
 ground truth (seed 1337, 80 attacks, arena hash above) in baseline and action,
@@ -27,8 +28,9 @@ had enforced-block and side-effect evidence. The host Gateway sample covers
 the replay from 2.002 seconds after start to 0.556 seconds before finish;
 the combined CPU report aligns all 1,213 Docker snapshots with host samples.
 Host Gateway CPU p95 is 4.285% and combined defense CPU p95 is 4.867%; the
-combined instantaneous maximum is 8.175%. Every local scorer acceptance gate
-is true for this run. The competition document does not specify a CPU
+combined instantaneous maximum is 8.175%. The detection, business, latency,
+evidence, and CPU gates pass, but the new `inspect_unavailable_eq_0` availability
+gate fails. The competition document does not specify a CPU
 aggregation statistic, so a local p95 pass is not an official CPU verdict.
 
 An earlier full matched-rate action replay against the same baseline exited 0
@@ -43,6 +45,19 @@ not acceptance results. The second run supplies complete evidence but the
 first run shows that audit delivery and CPU margin are sensitive to the local
 environment. The sidecars currently fail open when inspection is unavailable;
 that transport failure remains an operational risk beyond the scored sample.
+Rejoining mode-less failed-inspection audit rows found 1,580 unavailable
+events affecting 1,151 instances in that run. The stricter action scorer still
+requires a sidecar-enforced block; an HTTP or nested response claiming `block`
+without that audit evidence remains `unknown`.
+
+A separate 1,000-event action probe raised all four sidecar inspection timeouts
+from 250 to 350 ms at 1.5 events/second. It still had 253 unavailable events
+affecting 197 instances, while end-to-end p95 rose to 1,099.623 ms and
+combined defense CPU p95 was 5.004%. Gateway inspection records exist for
+251/253 unavailable attempts, so the reported `Network is unreachable` error
+usually does not mean the request failed to reach the Gateway. The experiment
+did not improve the overall gate and the sidecars were restored to 250 ms.
+Its ignored run is `bench/runs/20260929-timeout350-rate150-1k/action`.
 
 The earlier natural-rate action replay had an end-to-end p95 that exceeded
 the local 1,000 ms gate by 3.966 ms, even though its inspection p95 is below
@@ -62,7 +77,7 @@ before scoring.
 The frozen local static fixture reports 27/27 assets and 13/13 risk pairs,
 with no false positives or misses. It covers this arena hash only and does not
 measure unseen assets or attack variants. Current Python-focused tests pass
-(40 tests); the targeted Go AgentRange rule test also passes. The broad Go
+(41 tests); the targeted Go AgentRange rule test also passes. The broad Go
 gateway test package has unrelated Windows-only failures in WSL/bash, Unix
 permission, and symlink-dependent cases.
 

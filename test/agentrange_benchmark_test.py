@@ -112,9 +112,13 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
         observe = _confusion(truth, [observation], "observe")
         self.assertEqual(action["counts"]["fn"], 1)
         self.assertEqual(observe["counts"]["tp"], 1)
-        self.assertEqual(_confusion(truth, [{**observation, "decision": "block"}], "action")["counts"]["fn"], 1)
+        self.assertEqual(_confusion(truth, [{**observation, "decision": "block"}], "action")["counts"]["unknown"], 1)
         self.assertEqual(
-            _confusion(truth, [{**observation, "response_raw_action": "block", "decision": "block"}], "action")["counts"]["tp"],
+            _confusion(truth, [{**observation, "response_raw_action": "block", "decision": "block"}], "action")["counts"]["unknown"],
+            1,
+        )
+        self.assertEqual(
+            _confusion(truth, [{**observation, "detector_block_evidence": [{"enforced": True}]}], "action")["counts"]["tp"],
             1,
         )
 
@@ -230,6 +234,7 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
                         "baseline": {"status": "partial_container_overlap"},
                     },
                     "metrics": {"recall": 1.0, "fpr": 0.0, "normal_success_rate": 1.0},
+                    "inspection_availability": {"status": "complete", "unavailable_events": 3, "affected_instances": 2},
                 }),
                 encoding="utf-8",
             )
@@ -239,6 +244,8 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
             self.assertEqual(action["cpu_increment_pct"], 2.15)
             self.assertEqual(action["cpu_increment_by_container"], {"postgres": 2.15})
             self.assertEqual(action["cpu_comparison_status"], "partial_container_overlap")
+            self.assertEqual(action["inspection_availability"]["affected_instances"], 2)
+            self.assertFalse(summary["acceptance"]["inspect_unavailable_eq_0"])
             self.assertFalse(summary["acceptance"]["cpu_increment_lte_5pct"])
 
     def test_summary_normalizes_score_report_overall_metrics(self):
@@ -250,6 +257,7 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
                     "metrics": {"recall": 1.0, "fpr": 0.0},
                     "normal_business": {"success_rate": 1.0},
                     "latency_ms": {"p95": 42.0},
+                    "inspection_availability": {"status": "complete", "unavailable_events": 0, "affected_instances": 0},
                 },
                 "resources": {
                     "cpu_p95_pct": 2.0,
@@ -265,6 +273,8 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
             self.assertEqual(action["metrics"]["recall"], 1.0)
             self.assertEqual(action["metrics"]["normal_success_rate"], 1.0)
             self.assertEqual(action["inspect_latency_ms"]["p95"], 42.0)
+            self.assertEqual(action["inspection_availability"]["affected_instances"], 0)
+            self.assertTrue(summary["acceptance"]["inspect_unavailable_eq_0"])
             self.assertTrue(summary["acceptance"]["cpu_increment_lte_5pct"])
 
     def test_summary_treats_missing_inspect_p95_as_unverified(self):
@@ -280,6 +290,7 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
             )
             summary = summarize_modes(result_dir)
             self.assertFalse(summary["acceptance"]["inspect_p95_lt_1000ms"])
+            self.assertFalse(summary["acceptance"]["inspect_unavailable_eq_0"])
 
     def test_enrich_promotes_nested_runtime_block_over_outer_http_allow(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -336,6 +347,19 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
                     ),
                 ),
             )
+            connection.execute(
+                "INSERT INTO audit_events VALUES (?, ?, ?, ?)",
+                (
+                    "2026-09-28T00:00:02Z",
+                    "C2-A-1",
+                    "agentrange-runtime-pre",
+                    json.dumps({
+                        "instance_id": "C2-A-1", "mode": "", "stage": "pre",
+                        "latency_ms": 250, "destination": "opspilot-app",
+                        "decision": "inspect_unavailable",
+                    }),
+                ),
+            )
             connection.commit()
             connection.close()
 
@@ -347,6 +371,34 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
             self.assertFalse(observation["side_effect_reached"])
             self.assertEqual(observation["side_effect_probe_status"], "complete")
             self.assertEqual(observation["inspect_latency_ms"], 42.0)
+            self.assertEqual(observation["inspect_unavailable_count"], 1)
+            report = score_run(run_dir)
+            self.assertEqual(report["overall"]["inspection_availability"]["affected_instances"], 1)
+            self.assertFalse(report["acceptance"]["inspect_unavailable_eq_0"])
+            enrich(run_dir, db_path, "action")
+            observation = json.loads((run_dir / "observations.jsonl").read_text(encoding="utf-8"))
+            self.assertEqual(observation["transport_decision"], "allow")
+
+    def test_enrich_marks_missing_runtime_audit_as_unverified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "action"
+            run_dir.mkdir()
+            (run_dir / "gt.jsonl").write_text(
+                json.dumps({"instance_id": "B-1", "label": "benign"}) + "\n", encoding="utf-8"
+            )
+            (run_dir / "observations.jsonl").write_text(
+                json.dumps({"instance_id": "B-1", "mode": "action", "decision": "allow",
+                            "valid": True, "timeout": False, "business_success": True,
+                            "e2e_latency_ms": 12}) + "\n", encoding="utf-8"
+            )
+            db_path = Path(directory) / "audit.db"
+            connection = sqlite3.connect(db_path)
+            connection.execute("CREATE TABLE audit_events (timestamp TEXT, session_id TEXT, action TEXT, structured_json TEXT)")
+            connection.close()
+            enrich(run_dir, db_path, "action")
+            observation = json.loads((run_dir / "observations.jsonl").read_text(encoding="utf-8"))
+            self.assertIsNone(observation["inspect_unavailable_count"])
+            self.assertEqual(score_run(run_dir)["overall"]["inspection_availability"]["status"], "unverified")
 
     def test_cat1_replay_uses_full_arena_public_shape(self):
         runner_root = Path(__file__).resolve().parents[1] / "task" / "AgentRange-player-full" / "scenario-runner"
@@ -510,12 +562,14 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
                     "instance_id": row["instance_id"],
                     "decision": "block" if row["label"] == "malicious" else "allow",
                     "response_raw_action": "block" if row["label"] == "malicious" else None,
+                    "detector_block_evidence": [{"enforced": True}] if row["label"] == "malicious" else [],
                     "valid": True,
                     "timeout": False,
                     "side_effect_reached": False,
                     "business_success": row["label"] == "benign",
                     "e2e_latency_ms": 12,
                     "inspect_latency_ms": 8,
+                    "inspect_unavailable_count": 0,
                 }
                 for row in truth
             ]
@@ -534,8 +588,13 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
             self.assertEqual(report["resources"]["cpu_increment_by_container"]["mcp"], 1.5)
             self.assertTrue(report["acceptance"]["inspect_p95_lt_1000ms"])
             self.assertTrue(report["acceptance"]["inspect_latency_coverage_1"])
+            self.assertTrue(report["acceptance"]["inspect_unavailable_eq_0"])
             self.assertFalse(report["acceptance"]["host_gateway_cpu_p95_lte_5pct"])
             self.assertFalse(report["acceptance"]["combined_defense_cpu_p95_lte_5pct"])
+            observations[0].pop("inspect_unavailable_count")
+            (run_dir / "observations.jsonl").write_text("\n".join(json.dumps(row) for row in observations) + "\n", encoding="utf-8")
+            self.assertEqual(score_run(run_dir)["overall"]["inspection_availability"]["status"], "unverified")
+            self.assertFalse(score_run(run_dir)["acceptance"]["inspect_unavailable_eq_0"])
             observations[0].pop("inspect_latency_ms")
             (run_dir / "observations.jsonl").write_text("\n".join(json.dumps(row) for row in observations) + "\n", encoding="utf-8")
             self.assertFalse(score_run(run_dir)["acceptance"]["inspect_latency_coverage_1"])

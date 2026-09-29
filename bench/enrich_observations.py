@@ -111,10 +111,10 @@ def audit_rows(
         if end and (timestamp is None or timestamp > end):
             continue
         structured = _json(row["structured_json"])
-        # Login/health proxy rows have no mode.  Runtime rows are filtered so
-        # a later action replay cannot contaminate an earlier observe run with
-        # the same deterministic instance ids.
-        if str(structured.get("mode") or "") != mode:
+        # Failed inspections have no verdict mode; the replay window still
+        # identifies their run. Other mode-less rows are login/health traffic.
+        row_mode = str(structured.get("mode") or "")
+        if row_mode != mode and not (row_mode == "" and structured.get("decision") == "inspect_unavailable"):
             continue
         instance_id = str(structured.get("instance_id") or row["session_id"] or "")
         if not instance_id:
@@ -188,7 +188,7 @@ def evidence_for(expected: set[str], rows: list[dict[str, Any]]) -> tuple[bool |
     if expected and not reached:
         # A complete audit path with no downstream call is evidence of a
         # pre-execution block.  Missing events remain unknown.
-        has_instance_events = bool(rows)
+        has_instance_events = any(row.get("decision") != "inspect_unavailable" for row in rows)
         return (False if has_instance_events else None), evidence, "complete" if has_instance_events else "unknown"
     return (reached if expected_complete else None), evidence, "complete" if expected_complete else "unknown"
 
@@ -234,6 +234,8 @@ def inspect_latency_ms(rows: list[dict[str, Any]]) -> float | None:
     for row in rows:
         if str(row.get("stage") or "") not in {"pre", "post"}:
             continue
+        if row.get("decision") == "inspect_unavailable":
+            continue
         value = row.get("latency_ms")
         if isinstance(value, (int, float)):
             values.append(float(value))
@@ -250,11 +252,19 @@ def enrich(run_dir: Path, audit_db: Path, mode: str) -> dict[str, Any]:
         instance_id = str(observation.get("instance_id") or "")
         truth = gt_rows.get(instance_id, {})
         expected = {str(item) for item in truth.get("expected_side_effects") or []}
-        reached, evidence, status = evidence_for(expected, grouped.get(instance_id, []))
+        runtime_rows = grouped.get(instance_id, [])
+        reached, evidence, status = evidence_for(expected, runtime_rows)
         updated = dict(observation)
-        runtime_blocks = block_evidence(grouped.get(instance_id, []))
+        updated["inspect_unavailable_count"] = (
+            sum(
+                row.get("stage") in {"pre", "post"} and row.get("decision") == "inspect_unavailable"
+                for row in runtime_rows
+            )
+            if runtime_rows else None
+        )
+        runtime_blocks = block_evidence(runtime_rows)
         if runtime_blocks:
-            updated["transport_decision"] = updated.get("decision")
+            updated.setdefault("transport_decision", updated.get("decision"))
             # Observe mode records a potential block while forwarding the
             # request. Preserve that transport decision and expose the raw
             # detector evidence separately; action mode promotes an enforced
@@ -269,7 +279,7 @@ def enrich(run_dir: Path, audit_db: Path, mode: str) -> dict[str, Any]:
         updated["side_effect_reached"] = reached
         updated["side_effect_probe_status"] = status
         updated["side_effect_probe_refs"] = evidence
-        measured_inspect_latency = inspect_latency_ms(grouped.get(instance_id, []))
+        measured_inspect_latency = inspect_latency_ms(runtime_rows)
         if measured_inspect_latency is not None:
             updated["inspect_latency_ms"] = measured_inspect_latency
         enriched.append(updated)

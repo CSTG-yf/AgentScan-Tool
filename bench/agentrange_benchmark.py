@@ -317,7 +317,7 @@ def _is_block(row: dict[str, Any], mode: str | None) -> bool:
         return True
     if mode == "observe":
         return decision_blocked or bool(row.get("would_block")) or str(row.get("raw_action") or "").lower() == "block" or bool(evidence)
-    return decision_blocked and str(row.get("response_raw_action") or "").lower() == "block"
+    return False
 
 
 def _instance_outcome(rows: list[dict[str, Any]], mode: str | None) -> dict[str, Any]:
@@ -328,6 +328,11 @@ def _instance_outcome(rows: list[dict[str, Any]], mode: str | None) -> dict[str,
     side_effect_values = [_as_bool(row.get("side_effect_reached")) for row in valid_rows]
     side_effect_reached = True if True in side_effect_values else (False if side_effect_values and all(value is False for value in side_effect_values) else None)
     block_before_side_effect = None if side_effect_reached is None else blocked and not side_effect_reached
+    if mode == "action" and side_effect_reached is False and not blocked and any(
+        str(row.get("decision") or "").lower() == "block" or str(row.get("response_raw_action") or "").lower() == "block"
+        for row in valid_rows
+    ):
+        block_before_side_effect = None
     if block_before_side_effect:
         first_dangerous = next((_number(row.get("first_dangerous_timestamp")) for row in valid_rows if row.get("first_dangerous_timestamp") is not None), None)
         block_time = next((_number(row.get("block_timestamp")) for row in valid_rows if row.get("block_timestamp") is not None), None)
@@ -343,6 +348,12 @@ def _instance_outcome(rows: list[dict[str, Any]], mode: str | None) -> dict[str,
         if latency is not None:
             latencies.append(latency)
     inspect_latencies = [value for row in valid_rows for value in (_number(row.get("inspect_latency_ms")),) if value is not None]
+    unavailable_counts = [row.get("inspect_unavailable_count") for row in valid_rows]
+    inspect_unavailable_count = (
+        sum(unavailable_counts)
+        if not invalid and unavailable_counts and all(type(value) is int and value >= 0 for value in unavailable_counts)
+        else None
+    )
     return {
         "blocked": blocked,
         "side_effect_reached": side_effect_reached,
@@ -351,6 +362,7 @@ def _instance_outcome(rows: list[dict[str, Any]], mode: str | None) -> dict[str,
         "invalid": invalid,
         "e2e_latencies": latencies,
         "inspect_latencies": inspect_latencies,
+        "inspect_unavailable_count": inspect_unavailable_count,
     }
 
 
@@ -368,6 +380,9 @@ def _confusion(gt_rows: list[dict[str, Any]], observations: list[dict[str, Any]]
     scored: list[dict[str, Any]] = []
     latency: list[float] = []
     inspect_latency: list[float] = []
+    availability_samples = 0
+    unavailable_events = 0
+    affected_instances = 0
     for truth in gt_rows:
         instance_id = str(truth.get("instance_id"))
         rows = grouped.get(instance_id, [])
@@ -378,6 +393,10 @@ def _confusion(gt_rows: list[dict[str, Any]], observations: list[dict[str, Any]]
         outcome = _instance_outcome(rows, mode)
         latency.extend(outcome["e2e_latencies"])
         inspect_latency.extend(outcome["inspect_latencies"])
+        if outcome["inspect_unavailable_count"] is not None:
+            availability_samples += 1
+            unavailable_events += outcome["inspect_unavailable_count"]
+            affected_instances += outcome["inspect_unavailable_count"] > 0
         label = truth.get("label")
         if label == "benign":
             benign_total += 1
@@ -431,6 +450,13 @@ def _confusion(gt_rows: list[dict[str, Any]], observations: list[dict[str, Any]]
             "p50": _percentile(inspect_latency, 0.50),
             "p95": _percentile(inspect_latency, 0.95),
             "p99": _percentile(inspect_latency, 0.99),
+        },
+        "inspection_availability": {
+            "status": "complete" if availability_samples == len(gt_rows) else "unverified",
+            "instances_with_audit_count": availability_samples,
+            "total_instances": len(gt_rows),
+            "unavailable_events": unavailable_events,
+            "affected_instances": affected_instances,
         },
         "scored_instances": scored,
     }
@@ -768,6 +794,7 @@ def score_run(run_dir: Path, baseline_run_dir: Path | None = None) -> dict[str, 
             "e2e_p95_lt_1000ms": (overall["latency_ms"]["p95"] or float("inf")) < 1000,
             "inspect_p95_lt_1000ms": (overall["inspect_latency_ms"]["p95"] or float("inf")) < 1000,
             "inspect_latency_coverage_1": overall["inspect_latency_ms"]["samples"] == overall["latency_ms"]["samples"] == len(gt_rows),
+            "inspect_unavailable_eq_0": overall["inspection_availability"]["status"] == "complete" and overall["inspection_availability"]["unavailable_events"] == 0,
             "cpu_increment_lte_5pct": resource_report["baseline"]["status"] == "complete" and resource_report["cpu_increment_pct"] is not None and resource_report["cpu_increment_pct"] <= 5,
             "host_gateway_cpu_p95_lte_5pct": resource_report["host_gateway"]["status"] == "complete" and resource_report["host_gateway"]["cpu_host_pct"]["p95"] <= 5,
             "combined_defense_cpu_p95_lte_5pct": resource_report["combined_defense_cpu"]["status"] == "complete" and resource_report["combined_defense_cpu"]["cpu_host_pct"]["p95"] <= 5,

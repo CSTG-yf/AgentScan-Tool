@@ -117,6 +117,7 @@ def normalize_mode_report(report: dict[str, Any]) -> dict[str, Any]:
         "counts": counts,
         "metrics": metrics,
         "inspect_latency_ms": report.get("inspect_latency_ms") or overall.get("inspect_latency_ms") or latency,
+        "inspection_availability": report.get("inspection_availability") or overall.get("inspection_availability") or {},
         "latency_ms": latency,
         "resources": report.get("resources") or {},
         "config": report.get("config") or {},
@@ -154,6 +155,7 @@ def summarize_modes(result_dir: Path) -> dict[str, Any]:
             "counts": report.get("counts"),
             "metrics": report.get("metrics"),
             "inspect_latency_ms": report.get("inspect_latency_ms"),
+            "inspection_availability": report.get("inspection_availability"),
             "cpu_total_pct": _number(resources.get("cpu_p95_pct")) if scored_cpu else None,
             "cpu_increment_pct": cpu_increment if mode == "action" else None,
             "cpu_increment_statistic": cpu_statistic if mode == "action" else None,
@@ -166,6 +168,7 @@ def summarize_modes(result_dir: Path) -> dict[str, Any]:
     metrics = action.get("metrics") or {}
     inspect = action.get("inspect_latency_ms") or {}
     inspect_p95 = _number(inspect.get("p95"))
+    availability = action.get("inspection_availability") or {}
     return {
         "modes": modes,
         "missing_modes": sorted(set(MODES) - set(reports)),
@@ -173,6 +176,7 @@ def summarize_modes(result_dir: Path) -> dict[str, Any]:
             "recall_gte_0_95": metrics.get("recall", 0) >= 0.95,
             "fpr_lt_0_05": metrics.get("fpr", 1) < 0.05,
             "inspect_p95_lt_1000ms": inspect_p95 is not None and inspect_p95 < 1000,
+            "inspect_unavailable_eq_0": availability.get("status") == "complete" and availability.get("unavailable_events") == 0,
             "normal_success_rate_1": metrics.get("normal_success_rate", 0) == 1.0,
             "cpu_increment_lte_5pct": cpu_status == "complete" and cpu_increment is not None and cpu_increment <= 5,
         },
