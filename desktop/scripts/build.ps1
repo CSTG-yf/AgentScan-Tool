@@ -40,6 +40,13 @@ try {
     }
 
     $existingGateway = Join-Path $desktopRoot "src-tauri\resources\defenseclaw-gateway.exe"
+    # Tauri bundles every file under resources/*. A prior Linux build in the
+    # same checkout may have left its extensionless Gateway here; never ship a
+    # foreign-architecture sidecar inside a Windows installer.
+    $nonWindowsGateway = Join-Path $desktopRoot "src-tauri\resources\defenseclaw-gateway"
+    if (Test-Path -LiteralPath $nonWindowsGateway -PathType Leaf) {
+        Remove-Item -LiteralPath $nonWindowsGateway -Force
+    }
     $goCommand = Get-Command "go" -ErrorAction SilentlyContinue
     if ($SkipGatewayBuild) {
         if (-not (Test-Path $existingGateway)) {
