@@ -85,6 +85,50 @@ import type {
 
 const inTauri = (): boolean => "__TAURI_INTERNALS__" in window;
 
+export interface PrivacySettings {
+  redactionEnabled: boolean;
+  retainJudgeBodies: boolean;
+}
+
+export interface NotificationSettings {
+  enabled: boolean;
+  blockEnforced: boolean;
+  blockWouldBlock: boolean;
+  hitlApproval: boolean;
+  hook: boolean;
+  guardrail: boolean;
+  assetPolicy: boolean;
+  dedupSeconds: number;
+  maxPerMinute: number;
+}
+
+export interface SavedSystemSettings<T> {
+  settings: T;
+  changed: string[];
+  restartRequired: string[];
+  live: boolean;
+}
+
+export async function getPrivacySettings(): Promise<PrivacySettings> {
+  if (!inTauri()) throw new Error("设置需要在桌面应用中读取 Gateway");
+  return invoke<PrivacySettings>("get_privacy_settings");
+}
+
+export async function savePrivacySettings(settings: PrivacySettings): Promise<SavedSystemSettings<PrivacySettings>> {
+  if (!inTauri()) throw new Error("浏览器预览无法保存设置");
+  return invoke<SavedSystemSettings<PrivacySettings>>("save_privacy_settings", { settings });
+}
+
+export async function getNotificationSettings(): Promise<NotificationSettings> {
+  if (!inTauri()) throw new Error("设置需要在桌面应用中读取 Gateway");
+  return invoke<NotificationSettings>("get_notification_settings");
+}
+
+export async function saveNotificationSettings(settings: NotificationSettings): Promise<SavedSystemSettings<NotificationSettings>> {
+  if (!inTauri()) throw new Error("浏览器预览无法保存设置");
+  return invoke<SavedSystemSettings<NotificationSettings>>("save_notification_settings", { settings });
+}
+
 const defaultScanScheduleSettings = (): ScanScheduleSettings => ({
   version: 1,
   environment: { enabled: true, intervalSec: 10 },

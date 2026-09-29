@@ -872,6 +872,8 @@ func (a *APIServer) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/scan-schedules", a.handleScanSchedules)
 	mux.HandleFunc("/api/v1/scan-schedules/", a.handleScanSchedules)
 	mux.HandleFunc("/api/v1/static-resource-scan-settings", a.handleStaticResourceScanSettings)
+	mux.HandleFunc("/api/v1/settings/privacy", a.handlePrivacySettings)
+	mux.HandleFunc("/api/v1/settings/notifications", a.handleNotificationSettings)
 	mux.HandleFunc("/api/v1/gateway-audit", a.handleGatewayAuditInventory)
 	mux.HandleFunc("/api/v1/ai-usage", a.handleAIUsage)
 	mux.HandleFunc("/api/v1/ai-usage/scan", a.handleAIUsageScan)

@@ -468,9 +468,17 @@ defenseclaw setup notifications-set guardrail off
 defenseclaw setup notifications-set asset_policy off
 ```
 
-Throttle fields (`dedup_window`, `max_per_minute`) remain config-only — flip
-them in `config.yaml`; the running gateway reloads the file and reconciles the
-notification dispatcher.
+The desktop Settings → Notifications page reads and patches these values via
+`GET/PATCH /api/v1/settings/notifications`. It also exposes the throttle
+fields as seconds and notifications per minute. Writes require the Gateway
+bearer token, are validated and saved atomically, and return `live` plus
+`restartRequired`; the running Gateway reloads the notification dispatcher.
+
+Settings → Privacy uses `GET/PATCH /api/v1/settings/privacy` for
+`privacy.disable_redaction` and `guardrail.retain_judge_bodies`. Disabling
+redaction is explicitly warned about. Changes requiring a Gateway restart
+are reported as such; saving a value is not presented as proof that it has
+already taken effect.
 
 ### YAML
 

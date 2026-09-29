@@ -1,10 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BellOutlined, CloudServerOutlined, DatabaseOutlined, DownloadOutlined, ExperimentOutlined,
   LockOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, SafetyCertificateOutlined,
   ToolOutlined, WarningOutlined,
 } from "@ant-design/icons";
-import { Alert, Badge, Button, Card, Input, Modal, Select, Space, Tag, Typography } from "antd";
+import { Alert, Button, Card, Input, InputNumber, Modal, Select, Space, Switch, Tag, Typography } from "antd";
+import { getNotificationSettings, getPrivacySettings, saveNotificationSettings, savePrivacySettings } from "../bridge";
+import type { NotificationSettings, PrivacySettings } from "../bridge";
 import type { EnvironmentComponent, RangeMode } from "../types";
 
 const { Text, Title } = Typography;
@@ -55,7 +57,7 @@ export function SettingsPage({ gatewayComponent, guardComponent, defenseMode, ga
       <div><Text className="eyebrow">SYSTEM SETTINGS</Text><Title level={2}>系统设置</Title><Text type="secondary">管理本机服务、数据、隐私、通知、更新与诊断能力。</Text></div>
       <div className="settings-header-tools">
         <Input allowClear prefix={<SearchOutlined />} placeholder="搜索设置" value={query} onChange={event => setQuery(event.target.value)} />
-        <span className="settings-save-state"><Badge status="success" /> 已保存</span>
+        <span className="settings-save-state">配置由 Gateway 管理</span>
         <Text type="secondary">状态更新于 {refreshedAt ? new Date(refreshedAt).toLocaleTimeString("zh-CN", { hour12: false }) : "—"}</Text>
         <Button icon={<ReloadOutlined />} loading={busy} onClick={onRefresh}>刷新状态</Button>
       </div>
@@ -102,10 +104,108 @@ export function SettingsPage({ gatewayComponent, guardComponent, defenseMode, ga
             <div><div><Text strong>卸载系统进程守护</Text><Text type="secondary">停止系统级防护并移除系统服务，审计数据仍会保留。</Text></div><Button danger disabled={guardMissing} onClick={uninstall}>卸载服务</Button></div>
           </Card>
         </>}
-        {section !== "services" && <CapabilitySection section={section} />}
+        {section === "privacy" && <PrivacySettingsSection />}
+        {section === "notifications" && <NotificationSettingsSection />}
+        {section !== "services" && section !== "privacy" && section !== "notifications" && <CapabilitySection section={section} />}
       </main>
     </div>
   </section>;
+}
+
+function PrivacySettingsSection() {
+  const [settings, setSettings] = useState<PrivacySettings>();
+  const [original, setOriginal] = useState<PrivacySettings>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [restart, setRestart] = useState<string[]>([]);
+  useEffect(() => {
+    let active = true;
+    void getPrivacySettings().then(value => {
+      if (active) { setSettings(value); setOriginal(value); setError(""); }
+    }).catch(cause => { if (active) setError(String(cause)); });
+    return () => { active = false; };
+  }, []);
+  const persist = async () => {
+    if (!settings) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await savePrivacySettings(settings);
+      setSettings(result.settings);
+      setOriginal(result.settings);
+      setRestart(result.restartRequired);
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const save = () => {
+    if (original?.redactionEnabled && settings && !settings.redactionEnabled) {
+      Modal.confirm({
+        title: "关闭敏感内容脱敏？",
+        content: "关闭后，审计、日志和外部接收端可能获得未脱敏内容。仅应在受控单租户环境使用。",
+        okText: "确认关闭并保存", okButtonProps: { danger: true }, cancelText: "取消",
+        onOk: persist,
+      });
+      return;
+    }
+    void persist();
+  };
+  return <><div className="settings-section-heading"><div><Title level={3}>隐私与脱敏</Title><Text type="secondary">以下值来自 Gateway 配置，保存后写入本机配置文件。</Text></div></div>
+    {error && <Alert showIcon type="error" message="设置不可用" description={error} />}
+    {restart.length > 0 && <Alert showIcon type="warning" message="需要重启 Gateway" description={`变更 ${restart.join("、")} 已保存，但需重启后完整生效。`} />}
+    {settings && <Card title="采集与持久化">
+      <div className="settings-form-row"><div><Text strong>敏感字段脱敏</Text><br /><Text type="secondary">控制审计、日志和遥测接收端的统一脱敏。</Text></div><Switch checked={settings.redactionEnabled} onChange={value => setSettings({ ...settings, redactionEnabled: value })} /></div>
+      <div className="settings-form-row"><div><Text strong>保留 Judge 原始响应</Text><br /><Text type="secondary">保留本地取证内容；关闭后新响应不再持久化，现有数据不会自动删除。</Text></div><Switch checked={settings.retainJudgeBodies} onChange={value => setSettings({ ...settings, retainJudgeBodies: value })} /></div>
+      {!settings.redactionEnabled && <Alert showIcon type="warning" message="脱敏已关闭，敏感数据可能流向持久化和外部接收端。" />}
+      <div className="service-actions"><Button type="primary" loading={busy} disabled={JSON.stringify(settings) === JSON.stringify(original)} onClick={save}>保存隐私设置</Button></div>
+    </Card>}
+  </>;
+}
+
+function NotificationSettingsSection() {
+  const [settings, setSettings] = useState<NotificationSettings>();
+  const [original, setOriginal] = useState<NotificationSettings>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [restart, setRestart] = useState<string[]>([]);
+  useEffect(() => {
+    let active = true;
+    void getNotificationSettings().then(value => {
+      if (active) { setSettings(value); setOriginal(value); setError(""); }
+    }).catch(cause => { if (active) setError(String(cause)); });
+    return () => { active = false; };
+  }, []);
+  const save = async () => {
+    if (!settings) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await saveNotificationSettings(settings);
+      setSettings(result.settings);
+      setOriginal(result.settings);
+      setRestart(result.restartRequired);
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggle = (field: keyof NotificationSettings, value: boolean) => setSettings(current => current ? { ...current, [field]: value } : current);
+  return <><div className="settings-section-heading"><div><Title level={3}>通知</Title><Text type="secondary">配置真实的本机安全通知和去重节流。</Text></div></div>
+    {error && <Alert showIcon type="error" message="设置不可用" description={error} />}
+    {restart.length > 0 && <Alert showIcon type="warning" message="需要重启 Gateway" description={restart.join("、")} />}
+    {settings && <Card title="本机通知">
+      {([
+        ["enabled", "启用通知"], ["blockEnforced", "实际阻断"], ["blockWouldBlock", "Observe 模式预阻断"],
+        ["hitlApproval", "人工审批"], ["hook", "Agent Hook 来源"], ["guardrail", "Guardrail 来源"], ["assetPolicy", "资源策略来源"],
+      ] as Array<[keyof NotificationSettings, string]>).map(([field, label]) => <div className="settings-form-row" key={field}><Text strong>{label}</Text><Switch checked={Boolean(settings[field])} onChange={value => toggle(field, value)} /></div>)}
+      <div className="settings-form-row"><Text strong>相同通知去重（秒）</Text><InputNumber min={1} max={3600} value={settings.dedupSeconds} onChange={value => value !== null && setSettings({ ...settings, dedupSeconds: value })} /></div>
+      <div className="settings-form-row"><Text strong>每分钟通知上限</Text><InputNumber min={1} max={600} value={settings.maxPerMinute} onChange={value => value !== null && setSettings({ ...settings, maxPerMinute: value })} /></div>
+      <div className="service-actions"><Button type="primary" loading={busy} disabled={JSON.stringify(settings) === JSON.stringify(original)} onClick={() => void save()}>保存通知设置</Button></div>
+    </Card>}
+  </>;
 }
 
 function Metric({ label, value, note, tone = "normal" }: { label: string; value: number; note: string; tone?: string }) {

@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::models::{ScanScheduleSettings, StaticResourceScanSettings};
 
@@ -58,4 +59,28 @@ pub fn save_static_resource_scan_settings(
     )
     .map(|response| response.settings.normalize())
     .map_err(|error| format!("Go Gateway 暂不可用，无法保存后端静态资源扫描配置：{error}"))
+}
+
+#[tauri::command]
+pub fn get_privacy_settings(app: tauri::AppHandle) -> Result<Value, String> {
+    crate::commands::gateway_api::get_json(&app, "/api/v1/settings/privacy")
+        .map_err(|error| format!("获取隐私设置失败：{error}"))
+}
+
+#[tauri::command]
+pub fn save_privacy_settings(app: tauri::AppHandle, settings: Value) -> Result<Value, String> {
+    crate::commands::gateway_api::patch_json(&app, "/api/v1/settings/privacy", &settings)
+        .map_err(|error| format!("保存隐私设置失败：{error}"))
+}
+
+#[tauri::command]
+pub fn get_notification_settings(app: tauri::AppHandle) -> Result<Value, String> {
+    crate::commands::gateway_api::get_json(&app, "/api/v1/settings/notifications")
+        .map_err(|error| format!("获取通知设置失败：{error}"))
+}
+
+#[tauri::command]
+pub fn save_notification_settings(app: tauri::AppHandle, settings: Value) -> Result<Value, String> {
+    crate::commands::gateway_api::patch_json(&app, "/api/v1/settings/notifications", &settings)
+        .map_err(|error| format!("保存通知设置失败：{error}"))
 }
