@@ -29,12 +29,16 @@ import threading
 import time
 import base64
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
+from http.client import HTTPConnection, HTTPException, HTTPSConnection
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
+from queue import Empty, Full, LifoQueue
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
+from urllib.parse import quote, urlencode, urlsplit
+from urllib.request import Request, urlopen as _urllib_urlopen
 from uuid import uuid4
  
 HOP_BY_HOP_HEADERS = {
@@ -55,6 +59,8 @@ _runtime_result_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix=
 _audit_executor = ThreadPoolExecutor(max_workers=16, thread_name_prefix="runtime-audit")
 _audit_pending = 0
 _audit_pending_lock = threading.Lock()
+_gateway_pools: dict[tuple[str, str, int], LifoQueue[HTTPConnection]] = {}
+_gateway_pools_lock = threading.Lock()
 
 MAX_FORWARD_BODY_BYTES = int(os.getenv("DC_MAX_FORWARD_BODY_BYTES", str(10 * 1024 * 1024)))
 MAX_INSPECT_TEXT_BYTES = int(os.getenv("DC_MAX_INSPECT_TEXT_BYTES", str(256 * 1024)))
@@ -69,17 +75,79 @@ def gateway_base() -> str:
     return getenv("DC_GATEWAY_BASE", "http://host.docker.internal:18970").rstrip("/")
 
 
+def _gateway_pool(url: str) -> tuple[LifoQueue[HTTPConnection], tuple[str, str, int]]:
+    parsed = urlsplit(url)
+    key = (parsed.scheme, parsed.hostname or "", parsed.port or (443 if parsed.scheme == "https" else 80))
+    with _gateway_pools_lock:
+        pool = _gateway_pools.setdefault(key, LifoQueue(maxsize=32))
+    return pool, key
+
+
+@contextmanager
+def _gateway_urlopen(request: Request, timeout: float):
+    pool, (scheme, host, port) = _gateway_pool(request.full_url)
+    parsed = urlsplit(request.full_url)
+    path = parsed.path + ("?" + parsed.query if parsed.query else "")
+    deadline = time.monotonic() + timeout
+    for attempt in range(2):
+        try:
+            connection = pool.get_nowait()
+            reused = True
+        except Empty:
+            connection = (HTTPSConnection if scheme == "https" else HTTPConnection)(host, port)
+            reused = False
+        remaining = max(0.001, deadline - time.monotonic())
+        connection.timeout = remaining
+        if connection.sock is not None:
+            connection.sock.settimeout(remaining)
+        try:
+            connection.request(request.get_method(), path, body=request.data, headers=dict(request.header_items()))
+            response = connection.getresponse()
+        except (OSError, HTTPException) as exc:
+            connection.close()
+            if reused and attempt == 0 and time.monotonic() < deadline:
+                continue
+            raise URLError(exc) from exc
+        if response.status >= 400:
+            body = response.read()
+            connection.close()
+            raise HTTPError(request.full_url, response.status, response.reason, response.headers, BytesIO(body))
+        try:
+            yield response
+            response.read()
+        except BaseException:
+            connection.close()
+            raise
+        else:
+            if response.will_close or connection.sock is None:
+                connection.close()
+            else:
+                try:
+                    pool.put_nowait(connection)
+                except Full:
+                    connection.close()
+        return
+
+
+def urlopen(request: Request, *, timeout: float):
+    target = urlsplit(request.full_url)
+    gateway = urlsplit(gateway_base())
+    if (target.scheme, target.netloc) == (gateway.scheme, gateway.netloc):
+        return _gateway_urlopen(request, timeout)
+    return _urllib_urlopen(request, timeout=timeout)
+
+
 def fail_mode() -> str:
     mode = getenv("DC_FAIL_MODE", "open").lower()
     return "closed" if mode in {"closed", "fail-closed", "fail_closed"} else "open"
 
 
 def inspect_timeout() -> float:
-    raw = getenv("DC_INSPECT_TIMEOUT_MS", "250")
+    raw = getenv("DC_INSPECT_TIMEOUT_MS", "400")
     try:
         return max(1, int(raw)) / 1000.0
     except ValueError:
-        return 0.25
+        return 0.4
 
 
 def inspection_bypassed() -> bool:
@@ -305,21 +373,33 @@ def inspect_call(endpoint: str, payload: dict[str, Any]) -> tuple[dict[str, Any]
         state["pending_checks"].append(check)
     url = f"{gateway_base()}{endpoint}"
     request = authed_request(url, payload, timeout=inspect_timeout())
-    try:
-        with urlopen(request, timeout=inspect_timeout()) as response:
-            raw = response.read()
-            if response.headers.get("X-DefenseClaw-Runtime-Status") in {"failed", "unavailable"}:
-                sys.stderr.write("[runtime] inspection persistence/evaluation failed; see gateway log\n")
-            elif state:
-                state["pending_checks"].remove(check)
-    except HTTPError as exc:
-        return None, f"HTTP {exc.code}"
-    except (URLError, TimeoutError, OSError) as exc:
-        return None, str(exc)
-    parsed = json_loads_maybe(raw)
-    if isinstance(parsed, dict):
-        return parsed, None
-    return None, "inspect response was not JSON"
+    timeout = inspect_timeout()
+    retryable = state is not None and timeout >= 0.35
+    deadline = time.monotonic() + timeout
+    last_error = "inspection timeout"
+    # A second delivery uses the same event ID, so Gateway persistence stays idempotent.
+    for attempt in range(2 if retryable else 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        attempt_timeout = min(0.25, remaining) if retryable and attempt == 0 else remaining
+        try:
+            with urlopen(request, timeout=attempt_timeout) as response:
+                raw = response.read()
+                if response.headers.get("X-DefenseClaw-Runtime-Status") in {"failed", "unavailable"}:
+                    sys.stderr.write("[runtime] inspection persistence/evaluation failed; see gateway log\n")
+                elif state:
+                    state["pending_checks"].remove(check)
+        except HTTPError as exc:
+            return None, f"HTTP {exc.code}"
+        except (URLError, TimeoutError, OSError) as exc:
+            last_error = str(exc)
+            continue
+        parsed = json_loads_maybe(raw)
+        if isinstance(parsed, dict):
+            return parsed, None
+        return None, "inspect response was not JSON"
+    return None, last_error
 
 
 def should_block(verdict: dict[str, Any] | None, error: str | None) -> bool:

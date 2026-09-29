@@ -4,7 +4,10 @@ import io
 import json
 import os
 import base64
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -28,6 +31,58 @@ class Response:
 
 
 class AgentRangeRuntimeTests(unittest.TestCase):
+    def test_gateway_requests_reuse_one_connection(self):
+        class Server(ThreadingHTTPServer):
+            connections = 0
+            auth_headers = None
+
+            def get_request(self):
+                self.connections += 1
+                return super().get_request()
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"ok")
+
+            def do_POST(self):
+                self.server.auth_headers = (self.headers.get("Authorization"), self.headers.get("X-DefenseClaw-Connector"))
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *args):
+                pass
+
+        server = Server(("127.0.0.1", 0), Handler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{server.server_port}/health"
+        try:
+            with patch.dict(os.environ, {"DC_GATEWAY_BASE": f"http://127.0.0.1:{server.server_port}"}):
+                for _ in range(2):
+                    with sidecar.urlopen(sidecar.Request(url), timeout=0.25) as response:
+                        self.assertEqual(response.read(), b"ok")
+                with patch.dict(os.environ, {"DEFENSECLAW_GATEWAY_TOKEN": "test-token"}):
+                    request = sidecar.authed_request(url, {"check": True}, timeout=0.25)
+                    with sidecar.urlopen(request, timeout=0.25) as response:
+                        self.assertEqual(response.read(), b"{}")
+            self.assertEqual(server.connections, 1)
+            self.assertEqual(server.auth_headers, ("Bearer test-token", "agentrange"))
+        finally:
+            pool, _ = sidecar._gateway_pool(url)
+            while not pool.empty():
+                pool.get_nowait().close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_auth_token_response_is_redacted_for_inspection(self):
         token = "eyJ" + "a" * 20 + ".eyJ" + "b" * 20 + ".signature"
         original = json.dumps({"access_token": token, "token_type": "bearer", "message": "normal"}).encode()
@@ -103,6 +158,33 @@ class AgentRangeRuntimeTests(unittest.TestCase):
             self.assertEqual(checks[0], checks[1])
             self.assertEqual(len(state['inspection_ids']), 1)
             self.assertEqual(state['pending_checks'], [])
+        finally:
+            sidecar._runtime_request.reset(token)
+
+    def test_inspection_timeout_retries_within_budget_and_same_event(self):
+        state = self.state()
+        token = sidecar._runtime_request.set(state)
+        calls = []
+
+        def urlopen(request, **kwargs):
+            calls.append((json.loads(request.data), kwargs["timeout"]))
+            if len(calls) == 1:
+                time.sleep(kwargs["timeout"])
+                raise TimeoutError("timed out")
+            return Response({"action": "allow"}, {"X-DefenseClaw-Runtime-Status": "recorded"})
+
+        try:
+            with patch.object(sidecar, "urlopen", side_effect=urlopen), patch.dict(
+                    os.environ, {"DC_INSPECT_TIMEOUT_MS": "400"}):
+                verdict, error = sidecar.inspect_request("safe content", "session-1")
+            self.assertIsNone(error)
+            self.assertEqual(verdict["action"], "allow")
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[0][0], calls[1][0])
+            self.assertLessEqual(calls[0][1], 0.25)
+            self.assertLessEqual(calls[1][1], 0.16)
+            self.assertEqual(len(state["inspection_ids"]), 1)
+            self.assertEqual(state["pending_checks"], [])
         finally:
             sidecar._runtime_request.reset(token)
 

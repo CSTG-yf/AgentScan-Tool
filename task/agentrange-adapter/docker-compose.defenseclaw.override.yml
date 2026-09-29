@@ -32,7 +32,7 @@ services:
       DC_GATEWAY_BASE: http://host.docker.internal:18970
       DC_FAIL_MODE: open
       DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
-      DC_INSPECT_TIMEOUT_MS: '250'
+      DC_INSPECT_TIMEOUT_MS: '400'
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: opspilot
       DC_TARGET_BASE: http://opspilot-app:8000
@@ -59,7 +59,7 @@ services:
       DC_GATEWAY_BASE: http://host.docker.internal:18970
       DC_FAIL_MODE: open
       DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
-      DC_INSPECT_TIMEOUT_MS: '250'
+      DC_INSPECT_TIMEOUT_MS: '400'
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: llm
       DC_TARGET_BASE: http://llm-stub:8000
@@ -84,7 +84,7 @@ services:
       DC_GATEWAY_BASE: http://host.docker.internal:18970
       DC_FAIL_MODE: open
       DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
-      DC_INSPECT_TIMEOUT_MS: '250'
+      DC_INSPECT_TIMEOUT_MS: '400'
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: mcp
       DC_MCP_TARGETS: '{"mcp-customer-db": "http://mcp-customer-db:8000", "mcp-gitlab":
@@ -134,7 +134,7 @@ services:
       DC_GATEWAY_BASE: http://host.docker.internal:18970
       DC_FAIL_MODE: open
       DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
-      DC_INSPECT_TIMEOUT_MS: '250'
+      DC_INSPECT_TIMEOUT_MS: '400'
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: langflow
       DC_TARGET_BASE: http://langflow:7860

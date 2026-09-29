@@ -60,6 +60,22 @@ whether the original attempt reached the Gateway or only its retry did. The
 experiment did not improve the overall gate and the sidecars were restored to 250 ms.
 Its ignored run is `bench/runs/20260929-timeout350-rate150-1k/action`.
 
+With a pooled Gateway HTTP connection, the same 1,000-event, 1.5-event/second
+action replay at 250 ms had 3 unavailable inspections, 16/16 confirmed blocks,
+984/984 normal successes, 539.809 ms end-to-end p95, and 4.203% combined CPU
+p95. Raising only the timeout to 400 ms left 1 unavailable inspection and
+541.990 ms end-to-end p95. Prewarming four connections per sidecar still left
+1 unavailable inspection, so that extra startup behavior was removed.
+
+The current candidate keeps connection reuse and retries an unanswered inspect
+request once using the same runtime event ID, within a 400 ms total deadline.
+Its matched-input 1,000-event action replay had 16/16 confirmed blocks,
+0 false positives, 984/984 normal successes, 0 unavailable inspections,
+109 ms inspection p95, 562.734 ms end-to-end p95, and 4.205% combined CPU
+p95. It is at `bench/runs/20260929-pooled-retry400-rate150-1k/action`.
+The 5,200-event paired run and same-code CPU baseline remain to be verified;
+these 1,000-event results do not supersede the failing full result above.
+
 The earlier natural-rate action replay had an end-to-end p95 that exceeded
 the local 1,000 ms gate by 3.966 ms, even though its inspection p95 is below
 that gate. Its older CPU baseline ran at a different rate (action/baseline
@@ -78,7 +94,7 @@ before scoring.
 The frozen local static fixture reports 27/27 assets and 13/13 risk pairs,
 with no false positives or misses. It covers this arena hash only and does not
 measure unseen assets or attack variants. Current Python-focused tests pass
-(41 tests); the targeted Go AgentRange rule test also passes. The broad Go
+(43 tests); the targeted Go AgentRange rule test also passes. The broad Go
 gateway test package has unrelated Windows-only failures in WSL/bash, Unix
 permission, and symlink-dependent cases.
 
