@@ -24,3 +24,20 @@ func TestHookRuntimeEventCarriesMCPServerForEnforcement(t *testing.T) {
 		t.Fatalf("MCP hook evidence = %+v", rows)
 	}
 }
+
+func TestHookRuntimeEventDoesNotClaimUnknownConnectorCanBlock(t *testing.T) {
+	store, _ := testStoreAndLogger(t)
+	SetRuntimeEventStore(store)
+	t.Cleanup(func() { SetRuntimeEventStore(nil) })
+	api := &APIServer{store: store}
+	api.recordHookRuntimeEvent(context.Background(), agentHookRequest{
+		ConnectorName: "unsupported-agent", HookEventName: "PreToolUse", ToolName: "Read",
+	}, agentHookResponse{Action: "allow", Mode: "action"})
+	rows, err := store.ListRuntimeEvents(audit.RuntimeEventFilter{EventSource: audit.RuntimeSourceAgentHook, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Attributes["pre_call_block_capable"] != false {
+		t.Fatalf("unknown connector capability = %+v", rows)
+	}
+}

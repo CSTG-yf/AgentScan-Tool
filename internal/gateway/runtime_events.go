@@ -208,6 +208,10 @@ func (a *APIServer) recordHookRuntimeEvent(ctx context.Context, req agentHookReq
 		},
 	}
 	in.CanonicalAgentID = firstNonEmpty(req.AgentID, env.AgentID, identity.AgentID)
+	if eventType == audit.RuntimeEventToolPreCall {
+		caps := a.hookProfileForConnector(req.ConnectorName).Capabilities
+		in.Attributes["pre_call_block_capable"] = caps.CanBlock && eventIn(req.HookEventName, caps.BlockEvents)
+	}
 	if eventType == audit.RuntimeEventToolPreCall && (req.ConnectorName == "codex" || req.ConnectorName == "claudecode") {
 		var args map[string]interface{}
 		if json.Unmarshal(req.ToolArgs, &args) == nil {

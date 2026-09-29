@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/defenseclaw/defenseclaw/internal/audit"
@@ -18,12 +19,17 @@ func TestRuntimeDecisionHookExecutorBlocksNextToolCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	decision := audit.RuntimeDecision{DecisionID: "D-hook-gate", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointAgentHook}
-	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
-		EventType:   audit.RuntimeEventToolPreCall,
-		EventSource: audit.RuntimeSourceAgentHook,
-		ToolName:    "Read",
-		Attributes:  map[string]any{"connector": "codex"},
-	}}}
+	SetRuntimeEventStore(store)
+	t.Cleanup(func() { SetRuntimeEventStore(nil) })
+	api.recordHookRuntimeEvent(context.Background(), agentHookRequest{
+		ConnectorName: "codex", HookEventName: "PreToolUse", ToolName: "Read",
+		ToolArgs: json.RawMessage(`{"file_path":"README.md"}`),
+	}, agentHookResponse{Action: "allow", Mode: "action"})
+	rows, err := store.ListRuntimeEvents(audit.RuntimeEventFilter{EventSource: audit.RuntimeSourceAgentHook, Limit: 10})
+	if err != nil || len(rows) != 1 || rows[0].Attributes["pre_call_block_capable"] != true {
+		t.Fatalf("hook capability evidence = %+v, %v", rows, err)
+	}
+	evidence := []audit.DetectionEvidence{{Event: rows[0]}}
 	status, _, _ := engine.ExecuteNonProxy(context.Background(), decision, "TOOL_BLOCK", evidence, true)
 	if status != audit.ResponseStatusExecuted {
 		t.Fatalf("hook executor status = %s", status)

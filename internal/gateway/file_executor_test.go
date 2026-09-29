@@ -45,7 +45,7 @@ func TestRuntimeFileExecutorBlocksNextControlledRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].Attributes["file_read_path_sha256"] != digest {
+	if len(rows) != 1 || rows[0].Attributes["file_read_path_sha256"] != digest || rows[0].Attributes["pre_call_block_capable"] != true {
 		t.Fatalf("recorded hook file identity = %+v", rows)
 	}
 	decision := audit.RuntimeDecision{DecisionID: "D-file-hook", DetectionID: finding.DetectionID, EnforcementPoint: audit.EnforcementPointFile}

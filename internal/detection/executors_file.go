@@ -43,6 +43,9 @@ func (e FileBlockExecutor) Execute(ctx context.Context, req RuntimeExecutionRequ
 		if ev.EventSource != audit.RuntimeSourceAgentHook || ev.EventType != audit.RuntimeEventToolPreCall {
 			continue
 		}
+		if ev.Attributes["pre_call_block_capable"] != true {
+			continue
+		}
 		value, _ := ev.Attributes["file_read_path_sha256"].(string)
 		scope, _ := ev.Attributes["connector"].(string)
 		if !fileReadDigestPattern.MatchString(value) || (scope != "codex" && scope != "claudecode") {

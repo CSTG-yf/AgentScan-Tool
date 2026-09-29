@@ -16,10 +16,10 @@ func TestAgentHookExecutorRequiresPreCallEvidence(t *testing.T) {
 	decision := audit.RuntimeDecision{DecisionID: "D-tool", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointAgentHook}
 	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
 		EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceOSSensor,
-		ToolName: "Read", Attributes: map[string]any{"connector": "codex"},
+		ToolName: "Read", Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": true},
 	}}}
 	status, _, result := policy.ExecuteNonProxy(context.Background(), decision, "TOOL_BLOCK", evidence, true)
-	if status != audit.ResponseStatusFailed || !strings.Contains(result, "no connector-scoped pre-tool") {
+	if status != audit.ResponseStatusFailed || !strings.Contains(result, "no block-capable connector-scoped pre-tool") {
 		t.Fatalf("unexpected result: %s %s", status, result)
 	}
 }
@@ -31,7 +31,7 @@ func TestAgentHookExecutorPersistsScopedGate(t *testing.T) {
 	decision := audit.RuntimeDecision{DecisionID: "D-tool", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointAgentHook}
 	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
 		EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook,
-		ToolName: "Read", Attributes: map[string]any{"connector": "codex"},
+		ToolName: "Read", Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": true},
 	}}}
 	status, target, result := policy.ExecuteNonProxy(context.Background(), decision, "TOOL_BLOCK", evidence, true)
 	if status != audit.ResponseStatusExecuted || target != "Read" || !strings.Contains(result, "future calls") {
@@ -48,6 +48,24 @@ func TestAgentHookExecutorPersistsScopedGate(t *testing.T) {
 	}
 }
 
+func TestAgentHookExecutorRejectsNonBlockingHook(t *testing.T) {
+	store := newDetectionTestStore(t)
+	d := explicitToolDetection(t, store)
+	decision := audit.RuntimeDecision{DecisionID: "D-unblockable", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointAgentHook}
+	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
+		EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook,
+		ToolName: "Read", Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": false},
+	}}}
+	status, _, _ := NewPolicyEngine(store).ExecuteNonProxy(context.Background(), decision, "TOOL_BLOCK", evidence, true)
+	if status != audit.ResponseStatusFailed {
+		t.Fatalf("non-blocking hook reported success: %s", status)
+	}
+	blocked, err := enforce.NewPolicyEngine(store).IsToolBlockedForConnector("Read", "codex")
+	if err != nil || blocked {
+		t.Fatalf("non-blocking hook changed policy: blocked=%v err=%v", blocked, err)
+	}
+}
+
 func TestAgentHookExecutorDoesNotPermanentlyBlockGenericRead(t *testing.T) {
 	store := newDetectionTestStore(t)
 	d, err := store.RecordRuntimeDetection(audit.RuntimeDetectionInput{
@@ -60,7 +78,7 @@ func TestAgentHookExecutorDoesNotPermanentlyBlockGenericRead(t *testing.T) {
 	decision := audit.RuntimeDecision{DecisionID: "D-credential", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointAgentHook}
 	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
 		EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook,
-		ToolName: "Read", Attributes: map[string]any{"connector": "codex"},
+		ToolName: "Read", Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": true},
 	}}}
 	status, _, _ := policy.ExecuteNonProxy(context.Background(), decision, "TOOL_BLOCK", evidence, true)
 	if status != audit.ResponseStatusFailed {

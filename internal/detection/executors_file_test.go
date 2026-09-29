@@ -26,9 +26,10 @@ func TestFileExecutorRequiresControlledPreReadEvidence(t *testing.T) {
 	detection := fileBlacklistDetection(t, store)
 	decision := audit.RuntimeDecision{DecisionID: "D-file", DetectionID: detection.DetectionID, EnforcementPoint: audit.EnforcementPointFile}
 	for _, event := range []audit.BehaviorEvent{
-		{EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceOSSensor, Attributes: map[string]any{"connector": "codex", "file_read_path_sha256": strings.Repeat("a", 64)}},
-		{EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook, Attributes: map[string]any{"connector": "cursor", "file_read_path_sha256": strings.Repeat("a", 64)}},
-		{EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook, Attributes: map[string]any{"connector": "codex", "file_read_path_sha256": "invalid"}},
+		{EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceOSSensor, Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": true, "file_read_path_sha256": strings.Repeat("a", 64)}},
+		{EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook, Attributes: map[string]any{"connector": "cursor", "pre_call_block_capable": true, "file_read_path_sha256": strings.Repeat("a", 64)}},
+		{EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook, Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": true, "file_read_path_sha256": "invalid"}},
+		{EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook, Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": false, "file_read_path_sha256": strings.Repeat("a", 64)}},
 	} {
 		status, _, _ := NewPolicyEngine(store).ExecuteNonProxy(context.Background(), decision, "FILE_BLOCK", []audit.DetectionEvidence{{Event: event}}, true)
 		if status != audit.ResponseStatusFailed {
@@ -44,7 +45,7 @@ func TestFileExecutorPersistsVerifiedScopedGate(t *testing.T) {
 	decision := audit.RuntimeDecision{DecisionID: "D-file", DetectionID: detection.DetectionID, EnforcementPoint: audit.EnforcementPointFile}
 	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
 		EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook,
-		Attributes: map[string]any{"connector": "codex", "file_read_path_sha256": digest},
+		Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": true, "file_read_path_sha256": digest},
 	}}}
 	status, target, result := NewPolicyEngine(store).ExecuteNonProxy(context.Background(), decision, "FILE_BLOCK", evidence, true)
 	if status != audit.ResponseStatusExecuted || target != digest || !strings.Contains(result, "future exact-file calls") {

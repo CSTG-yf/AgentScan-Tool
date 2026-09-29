@@ -42,7 +42,7 @@ func (e AgentHookBlockExecutor) Execute(ctx context.Context, req RuntimeExecutio
 		name := strings.TrimSpace(ev.ToolName)
 		scope, _ := ev.Attributes["connector"].(string)
 		scope = strings.TrimSpace(scope)
-		if name == "" || scope == "" {
+		if name == "" || scope == "" || ev.Attributes["pre_call_block_capable"] != true {
 			continue
 		}
 		if tool != "" && (tool != name || connector != scope) {
@@ -51,7 +51,7 @@ func (e AgentHookBlockExecutor) Execute(ctx context.Context, req RuntimeExecutio
 		tool, connector = name, scope
 	}
 	if tool == "" {
-		return "", "", fmt.Errorf("no connector-scoped pre-tool hook evidence is available")
+		return "", "", fmt.Errorf("no block-capable connector-scoped pre-tool hook evidence is available")
 	}
 	policy := enforce.NewPolicyEngine(e.Store)
 	if err := policy.BlockToolForConnector(tool, connector, "runtime decision "+req.Decision.DecisionID); err != nil {
