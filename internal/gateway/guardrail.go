@@ -50,6 +50,9 @@ type ScanVerdict struct {
 	ScannerSources []string `json:"scanner_sources,omitempty"`
 	CiscoElapsedMs float64  `json:"cisco_elapsed_ms,omitempty"`
 	JudgeFailed    bool     `json:"-"`
+	// Set only by the in-process proxy immediately before recording a prompt
+	// verdict whose action-mode control flow returns without upstream I/O.
+	ProxyPreUpstreamBlocked bool `json:"-"`
 	// EvaluationID + RuleIDs are populated by the guardrail Inspect
 	// runtime emitter so downstream observers (recordTelemetry,
 	// EventVerdict, BlockEvent) can join this verdict to the

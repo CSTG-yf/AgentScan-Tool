@@ -285,7 +285,12 @@ func recordGuardrailRuntimeEvent(ctx context.Context, direction, model string, v
 
 	outcome := "allowed"
 	if strings.EqualFold(verdict.Action, "block") {
-		outcome = "blocked"
+		// A block verdict alone is not proof that the upstream request was
+		// denied. Observe and externally reported verdicts stay advisory.
+		outcome = "flagged"
+		if direction == "prompt" && verdict.ProxyPreUpstreamBlocked {
+			outcome = "blocked"
+		}
 	} else if strings.EqualFold(verdict.Action, "alert") {
 		outcome = "flagged"
 	}
@@ -295,6 +300,9 @@ func recordGuardrailRuntimeEvent(ctx context.Context, direction, model string, v
 		"action":        verdict.Action,
 		"model":         model,
 		"finding_count": len(verdict.Findings),
+	}
+	if direction == "prompt" && verdict.ProxyPreUpstreamBlocked {
+		attrs["proxy_pre_upstream_blocked"] = true
 	}
 	if verdict.Scanner != "" {
 		attrs["scanner"] = verdict.Scanner
