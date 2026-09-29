@@ -20,15 +20,6 @@ DEFAULT_TAXONOMY = PROJECT_ROOT / "integration" / "risk_taxonomy.yaml"
 DEFAULT_OUTPUT = PROJECT_ROOT / "integration" / "reports" / "static-scan.json"
 
 TEXT_SUFFIXES = {".py", ".md", ".yaml", ".yml", ".env", ".example", ".json", ".toml"}
-SCAN_ROOTS = (
-    "skills",
-    "mcp",
-    "opspilot-app",
-    "llm-stub",
-    "langflow",
-    "docker-compose.yml",
-    ".env.example",
-)
 PYTHON_AST_RULES = {
     "AR-STATIC-HIDDEN-TOOL",
     "AR-STATIC-SHELL-TRUE",
@@ -68,8 +59,13 @@ def python_ast_matches(path: Path) -> dict[str, set[int]]:
     return matches
 
 
-def iter_sources(root: Path):
-    for relative in SCAN_ROOTS:
+def iter_sources(root: Path, discovered: dict[str, dict[str, str]]):
+    scan_roots = {"docker-compose.yml", ".env.example"}
+    for asset in discovered.values():
+        source = asset["source"].replace("\\", "/")
+        if "/" in source:
+            scan_roots.add(source.split("/", 1)[0])
+    for relative in sorted(scan_roots):
         target = root / relative
         candidates = target.rglob("*") if target.is_dir() else [target]
         for path in candidates:
@@ -128,13 +124,18 @@ def discover_assets(root: Path) -> dict[str, dict[str, str]]:
         build = service.get("build") or ""
         build_context = build if isinstance(build, str) else str(build.get("context") or "") if isinstance(build, dict) else ""
         service_source = "docker-compose.yml"
-        if "SERVER" in env and (service_name.startswith("mcp-") or Path(build_context).name.startswith("mcp")):
+        if "SERVER" in env and (
+            service_name.startswith("mcp-")
+            or Path(build_context).name.startswith("mcp")
+            or image.rsplit("/", 1)[-1].startswith("mcp-")
+        ):
             name = service_name.removeprefix("mcp-")
             module = str(env["SERVER"]).split(".", 1)[0]
-            candidate = f"mcp/{module}/server.py"
+            context = str(build_context).removeprefix("./") or "mcp"
+            candidate = f"{context}/{module}/server.py"
             source = candidate if (root / candidate).is_file() else service_source
             add(f"mcp.{name}", "mcp_server", name, source, service_name)
-        elif "LLM_BASE" in env and any(key.startswith("MCP_") for key in env):
+        elif "LLM_BASE" in env:
             name = service_name.removesuffix("-app")
             candidate = f"{service_name}/api/app.py"
             source = candidate if (root / candidate).is_file() else service_source
@@ -240,7 +241,7 @@ def scan(
     compose_lines = compose_service_lines(range_root / "docker-compose.yml")
     findings = []
     seen = set()
-    for path in iter_sources(range_root):
+    for path in iter_sources(range_root, discovered):
         relative = path.relative_to(range_root).as_posix()
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         semantic_matches = python_ast_matches(path) if path.suffix == ".py" else {}

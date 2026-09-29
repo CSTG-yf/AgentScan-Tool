@@ -14,6 +14,7 @@ from integration.static_inventory import (
     asset_for_source,
     compose_service_lines,
     discover_assets,
+    iter_sources,
     python_ast_matches,
     scan,
 )
@@ -95,6 +96,11 @@ services:
   unrelated-worker:
     build: ./workers
     environment: {SERVER: worker.server}
+  solo-agent:
+    environment: {LLM_BASE: "http://llm-stub:8000/v1"}
+  probe-service:
+    image: acme/mcp-probe:1
+    environment: {SERVER: probe.server}
 networks:
   internal-net: {}
 """.lstrip(),
@@ -103,6 +109,10 @@ networks:
             app = root / "atlas-app" / "api"
             app.mkdir(parents=True)
             (app / "app.py").write_text('DEFAULT_MODEL = "atlas-v1"\n', encoding="utf-8")
+            solo_app = root / "solo-agent" / "api"
+            solo_app.mkdir(parents=True)
+            (solo_app / "app.py").write_text("# standalone agent\n", encoding="utf-8")
+            (solo_app / "rules.py").write_text("subprocess.run(user_cmd, shell = True)\n", encoding="utf-8")
             model_app = root / "llm-stub" / "llm_stub"
             model_app.mkdir(parents=True)
             (model_app / "app.py").write_text("# model endpoint\n", encoding="utf-8")
@@ -115,6 +125,7 @@ networks:
                 "agent.atlas", "model.atlas-v1", "mcp.search", "database.orders",
                 "framework.langflow", "skill.triage", "network.internal",
                 "mcp.lookup-service",
+                "agent.solo-agent", "mcp.probe-service",
                 "port.atlas", "port.postgres", "port.llm-stub",
             }.issubset(discovered))
             self.assertEqual(discovered["model.atlas-v1"]["source"], "llm-stub/llm_stub/app.py")
@@ -123,6 +134,7 @@ networks:
                 "agent.atlas",
             )
             self.assertNotIn("mcp.unrelated-worker", discovered)
+            self.assertIn(solo_app / "rules.py", set(iter_sources(root, discovered)))
             self.assertEqual(
                 asset_for_source("docker-compose.yml", [], service="lookup-service", discovered=discovered),
                 "mcp.lookup-service",
@@ -133,6 +145,24 @@ networks:
             self.assertEqual(
                 asset_for_source("docker-compose.yml", [], service=lines[9]),
                 "database.orders",
+            )
+
+            (root / "assets.yaml").write_text(yaml.safe_dump({
+                "assets": [{"id": "agent.solo-agent", "type": "agent", "source": "stale/agent.py"}],
+                "edges": [],
+            }), encoding="utf-8")
+            taxonomy = root / "taxonomy.yaml"
+            taxonomy.write_text(yaml.safe_dump({
+                "rules": [{
+                    "id": "AR-STATIC-SHELL-TRUE", "title": "Shell execution", "category": "command_execution",
+                    "severity": "CRITICAL", "confidence": 0.96, "patterns": ["shell=True"],
+                }],
+                "acceptance": {"required_rule_assets": [], "benign_controls": []},
+            }), encoding="utf-8")
+            result = scan(root, contracts_dir=root, taxonomy_path=taxonomy)
+            self.assertIn(
+                ("AR-STATIC-SHELL-TRUE", "agent.solo-agent"),
+                {(finding["rule_id"], finding["asset_id"]) for finding in result["findings"]},
             )
 
     def test_risk_attribution_uses_discovered_source_with_stale_contract(self):
