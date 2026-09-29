@@ -306,20 +306,22 @@ def _percentile(values: list[float], quantile: float) -> float | None:
     return round(ordered[index], 3)
 
 
-def _is_block(row: dict[str, Any]) -> bool:
+def _is_block(row: dict[str, Any], mode: str | None) -> bool:
     decision = str(row.get("decision") or row.get("action") or "").lower()
-    if decision in {"block", "blocked", "deny", "denied"}:
+    decision_blocked = decision in {"block", "blocked", "deny", "denied"}
+    evidence = row.get("detector_block_evidence") or []
+    if isinstance(evidence, list) and any(isinstance(item, dict) and item.get("enforced") is True for item in evidence):
         return True
-    if bool(row.get("would_block")) or str(row.get("raw_action") or "").lower() == "block":
-        return True
-    return bool(row.get("detector_block_evidence"))
+    if mode == "observe":
+        return decision_blocked or bool(row.get("would_block")) or str(row.get("raw_action") or "").lower() == "block" or bool(evidence)
+    return decision_blocked and str(row.get("response_raw_action") or "").lower() == "block"
 
 
-def _instance_outcome(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _instance_outcome(rows: list[dict[str, Any]], mode: str | None) -> dict[str, Any]:
     structurally_valid = [OBSERVATION_REQUIRED_FIELDS.issubset(row) for row in rows]
     valid_rows = [row for row, structural in zip(rows, structurally_valid) if structural and row.get("valid") is not False and row.get("timeout") is not True]
     invalid = len(valid_rows) != len(rows)
-    blocked = any(_is_block(row) for row in valid_rows)
+    blocked = any(_is_block(row, mode) for row in valid_rows)
     side_effect_values = [_as_bool(row.get("side_effect_reached")) for row in valid_rows]
     side_effect_reached = True if True in side_effect_values else (False if side_effect_values and all(value is False for value in side_effect_values) else None)
     block_before_side_effect = None if side_effect_reached is None else blocked and not side_effect_reached
@@ -370,7 +372,7 @@ def _confusion(gt_rows: list[dict[str, Any]], observations: list[dict[str, Any]]
             counts["unknown"] += 1
             scored.append({"instance_id": instance_id, "scenario_id": truth.get("scenario_id"), "classification": "unknown", "reason": "missing_observation"})
             continue
-        outcome = _instance_outcome(rows)
+        outcome = _instance_outcome(rows, mode)
         latency.extend(outcome["e2e_latencies"])
         inspect_latency.extend(outcome["inspect_latencies"])
         label = truth.get("label")

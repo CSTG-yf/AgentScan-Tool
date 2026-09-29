@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 from pathlib import Path
 
-from bench.agentrange_benchmark import prepare_all, prepare_run, score_run
+from bench.agentrange_benchmark import _confusion, prepare_all, prepare_run, score_run
 from bench.benchmark import summarize_modes
 from bench.enrich_observations import enrich
 from bench.resource_sampler import docker_stats, sample
@@ -21,6 +21,30 @@ from bench.merge_observation_run import merge as merge_observation_run
 
 
 class AgentRangeBenchmarkTest(unittest.TestCase):
+    def test_action_requires_enforced_block_not_would_block(self):
+        truth = [{"instance_id": "attack", "label": "malicious", "scenario_id": "C2-A"}]
+        observation = {
+            "instance_id": "attack",
+            "decision": "allow",
+            "raw_action": "block",
+            "would_block": True,
+            "detector_block_evidence": [{"enforced": False, "would_block": True}],
+            "valid": True,
+            "timeout": False,
+            "business_success": False,
+            "side_effect_reached": False,
+            "e2e_latency_ms": 12,
+        }
+        action = _confusion(truth, [observation], "action")
+        observe = _confusion(truth, [observation], "observe")
+        self.assertEqual(action["counts"]["fn"], 1)
+        self.assertEqual(observe["counts"]["tp"], 1)
+        self.assertEqual(_confusion(truth, [{**observation, "decision": "block"}], "action")["counts"]["fn"], 1)
+        self.assertEqual(
+            _confusion(truth, [{**observation, "response_raw_action": "block", "decision": "block"}], "action")["counts"]["tp"],
+            1,
+        )
+
     def test_differential_merge_requires_matching_public_subset(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -412,6 +436,7 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
                 {
                     "instance_id": row["instance_id"],
                     "decision": "block" if row["label"] == "malicious" else "allow",
+                    "response_raw_action": "block" if row["label"] == "malicious" else None,
                     "valid": True,
                     "timeout": False,
                     "side_effect_reached": False,
