@@ -93,10 +93,14 @@ pub(crate) fn executable_looks_like_gateway(executable: &str) -> bool {
     if trimmed.is_empty() {
         return false;
     }
-    let name = Path::new(trimmed)
-        .file_name()
-        .map(|name| name.to_string_lossy().to_ascii_lowercase())
-        .unwrap_or_default();
+    // PID records can outlive the host that created them, and Windows paths
+    // are also exercised by Linux CI. `Path::file_name()` only recognizes the
+    // current platform's separators, so split both forms explicitly.
+    let name = trimmed
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     GATEWAY_BINARY_NAMES
         .iter()
         .any(|candidate| name == candidate.to_ascii_lowercase())
