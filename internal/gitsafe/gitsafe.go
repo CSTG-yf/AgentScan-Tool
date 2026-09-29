@@ -39,6 +39,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/defenseclaw/defenseclaw/internal/procattr"
 )
 
 // safeGitFlags are prepended to every command-line. They disable
@@ -122,6 +124,7 @@ func Command(ctx context.Context, dir string, args ...string) (*exec.Cmd, error)
 	full := append([]string{}, safeGitFlags...)
 	full = append(full, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
+	procattr.Apply(cmd)
 	cmd.Dir = dir
 	cmd.Env = scrubbedEnv()
 	return cmd, nil

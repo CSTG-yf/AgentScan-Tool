@@ -43,6 +43,11 @@ pub fn get_agents(app: tauri::AppHandle, query: Option<AgentListQuery>) -> Agent
     }
 }
 
+#[tauri::command]
+pub fn get_connector_profiles(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    crate::commands::gateway_api::get_json::<serde_json::Value>(&app, "/v1/connectors")
+}
+
 /// Start an explicit backend Agent discovery job. Reads stay side-effect
 /// free; the returned scan_id is polled by the desktop before refreshing.
 #[tauri::command]

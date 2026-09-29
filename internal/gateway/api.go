@@ -821,6 +821,7 @@ func (a *APIServer) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/jobs", a.handleJobsAPI)
 	mux.HandleFunc("/api/v1/jobs/", a.handleJobsAPI)
 	mux.HandleFunc("/api/v1/changes", a.handleChangesAPI)
+	mux.HandleFunc("/api/v1/stream", a.handleChangeStreamAPI)
 	mux.HandleFunc("/api/v1/detection-rules", a.handleDetectionRules)
 	mux.HandleFunc(runtimeSettingsPrefix, a.handleRuntimeDetectionSettingsAPI)
 	mux.HandleFunc(runtimeSettingsPrefix+"/", a.handleRuntimeDetectionSettingsAPI)
@@ -872,6 +873,12 @@ func (a *APIServer) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/scan-schedules", a.handleScanSchedules)
 	mux.HandleFunc("/api/v1/scan-schedules/", a.handleScanSchedules)
 	mux.HandleFunc("/api/v1/static-resource-scan-settings", a.handleStaticResourceScanSettings)
+	mux.HandleFunc("/api/v1/settings/privacy", a.handlePrivacySettings)
+	mux.HandleFunc("/api/v1/settings/notifications", a.handleNotificationSettings)
+	mux.HandleFunc("/api/v1/settings/storage", a.handleStorageSettings)
+	mux.HandleFunc("/api/v1/settings/versions", a.handleVersionSettings)
+	mux.HandleFunc("/api/v1/diagnostics/run", a.handleDiagnosticsRun)
+	mux.HandleFunc("/api/v1/diagnostics/export", a.handleDiagnosticsExport)
 	mux.HandleFunc("/api/v1/gateway-audit", a.handleGatewayAuditInventory)
 	mux.HandleFunc("/api/v1/ai-usage", a.handleAIUsage)
 	mux.HandleFunc("/api/v1/ai-usage/scan", a.handleAIUsageScan)
@@ -1045,12 +1052,28 @@ func (a *APIServer) handleConnectors(w http.ResponseWriter, r *http.Request) {
 		// registrations) on every /connectors GET.
 		reg = getFallbackConnectorRegistry()
 	}
+	type hookContractCapability struct {
+		ID                  string   `json:"id"`
+		MinAgentVersion     string   `json:"min_agent_version,omitempty"`
+		MaxAgentVersion     string   `json:"max_agent_version,omitempty"`
+		DefaultUnversioned  bool     `json:"default_for_unversioned"`
+		Events              []string `json:"events,omitempty"`
+		AIDSurfaces         []string `json:"aid_surfaces,omitempty"`
+		SupportsTraceparent bool     `json:"supports_traceparent"`
+		NativeOTLP          bool     `json:"native_otlp"`
+		CanBlock            bool     `json:"can_block"`
+		CanAskNative        bool     `json:"can_ask_native"`
+		SupportsFailClosed  bool     `json:"supports_fail_closed"`
+	}
 	type connectorEntry struct {
 		Name               string `json:"name"`
 		Description        string `json:"description"`
 		Source             string `json:"source"`
 		ToolInspectionMode string `json:"tool_inspection_mode"`
 		SubprocessPolicy   string `json:"subprocess_policy"`
+		// Hook contracts are supported protocol declarations, not proof that
+		// the installed agent version has been detected or verified.
+		HookContracts []hookContractCapability `json:"hook_contracts,omitempty"`
 		// LLMTrafficMode ("proxy" | "hooks-only") tells the CLI whether a
 		// custom provider bound to this connector is enforced on the
 		// agent's own model traffic or only configures DefenseClaw's
@@ -1072,6 +1095,21 @@ func (a *APIServer) handleConnectors(w http.ResponseWriter, r *http.Request) {
 			ToolInspectionMode: string(info.ToolInspectionMode),
 			SubprocessPolicy:   string(info.SubprocessPolicy),
 			LLMTrafficMode:     connector.LLMTrafficModeForConnector(info.Name),
+		}
+		for _, contract := range connector.KnownHookContracts(info.Name) {
+			entry.HookContracts = append(entry.HookContracts, hookContractCapability{
+				ID:                  contract.ContractID,
+				MinAgentVersion:     contract.MinAgentVersion,
+				MaxAgentVersion:     contract.MaxAgentVersion,
+				DefaultUnversioned:  contract.DefaultForUnversioned,
+				Events:              append([]string(nil), contract.Events...),
+				AIDSurfaces:         append([]string(nil), contract.AIDSurfaces...),
+				SupportsTraceparent: contract.SupportsTraceparent,
+				NativeOTLP:          contract.NativeOTLP,
+				CanBlock:            contract.Capabilities.CanBlock,
+				CanAskNative:        contract.Capabilities.CanAskNative,
+				SupportsFailClosed:  contract.Capabilities.SupportsFailClosed,
+			})
 		}
 		if conn, ok := reg.Get(info.Name); ok {
 			opts := connector.SetupOpts{

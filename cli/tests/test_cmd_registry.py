@@ -580,11 +580,13 @@ class TestFileAdapterPathValidation(RegistryCommandTestBase):
         self.assertIn("absolute", str(result.output) + str(result.exception))
 
     def test_add_file_kind_accepts_absolute_path(self):
+        from pathlib import Path
+
         result = self.invoke([
             "add", "local",
             "--kind", "file",
             "--content", "skill",
-            "--url", "/tmp/manifest.yaml",
+            "--url", str(Path(self.app.cfg.data_dir).resolve() / "manifest.yaml"),
             "--non-interactive",
         ])
         self.assertEqual(result.exit_code, 0, result.output)

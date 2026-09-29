@@ -17,6 +17,8 @@ import (
 	"github.com/defenseclaw/defenseclaw/internal/gateway/connector"
 )
 
+func validateInstallerPlatform() error { return nil }
+
 func resolveOwner(home string, uid, gid int) (int, int, error) {
 	if uid < 0 || gid < 0 {
 		info, err := os.Stat(home)

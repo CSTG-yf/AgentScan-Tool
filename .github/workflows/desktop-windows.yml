@@ -56,6 +56,13 @@ jobs:
       - name: Test Windows process inventory
         run: go test ./internal/inventory -run "TestNormalizeWindowsProcessName|TestProcessSnapshotWindowsIncludesCurrentProcess" -count=1
 
+      - name: Prepare bundled Windows gateway resource
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path .\desktop\src-tauri\resources | Out-Null
+          go build -trimpath -ldflags "-s -w" -o .\desktop\src-tauri\resources\defenseclaw-gateway.exe .\cmd\defenseclaw
+          if ($LASTEXITCODE -ne 0) { throw "gateway build failed with exit code $LASTEXITCODE" }
+
       - name: Test desktop host
         working-directory: desktop/src-tauri
         run: cargo test --locked
@@ -72,33 +79,53 @@ jobs:
         shell: powershell
         run: .\desktop\scripts\test-installer.ps1 -InstallDir "$env:SystemDrive\TraceBastionDesktop-Custom-CI"
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: TraceBastion-Desktop-Windows-x64
-          path: dist/windows/TraceBastion-Desktop-Setup-Windows-x64.exe
-          if-no-files-found: error
-
   release:
     if: startsWith(github.ref, 'refs/tags/tracebastion-desktop-v')
     needs: build
     runs-on: windows-latest
     permissions:
-      actions: read
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
         with:
-          name: TraceBastion-Desktop-Windows-x64
-          path: dist/windows
-
+          package_json_file: desktop/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Windows setup package for release
+        shell: powershell
+        run: .\desktop\scripts\build.ps1
       - name: Publish GitHub Release
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$env:GITHUB_REF_NAME" `
+          $tag = $env:GITHUB_REF_NAME
+          $repo = $env:GITHUB_REPOSITORY
+          gh release view $tag --repo $repo *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $repo --verify-tag `
+              --title "TraceBastion Desktop $($tag -replace '^tracebastion-desktop-', '')" `
+              --generate-notes
+            if ($LASTEXITCODE -ne 0) {
+              $releaseVisible = $false
+              for ($attempt = 0; $attempt -lt 10; $attempt++) {
+                gh release view $tag --repo $repo *> $null
+                if ($LASTEXITCODE -eq 0) { $releaseVisible = $true; break }
+                Start-Sleep -Seconds 2
+              }
+              if (-not $releaseVisible) { throw "Could not create or find GitHub Release '$tag'." }
+            }
+          }
+          gh release upload $tag `
             ".\dist\windows\TraceBastion-Desktop-Setup-Windows-x64.exe#TraceBastion Desktop Setup (Windows x64)" `
-            --repo "$env:GITHUB_REPOSITORY" `
-            --verify-tag `
-            --title "TraceBastion Desktop $($env:GITHUB_REF_NAME -replace '^tracebastion-desktop-', '')" `
-            --generate-notes
+            --repo $repo --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Failed to upload the Windows setup package." }

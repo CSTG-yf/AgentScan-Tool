@@ -42,6 +42,7 @@ from defenseclaw.inventory.claw_inventory import (
     _model_providers_for_connector,
     _tools_for_connector,
 )
+from tests.helpers import home_env
 
 
 class _FakeCfg:
@@ -56,7 +57,7 @@ class _FakeCfg:
 class AgentsAdapterTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="dc-aibom-agents-")
-        self.env = patch.dict(os.environ, {"HOME": self.tmp}, clear=False)
+        self.env = patch.dict(os.environ, home_env(self.tmp), clear=False)
         self.env.start()
 
     def tearDown(self):
@@ -117,7 +118,7 @@ class AgentsAdapterTests(unittest.TestCase):
 class ToolsAdapterTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="dc-aibom-tools-")
-        self.env = patch.dict(os.environ, {"HOME": self.tmp}, clear=False)
+        self.env = patch.dict(os.environ, home_env(self.tmp), clear=False)
         self.env.start()
 
     def tearDown(self):
@@ -188,16 +189,15 @@ class ToolsAdapterTests(unittest.TestCase):
 class ModelProvidersAdapterTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="dc-aibom-providers-")
-        self.env = patch.dict(
-            os.environ,
+        env = home_env(self.tmp)
+        env.update(
             {
-                "HOME": self.tmp,
                 "ANTHROPIC_API_KEY": "sk-ant-secret",
                 "ANTHROPIC_BASE_URL": "https://override.example.com",
                 "OPENAI_API_KEY": "sk-oai-secret",
-            },
-            clear=False,
+            }
         )
+        self.env = patch.dict(os.environ, env, clear=False)
         self.env.start()
 
     def tearDown(self):
@@ -270,7 +270,7 @@ class ModelProvidersAdapterTests(unittest.TestCase):
 class MemoryAdapterTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="dc-aibom-memory-")
-        self.env = patch.dict(os.environ, {"HOME": self.tmp}, clear=False)
+        self.env = patch.dict(os.environ, home_env(self.tmp), clear=False)
         self.env.start()
 
     def tearDown(self):

@@ -6,8 +6,6 @@ package scanner
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -29,18 +27,10 @@ import (
 // findings + ExitCode + ScanError for diagnostics) but the non-nil
 // Go error guarantees admission fails closed.
 func TestScanners_FailClosedOnNonZeroExitWithParseableStdout(t *testing.T) {
-	dir := t.TempDir()
-
 	// Fake scanner that emits a valid empty findings array on stdout
 	// and then exits 7. Pre-fix this would have been parsed as a
 	// clean scan; post-fix it must surface as a Go error.
-	bin := filepath.Join(dir, "fake-scanner.sh")
-	script := "#!/bin/sh\n" +
-		`echo '{"findings":[]}'` + "\n" +
-		"exit 7\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	bin := writeFakeScanner(t, `{"findings":[]}`, 7)
 
 	tcs := []struct {
 		name    string
@@ -85,11 +75,7 @@ func TestScanners_FailClosedOnNonZeroExitWithParseableStdout(t *testing.T) {
 // that the returned ScanResult on failure is never nil so callers
 // can surface ExitCode / ScanError / partial findings in diagnostics.
 func TestScanners_PartialResultPreservedOnFailure(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "fake-scanner.sh")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho '{\"findings\":[]}'\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	bin := writeFakeScanner(t, `{"findings":[]}`, 1)
 	ss := NewPluginScanner(bin)
 	result, err := ss.Scan(context.Background(), "/tmp/target")
 	if err == nil {

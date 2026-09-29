@@ -345,10 +345,17 @@ def _registered_hook_script_paths(
                 if not isinstance(cmd, str) or script_name not in cmd:
                     continue
                 try:
-                    tokens = shlex.split(cmd)
+                    # Claude settings can register a native Windows path.
+                    # POSIX shlex treats path separators as escape prefixes
+                    # and silently turns ``C:\\Users\\...`` into
+                    # ``C:Users...``, so use its non-POSIX tokenization on
+                    # Windows and remove the surrounding command quotes.
+                    tokens = shlex.split(cmd, posix=os.name != "nt")
                 except ValueError:
                     tokens = [cmd]
                 match = next((tok for tok in tokens if script_name in tok), cmd)
+                if os.name == "nt":
+                    match = match.strip('"')
                 paths.append(os.path.abspath(os.path.expanduser(match)))
 
     deduped: list[str] = []

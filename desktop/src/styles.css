@@ -481,13 +481,36 @@ body { min-height: 100vh; background: #f5f8fc; }
 .service-facts > div { min-width: 0; display: grid; gap: 4px; padding: 11px 12px; border: 1px solid #edf1f7; border-radius: 8px; background: #f8fafc; }
 .service-facts strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .service-actions { margin-top: 16px; padding-top: 16px; border-top: 1px solid #edf1f7; }
-.service-preferences-card .ant-card-body > div { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
-.service-preferences-card .ant-card-body > div > div { display: grid; gap: 4px; }
+.service-preferences-card .ant-card-body { display: grid; gap: 16px; }
+/* Two columns: description on the left, control on the right, both vertically
+   centred. Grid (not flex) so the control stays centred even when the
+   description wraps, and `align-self` pins the Select regardless of the
+   description's line count. */
+.service-preferences-card .ant-card-body > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px; }
+.service-preferences-card .ant-card-body > div > div { display: grid; gap: 4px; min-width: 0; }
+.service-preferences-card .ant-card-body > div > .ant-select { align-self: center; }
+/* antd 6 moved the control onto `.ant-select` itself and the label into
+   `.ant-select-content`; the v5 `.ant-select-selector` / `-selection-item`
+   classes no longer exist, so every light-theme override in this file misses
+   these Selects. They keep the app-wide dark theme (`main.tsx` uses
+   darkAlgorithm) on a card this file paints white: a dark pill with a dark,
+   low-contrast label that wraps to a second line and pushes the arrow down.
+   Pin the light look and keep the label on one line. */
+.service-preferences-card .ant-select { background: #ffffff !important; border-color: #d9e1ee !important; color: #14213a !important; }
+.service-preferences-card .ant-select-content,
+.service-preferences-card .ant-select-content-value,
+.service-preferences-card .ant-select-placeholder { color: #14213a !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.service-preferences-card .ant-select-suffix { flex: none; align-self: center; color: #667085 !important; }
 .settings-danger-zone { border-color: #ffc8cc !important; background: #fffafa !important; }
 .settings-danger-zone .ant-card-head { border-bottom-color: #ffe1e3 !important; }
 .settings-danger-zone .ant-card-head-title { color: #c92534 !important; }
 .settings-danger-zone .ant-card-body > div { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .settings-danger-zone .ant-card-body > div > div { display: grid; gap: 4px; }
+.settings-form-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 0; border-bottom: 1px solid #eef1f5; }
+.settings-form-row:last-of-type { border-bottom: 0; }
+.settings-form-row > div:first-child { min-width: 0; }
+.settings-form-row .ant-typography { overflow-wrap: anywhere; }
+.settings-form-row .ant-switch, .settings-form-row .ant-input-number { flex: 0 0 auto; }
 .capability-placeholder .ant-card-body { min-height: 350px; display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; }
 .capability-icon { display: grid; place-items: center; width: 58px; height: 58px; margin-bottom: 12px; color: #1677ff; border-radius: 16px; background: #eaf3ff; font-size: 26px; }
 .capability-placeholder h4 { margin: 0 0 7px !important; }
@@ -1433,6 +1456,8 @@ body { min-height: 100vh; background: #f5f8fc; }
 .runtime-chain-step { padding:12px; border:1px solid #2a405c; border-radius:8px; background:#10243c; }
 .runtime-chain-step .ant-descriptions { margin-top:10px; }
 .runtime-record-text { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.7; }
+.runtime-stack-evidence { margin-top:10px; }
+.runtime-stack-evidence pre { margin:6px 0 0; padding:10px; border-radius:6px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; background:#091827; color:#c2d2e3; font-size:12px; line-height:1.6; }
 .runtime-raw-record { margin:12px 0; color:#a2b6ce; }
 .runtime-raw-record summary { cursor:pointer; }
 /* Runtime detection and attack-chain pages share the static-resource workbench language. */

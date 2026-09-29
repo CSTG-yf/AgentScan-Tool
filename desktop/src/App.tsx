@@ -1,14 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { EyeInvisibleOutlined, EyeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, ReloadOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { Badge, Button, Layout, Menu, message, Modal, Result, Segmented, Space, Tag, Tooltip, Typography } from "antd";
 import {
   applyProcessGuardPolicy,
+  clearGatewayExitState,
   ensureGatewayReady,
   getAgents,
   getChanges,
+  startChangeStream,
+  stopChangeStream,
   getAttackChains,
   getEnvironment,
   getGatewayAudit,
+  getGatewayExitState,
+  getGatewaySettings,
   getGuardPolicy,
   getProcessGuardAudit,
   getRangeReplayStatus,
@@ -20,6 +26,7 @@ import {
   startProcessGuard,
   stopProcessGuard,
   saveDefenseMode,
+  saveGatewaySettings,
   saveGuardPolicy,
   saveScanScheduleSettings,
   saveStaticResourceScanSettings,
@@ -46,7 +53,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { StaticAssetsPage } from "./pages/StaticAssetsPage";
 import { TracePage } from "./pages/TracePage";
 import { AuditEventsPage } from "./pages/AuditEventsPage";
-import type { AgentInventory, AgentSnapshot, AttackChainSnapshot, EnvironmentSnapshot, GatewayAuditSnapshot, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus, ScanScheduleSettings, ScanTaskKey, StaticResourceScanSettings } from "./types";
+import type { AgentInventory, AgentSnapshot, AttackChainSnapshot, ChangeCursor, EnvironmentSnapshot, GatewayAuditSnapshot, GuardAuditSnapshot, GuardPolicy, RangeMode, RangeReplayStatus, RangeStatus, ScanScheduleSettings, ScanTaskKey, StaticResourceScanSettings } from "./types";
 
 const { Header, Sider, Content } = Layout;
 const { Text, Title } = Typography;
@@ -85,6 +92,9 @@ export default function App() {
     const saved = localStorage.getItem("tracebastion.gatewayStartup");
     return saved === "manual" || saved === "disabled" ? saved : "auto";
   });
+  // Persisted in desktop-settings.json instead of localStorage: the Rust
+  // close/exit handlers read it while no webview is running.
+  const [keepGatewayRunning, setKeepGatewayRunning] = useState(false);
 
   const persistPolicy = async (next: GuardPolicy) => {
     setSavingPolicy(true);
@@ -218,6 +228,10 @@ export default function App() {
         if (gatewayStartup === "auto") {
           const result = await ensureGatewayReady();
           if (!result.success) throw new Error(result.message || "内置 Go Gateway 启动失败");
+          // Another DefenseClaw home (CLI gateway, AgentRange session) may hold
+          // 18970; the desktop then serves from 18971+ and says so once, instead
+          // of failing or silently showing the other home's data.
+          if (result.notice) message.info({ key: "gateway-bootstrap", content: result.notice, duration: 8 });
         }
         setGatewayBootState("ready");
       } catch (error) {
@@ -228,9 +242,28 @@ export default function App() {
         return;
       }
 
-      const settings = await Promise.allSettled([getScanScheduleSettings(), getStaticResourceScanSettings()]);
+      const settings = await Promise.allSettled([
+        getScanScheduleSettings(),
+        getStaticResourceScanSettings(),
+        getGatewaySettings(),
+        getGatewayExitState(),
+      ]);
       if (settings[0].status === "fulfilled") setScanSettings(settings[0].value);
       if (settings[1].status === "fulfilled") setStaticScanSettings(settings[1].value);
+      if (settings[2].status === "fulfilled") setKeepGatewayRunning(settings[2].value.keepRunningOnClose);
+      // Surface a previous exit that could not stop the gateway. The window
+      // is gone by then, so this warning on the next launch is the only place
+      // the user can learn about a surviving listener.
+      if (settings[3].status === "fulfilled" && settings[3].value && !settings[3].value.stopped) {
+        Modal.warning({
+          title: "上次退出时未能停止 Gateway",
+          content: `${settings[3].value.message || "Gateway 可能仍在后台运行。"}请在此页面点“停止”，或在正确的 home 下执行 defenseclaw-gateway stop。`,
+          okText: "我知道了",
+          onOk: () => { void clearGatewayExitState().catch(() => undefined); },
+        });
+      } else if (settings[3].status === "fulfilled" && settings[3].value?.stopped) {
+        void clearGatewayExitState().catch(() => undefined);
+      }
       await refresh();
   };
 
@@ -244,12 +277,28 @@ export default function App() {
     message.success("Gateway 启动方式已保存");
   };
 
+  const changeKeepGatewayRunning = async (value: boolean) => {
+    const previous = keepGatewayRunning;
+    setKeepGatewayRunning(value);
+    try {
+      const saved = await saveGatewaySettings({ keepRunningOnClose: value });
+      setKeepGatewayRunning(saved.keepRunningOnClose);
+      message.success(saved.keepRunningOnClose
+        ? "已开启：关闭窗口后窗口会收进系统托盘；若托盘里看不到图标，请展开任务栏的“隐藏的图标”(^)，把 TraceBastion 拖到任务栏上固定"
+        : "关闭窗口时将停止网关并退出");
+    } catch (error) {
+      setKeepGatewayRunning(previous);
+      message.error(`保存关闭窗口行为失败：${String(error)}`);
+    }
+  };
+
   const changeCursorRef = useRef(0);
 
   useEffect(() => {
     let disposed = false;
     let inFlight = false;
     let timer: number | undefined;
+    let unlisten: (() => void) | undefined;
     let consecutiveFailures = 0;
     const refreshConfig = (() => {
       if (!scanSettings) return undefined;
@@ -267,10 +316,43 @@ export default function App() {
     })();
     if (!refreshConfig?.enabled) return;
     const baseDelay = Math.max(3, refreshConfig.intervalSec) * 1000;
+    const pageDomains: Record<PageKey, string[]> = {
+      overview: ["agents", "static_resources", "scan_findings", "behavior_events", "runtime_detections", "runtime_decisions", "runtime_response_actions", "runtime_attack_chains", "runtime_attack_chain_events", "scan_jobs"],
+      agents: ["agents"],
+      staticAssets: ["static_resources", "scan_findings"],
+      trace: ["behavior_events"],
+      events: ["behavior_events", "runtime_detections", "runtime_decisions", "runtime_response_actions"],
+      chain: ["runtime_attack_chains", "runtime_attack_chain_events"],
+      alerts: ["runtime_response_actions"],
+      range: ["scan_jobs"],
+      auditEvents: ["behavior_events", "runtime_response_actions"],
+      evidence: ["runtime_attack_chains", "runtime_attack_chain_events", "runtime_response_actions"],
+      governance: [],
+      policies: [],
+      settings: [],
+    };
+    const domains = pageDomains[active] ?? [];
+    const fallbackDelay = Math.max(15_000, Math.min(60_000, baseDelay * 5));
     const scheduleNext = () => {
       if (disposed) return;
-      const delay = Math.min(60_000, baseDelay * 2 ** Math.min(consecutiveFailures, 4));
+      const delay = Math.min(60_000, fallbackDelay * 2 ** Math.min(consecutiveFailures, 2));
       timer = window.setTimeout(() => void syncChanges(), delay);
+    };
+    const applyChanges = async (changes: ChangeCursor) => {
+      if (disposed) return;
+      const nextCursor = changes.next_cursor || 0;
+      if (nextCursor <= changeCursorRef.current) return;
+      changeCursorRef.current = Math.max(changeCursorRef.current, nextCursor);
+      const changedDomains = new Set(changes.changed_domains ?? []);
+      if (changedDomains.has("agents") && (active === "agents" || active === "overview")) await refreshTask("agentDiscovery");
+      if (["static_resources", "scan_findings"].some((domain) => changedDomains.has(domain)) && (active === "staticAssets" || active === "overview")) setStaticRefreshTick((tick) => tick + 1);
+      const runtimeChanged = ["behavior_events", "runtime_detections", "runtime_decisions", "runtime_response_actions"].some((domain) => changedDomains.has(domain));
+      if (runtimeChanged && (active === "events" || active === "overview")) setEventRefreshTick((tick) => tick + 1);
+      if (changedDomains.has("behavior_events") && active === "trace") await refreshTask("behaviorTrace");
+      if (["runtime_attack_chains", "runtime_attack_chain_events"].some((domain) => changedDomains.has(domain)) && (active === "chain" || active === "overview")) await refreshAttackChains();
+      if (active === "overview") await refreshTask("environment");
+      if (active === "alerts") await Promise.all([refreshTask("processGuardAudit"), refreshTask("gatewayAudit")]);
+      if (active === "range") await refreshTask("rangeStatus");
     };
     const syncChanges = async () => {
       if (disposed || inFlight) return;
@@ -280,22 +362,10 @@ export default function App() {
       }
       inFlight = true;
       try {
-        const changes = await getChanges(changeCursorRef.current, ["agents", "static_resources", "scan_findings", "behavior_events", "runtime_detections", "runtime_decisions", "runtime_response_actions", "runtime_attack_chains", "runtime_attack_chain_events", "scan_jobs"]);
+        const changes = await getChanges(changeCursorRef.current, domains);
         if (disposed) return;
         consecutiveFailures = 0;
-        changeCursorRef.current = Math.max(changeCursorRef.current, changes.next_cursor || 0);
-        const domains = new Set(changes.changed_domains ?? []);
-        if (domains.has("agents") && (active === "agents" || active === "overview")) await refreshTask("agentDiscovery");
-        if (["static_resources", "scan_findings"].some((domain) => domains.has(domain)) && (active === "staticAssets" || active === "overview")) setStaticRefreshTick((tick) => tick + 1);
-        const runtimeChanged = ["behavior_events", "runtime_detections", "runtime_decisions", "runtime_response_actions"].some((domain) => domains.has(domain));
-        if (runtimeChanged && (active === "events" || active === "overview")) setEventRefreshTick((tick) => tick + 1);
-        if (domains.has("behavior_events") && active === "trace") await refreshTask("behaviorTrace");
-        if (["runtime_attack_chains", "runtime_attack_chain_events"].some((domain) => domains.has(domain)) && (active === "chain" || active === "overview")) await refreshAttackChains();
-        // Host-derived surfaces do not have SQLite change domains. Their own
-        // configured interval remains the source of truth for read refreshes.
-        if (active === "overview") await refreshTask("environment");
-        if (active === "alerts") await Promise.all([refreshTask("processGuardAudit"), refreshTask("gatewayAudit")]);
-        if (active === "range") await refreshTask("rangeStatus");
+        await applyChanges(changes);
       } catch (error) {
         consecutiveFailures += 1;
         console.warn("change cursor sync failed", error);
@@ -304,10 +374,29 @@ export default function App() {
         scheduleNext();
       }
     };
+    const startStream = async () => {
+      if (!("__TAURI_INTERNALS__" in window) || domains.length === 0) return;
+      try {
+        const removeListener = await listen<ChangeCursor>("gateway-change", (event) => {
+          void applyChanges(event.payload).catch((error) => console.warn("change stream refresh failed", error));
+        });
+        if (disposed) {
+          removeListener();
+          return;
+        }
+        unlisten = removeListener;
+        await startChangeStream(changeCursorRef.current, domains);
+      } catch (error) {
+        console.warn("change stream unavailable; cursor fallback remains active", error);
+      }
+    };
     void syncChanges();
+    void startStream();
     return () => {
       disposed = true;
       if (timer !== undefined) window.clearTimeout(timer);
+      unlisten?.();
+      void stopChangeStream();
     };
   }, [active, scanSettings]);
 
@@ -588,11 +677,13 @@ export default function App() {
             guardComponent={guardComponent}
             defenseMode={defenseMode}
             gatewayStartup={gatewayStartup}
+            keepGatewayRunning={keepGatewayRunning}
             refreshedAt={environment?.capturedAt}
             busy={loading}
             onRefresh={() => void refresh()}
             onGatewayAction={(action) => void requestGatewayAction(action)}
             onGatewayStartupChange={changeGatewayStartup}
+            onKeepGatewayRunningChange={(value) => void changeKeepGatewayRunning(value)}
             onGuardAction={(action) => void requestGuardAction(action)}
           />
         );

@@ -89,11 +89,11 @@ func TestRejectUntrustedWindowsWriteACEs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SecurityDescriptorFromString: %v", err)
 			}
-			dacl, present, err := descriptor.DACL()
+			dacl, _, err := descriptor.DACL()
 			if err != nil {
 				t.Fatalf("DACL: %v", err)
 			}
-			if !present || dacl == nil {
+			if dacl == nil {
 				t.Fatal("test descriptor has no DACL")
 			}
 			err = rejectUntrustedWindowsWriteACEs("test-path", dacl)

@@ -28,6 +28,8 @@ import (
 
 	toml "github.com/pelletier/go-toml/v2"
 	yaml "gopkg.in/yaml.v3"
+
+	"github.com/defenseclaw/defenseclaw/internal/procattr"
 )
 
 // tomlUnmarshal is a thin alias kept private to this package — it
@@ -239,6 +241,7 @@ func readMCPServersOpenClaw(configFile string) ([]MCPServerEntry, error) {
 
 func readMCPServersViaCLI() ([]MCPServerEntry, error) {
 	cmd := exec.Command("openclaw", "config", "get", "mcp.servers")
+	procattr.Apply(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

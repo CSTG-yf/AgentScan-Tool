@@ -40,6 +40,19 @@ from defenseclaw.db import Store
 from defenseclaw.logger import Logger
 
 
+def home_env(path: str) -> dict[str, str]:
+    """Return environment overrides that make ``Path.home()`` use *path*.
+
+    ``Path.home`` uses ``USERPROFILE`` on Windows and ``HOME`` on POSIX.
+    Tests that only override HOME otherwise accidentally read the developer's
+    real profile when run on Windows.
+    """
+    values = {"HOME": path}
+    if os.name == "nt":
+        values["USERPROFILE"] = path
+    return values
+
+
 def make_temp_store() -> tuple[Store, str]:
     """Create a temporary SQLite store. Returns (store, db_path)."""
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)

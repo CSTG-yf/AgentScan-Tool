@@ -13,8 +13,11 @@ import type {
   BackendScanSchedule,
   BackendScanSchedulesResponse,
   ChangeCursor,
+  ConnectorProfilesResponse,
   EnvironmentSnapshot,
   GatewayAuditSnapshot,
+  GatewayDesktopSettings,
+  GatewayExitState,
   GovernanceAdmissionEvaluateInput,
   GovernanceAdmissionEvaluateResponse,
   GovernanceAdmissionMatrixResponse,
@@ -84,6 +87,115 @@ import type {
 } from "./types";
 
 const inTauri = (): boolean => "__TAURI_INTERNALS__" in window;
+let changeStreamTransition: Promise<void> = Promise.resolve();
+
+function queueChangeStreamTransition<T>(action: () => Promise<T>): Promise<T> {
+  const operation = changeStreamTransition.then(action, action);
+  changeStreamTransition = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+export interface PrivacySettings {
+  redactionEnabled: boolean;
+  retainJudgeBodies: boolean;
+}
+
+export interface NotificationSettings {
+  enabled: boolean;
+  blockEnforced: boolean;
+  blockWouldBlock: boolean;
+  hitlApproval: boolean;
+  hook: boolean;
+  guardrail: boolean;
+  assetPolicy: boolean;
+  dedupSeconds: number;
+  maxPerMinute: number;
+}
+
+export interface SavedSystemSettings<T> {
+  settings: T;
+  changed: string[];
+  restartRequired: string[];
+  live: boolean;
+}
+
+export async function getPrivacySettings(): Promise<PrivacySettings> {
+  if (!inTauri()) throw new Error("设置需要在桌面应用中读取 Gateway");
+  return invoke<PrivacySettings>("get_privacy_settings");
+}
+
+export async function savePrivacySettings(settings: PrivacySettings): Promise<SavedSystemSettings<PrivacySettings>> {
+  if (!inTauri()) throw new Error("浏览器预览无法保存设置");
+  return invoke<SavedSystemSettings<PrivacySettings>>("save_privacy_settings", { settings });
+}
+
+export async function getNotificationSettings(): Promise<NotificationSettings> {
+  if (!inTauri()) throw new Error("设置需要在桌面应用中读取 Gateway");
+  return invoke<NotificationSettings>("get_notification_settings");
+}
+
+export async function saveNotificationSettings(settings: NotificationSettings): Promise<SavedSystemSettings<NotificationSettings>> {
+  if (!inTauri()) throw new Error("浏览器预览无法保存设置");
+  return invoke<SavedSystemSettings<NotificationSettings>>("save_notification_settings", { settings });
+}
+
+export interface StorageFileStatus {
+  path: string;
+  bytes: number;
+  exists: boolean;
+  error?: string;
+}
+
+export interface StorageSettings {
+  dataDir: string;
+  auditDb: StorageFileStatus;
+  judgeBodiesDb: StorageFileStatus;
+  gatewayLog: StorageFileStatus;
+  knownStoredBytes: number;
+  note: string;
+}
+
+export interface GatewayVersionSettings {
+  gatewayVersion: string;
+  schemaVersion: number;
+  configGeneration: number;
+  os: string;
+  architecture: string;
+}
+
+export interface VersionSettings {
+  desktopVersion: string;
+  gateway: GatewayVersionSettings | null;
+  gatewayError: string | null;
+}
+
+export interface DiagnosticReport {
+  capturedAt: string;
+  checks: Array<{ name: string; status: string; detail: string }>;
+  versions: GatewayVersionSettings;
+  storage: { auditBytes: number; judgeBodiesBytes: number; gatewayLogBytes: number };
+}
+
+export async function getStorageSettings(): Promise<StorageSettings> {
+  if (!inTauri()) throw new Error("存储状态需要在桌面应用中读取 Gateway");
+  return invoke<StorageSettings>("get_storage_settings");
+}
+
+export async function getVersionSettings(): Promise<VersionSettings> {
+  if (!inTauri()) throw new Error("版本状态需要在桌面应用中读取 Gateway");
+  return invoke<VersionSettings>("get_version_settings");
+}
+
+export async function runDiagnostics(): Promise<DiagnosticReport> {
+  if (!inTauri()) throw new Error("诊断需要在桌面应用中运行 Gateway");
+  return invoke<DiagnosticReport>("run_diagnostics");
+}
+
+export async function exportDiagnostics(): Promise<{ path: string; bytes: number }> {
+  if (!inTauri()) throw new Error("诊断导出需要在桌面应用中运行 Gateway");
+  return invoke<{ path: string; bytes: number }>("export_diagnostics");
+}
+
 export const isDesktopRuntime = (): boolean => inTauri();
 
 export async function selectExportDirectory(title = "选择导出文件夹"): Promise<string | null> {
@@ -339,6 +451,16 @@ export async function getChanges(cursor = 0, domains?: string[]): Promise<Change
     cursor,
     domains: domains?.join(","),
   });
+}
+
+export async function startChangeStream(cursor: number, domains: string[]): Promise<void> {
+  if (!inTauri()) throw new Error("Gateway 变更流需要在桌面应用中启动");
+  return queueChangeStreamTransition(() => invoke<void>("start_change_stream", { cursor, domains }));
+}
+
+export async function stopChangeStream(): Promise<void> {
+  if (!inTauri()) return;
+  return queueChangeStreamTransition(() => invoke<void>("stop_change_stream"));
 }
 
 export async function getStaticResourceScans(resourceId: string, limit = 50): Promise<StaticResourceScanHistoryResponse> {
@@ -920,6 +1042,11 @@ export async function getAgents(query: AgentListQuery = {}): Promise<AgentSnapsh
   return invoke<AgentSnapshot>("get_agents", { query });
 }
 
+export async function getConnectorProfiles(): Promise<ConnectorProfilesResponse> {
+  if (!inTauri()) throw new Error("连接器能力档案需要在桌面应用中读取本机 Gateway");
+  return invoke<ConnectorProfilesResponse>("get_connector_profiles");
+}
+
 export async function rollbackRuntimeEnforcement(enforcementId: string): Promise<RuntimeEnforcementResult> {
   if (!inTauri()) return { status: "preview", removed: 0 };
   return invoke<RuntimeEnforcementResult>("rollback_runtime_enforcement", { enforcementId });
@@ -1037,6 +1164,8 @@ export interface LifecycleResult {
   action: string;
   success: boolean;
   message: string;
+  /** Set when the desktop had to leave 18970 because another DefenseClaw home holds it. */
+  notice?: string;
 }
 
 export async function startProcessGuard(): Promise<void> {
@@ -1059,6 +1188,37 @@ export async function ensureGatewayReady(): Promise<LifecycleResult> {
 export async function setGatewayRunning(running: boolean): Promise<LifecycleResult> {
   if (!inTauri()) throw new Error("仅桌面应用可以控制网关");
   return invoke<LifecycleResult>(running ? "start_gateway" : "stop_gateway");
+}
+
+/**
+ * Reads the desktop-level gateway preference. In browser preview the setting
+ * is meaningless (there is no window to close and no managed gateway), so the
+ * default "stop on close" is returned instead of throwing.
+ */
+export async function getGatewaySettings(): Promise<GatewayDesktopSettings> {
+  if (!inTauri()) return { keepRunningOnClose: false };
+  return invoke<GatewayDesktopSettings>("get_gateway_settings");
+}
+
+export async function saveGatewaySettings(
+  settings: GatewayDesktopSettings,
+): Promise<GatewayDesktopSettings> {
+  if (!inTauri()) return settings;
+  return invoke<GatewayDesktopSettings>("set_gateway_settings", { settings });
+}
+
+/**
+ * Result of the gateway stop performed while the desktop was last closed.
+ * `null` means the previous exit left nothing to report.
+ */
+export async function getGatewayExitState(): Promise<GatewayExitState | null> {
+  if (!inTauri()) return null;
+  return invoke<GatewayExitState | null>("get_gateway_exit_state");
+}
+
+export async function clearGatewayExitState(): Promise<void> {
+  if (!inTauri()) return;
+  await invoke("clear_gateway_exit_state");
 }
 
 export async function getRangeStatus(): Promise<RangeStatus> {

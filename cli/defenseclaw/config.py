@@ -1497,16 +1497,11 @@ class RegistrySource:
                                 the literal token. Empty disables auth.
     * ``enabled``             — when False the source is preserved in
                                 config but skipped by ``sync --all``.
-    * ``auto_sync``           — RESERVED. Scheduled sync is not yet
-                                implemented; setting this to True today
-                                does NOT cause periodic ingest.
-                                Persisted so a v1 -> v2 operator config
-                                doesn't lose the bit. Run
-                                ``defenseclaw registry sync --all`` (or
-                                schedule it via cron) until the v2
-                                scheduler ships.
-    * ``sync_interval_hours`` — RESERVED. Paired with ``auto_sync``;
-                                ignored at runtime today.
+    * ``auto_sync``           — eligible for the opt-in background
+                                ``registry scheduler run`` process; setting
+                                this alone does not start that process.
+    * ``sync_interval_hours`` — per-source scheduler cadence in hours;
+                                zero disables automatic runs.
     * ``last_sync``           — ISO-8601 UTC timestamp; populated by
                                 the sync command on success.
     * ``last_status``         — ``ok`` or ``error: <reason>``.

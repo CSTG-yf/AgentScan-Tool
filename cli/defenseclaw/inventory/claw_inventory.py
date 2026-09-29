@@ -2242,8 +2242,8 @@ _PLUGIN_MANIFEST_FILES: tuple[str, ...] = (
     "manifest.json",
     "plugin.json",
     "openclaw.plugin.json",
-    os.path.join(".codex-plugin", "plugin.json"),
-    os.path.join(".claude-plugin", "plugin.json"),
+    ".codex-plugin/plugin.json",
+    ".claude-plugin/plugin.json",
 )
 
 

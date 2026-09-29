@@ -42,6 +42,7 @@ except ImportError:  # pragma: no cover - non-POSIX
 
 from defenseclaw.config import config_path_for_data_dir, default_data_path
 from defenseclaw.connector_paths import KNOWN_CONNECTORS, _expand, omnigent_config_path
+from defenseclaw.inventory import windows_acl
 
 # Sentinel error returned by ``_version_for_binary`` when a connector
 # binary resolves outside the trusted install prefixes. Callers (e.g.
@@ -439,13 +440,15 @@ def _bin_chain_is_system_owned(resolved: str, prefix: str) -> bool:
     return True
 
 
-def _trusted_prefix_dir_mode_error(st: os.stat_result) -> str | None:
+def _trusted_prefix_dir_mode_error(path: str, st: os.stat_result) -> str | None:
     """Return a human-readable refusal when a directory mode is unsafe to trust.
 
     Mirrors the parent-directory permission checks in ``_is_trusted_binary_path``
     so ``trusted-paths add`` cannot succeed on directories discovery would still
     reject for version probing.
     """
+    if os.name == "nt":
+        return windows_acl.directory_error(path)
     if st.st_mode & 0o002:
         return "directory is world-writable"
     if st.st_mode & 0o020:
@@ -498,7 +501,7 @@ def validate_trusted_prefix(path: str) -> tuple[str, str | None]:
         return resolved, f"cannot stat path ({exc})"
     if not os.path.isdir(resolved):
         return resolved, "path is not a directory"
-    mode_err = _trusted_prefix_dir_mode_error(st)
+    mode_err = _trusted_prefix_dir_mode_error(resolved, st)
     if mode_err:
         return resolved, mode_err
     return resolved, None
@@ -526,6 +529,14 @@ def _is_trusted_binary_path(
         return False
     if not os.path.isfile(resolved):
         return False
+    if os.name == "nt":
+        if not windows_acl.trusted_path(resolved):
+            return False
+        prefixes = _trusted_bin_prefixes(data_dir)
+        return any(
+            resolved == prefix or resolved.startswith(prefix.rstrip(os.sep) + os.sep)
+            for prefix in prefixes
+        )
     if not os.access(resolved, os.X_OK):
         return False
     parent = os.path.dirname(resolved)

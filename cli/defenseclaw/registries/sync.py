@@ -36,6 +36,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import wraps
 from typing import TYPE_CHECKING
 
 from defenseclaw.config import (
@@ -51,6 +52,7 @@ from defenseclaw.registries.cache import (
     merge_manifest_into_index,
     save_index,
     save_manifest,
+    source_sync_lock,
 )
 from defenseclaw.registries.manifest import (
     Manifest,
@@ -68,6 +70,16 @@ if TYPE_CHECKING:
 # scanner default policy in ``cli/defenseclaw/scanner/skill.py``.
 _BLOCKING_SEVERITIES = {"CRITICAL", "HIGH"}
 _WARNING_SEVERITIES = {"MEDIUM"}
+
+
+def _serialize_source_sync(function):
+    @wraps(function)
+    def wrapped(cfg, data_dir, source, *args, **kwargs):
+        if not source.id:
+            return function(cfg, data_dir, source, *args, **kwargs)
+        with source_sync_lock(data_dir, source.id):
+            return function(cfg, data_dir, source, *args, **kwargs)
+    return wrapped
 
 
 ScanCallback = Callable[[RegistrySource, ManifestEntry], "ScanResult | None"]
@@ -118,6 +130,7 @@ class SyncReport:
         }
 
 
+@_serialize_source_sync
 def sync_source(
     cfg: Config,
     data_dir: str,

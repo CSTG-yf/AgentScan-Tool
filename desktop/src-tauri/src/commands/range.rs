@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -12,7 +13,8 @@ use serde_json::Value;
 use tauri::Manager;
 
 use crate::commands::lifecycle::{
-    desktop_defenseclaw_home, run_gateway_action, run_gateway_action_for_mode,
+    desktop_defenseclaw_home, desktop_gateway_api_port, run_gateway_action,
+    run_gateway_action_for_mode,
 };
 
 #[cfg(windows)]
@@ -169,11 +171,20 @@ struct ReplayStateInner {
 
 static RANGE_REPLAY_STATE: Mutex<Option<Arc<Mutex<ReplayStateInner>>>> = Mutex::new(None);
 
+/// Range settings as stored in `desktop-settings.json`.
+///
+/// The file is shared with other desktop features (currently the
+/// "keep the gateway running after close" preference in
+/// `crate::desktop_settings`), and both writers rewrite the whole document.
+/// The flattened map keeps keys this struct does not know about, so saving
+/// the range root or mode can never silently reset them.
 #[derive(Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 struct DesktopSettings {
     agentrange_root: String,
     range_mode: RangeMode,
+    #[serde(flatten)]
+    other: BTreeMap<String, Value>,
 }
 
 #[derive(Serialize)]
@@ -738,6 +749,10 @@ fn write_adapter_compose(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let compose = runtime_dir.join("docker-compose.defenseclaw.override.yml");
     let sidecar_mount = docker_mount_path(&sidecar);
     let env_mount = docker_mount_path(&env_file);
+    // Never hardcode 18970 here: the desktop moves to an alternative port when
+    // another DefenseClaw home already holds the canonical one, and the
+    // sidecars must inspect the gateway this desktop actually runs.
+    let gateway_api_port = desktop_gateway_api_port(&home);
     let contents = format!(
         r#"services:
   opspilot-app:
@@ -769,7 +784,7 @@ fn write_adapter_compose(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     - opspilot-net
     environment:
       PYTHONUNBUFFERED: '1'
-      DC_GATEWAY_BASE: http://host.docker.internal:18970
+      DC_GATEWAY_BASE: http://host.docker.internal:{gateway_api_port}
       DC_FAIL_MODE: open
       DC_INSPECT_TIMEOUT_MS: '250'
       DC_CONNECTOR: agentrange
@@ -794,7 +809,7 @@ fn write_adapter_compose(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     - opspilot-net
     environment:
       PYTHONUNBUFFERED: '1'
-      DC_GATEWAY_BASE: http://host.docker.internal:18970
+      DC_GATEWAY_BASE: http://host.docker.internal:{gateway_api_port}
       DC_FAIL_MODE: open
       DC_INSPECT_TIMEOUT_MS: '250'
       DC_CONNECTOR: agentrange
@@ -817,7 +832,7 @@ fn write_adapter_compose(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     - opspilot-net
     environment:
       PYTHONUNBUFFERED: '1'
-      DC_GATEWAY_BASE: http://host.docker.internal:18970
+      DC_GATEWAY_BASE: http://host.docker.internal:{gateway_api_port}
       DC_FAIL_MODE: open
       DC_INSPECT_TIMEOUT_MS: '250'
       DC_CONNECTOR: agentrange
@@ -851,7 +866,7 @@ fn write_adapter_compose(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     - opspilot-net
     environment:
       PYTHONUNBUFFERED: '1'
-      DC_GATEWAY_BASE: http://host.docker.internal:18970
+      DC_GATEWAY_BASE: http://host.docker.internal:{gateway_api_port}
       DC_FAIL_MODE: open
       DC_INSPECT_TIMEOUT_MS: '250'
       DC_CONNECTOR: agentrange
@@ -864,7 +879,8 @@ fn write_adapter_compose(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     - 7860:7860
 "#,
         env_file = env_mount,
-        sidecar = sidecar_mount
+        sidecar = sidecar_mount,
+        gateway_api_port = gateway_api_port
     );
     fs::write(&compose, contents)
         .map_err(|error| format!("write {}: {error}", compose.display()))?;
@@ -1185,6 +1201,9 @@ pub fn set_range_root(app: tauri::AppHandle, root: String) -> Result<RangeStatus
     let settings = DesktopSettings {
         agentrange_root: canonical_root.to_string_lossy().into_owned(),
         range_mode: mode,
+        // Keys owned by other desktop features sharing this file (for example
+        // the gateway keep-running preference) must survive this write.
+        other: read_settings(&app).other,
     };
     let path = settings_path(&app)?;
     let parent = path
@@ -1220,6 +1239,8 @@ pub fn set_range_mode(app: tauri::AppHandle, mode: RangeMode) -> Result<RangeSta
             .map(|root| root.to_string_lossy().into_owned())
             .unwrap_or_default(),
         range_mode: mode,
+        // Same as `set_range_root`: never drop keys this struct does not own.
+        other: read_settings(&app).other,
     };
     let path = settings_path(&app)?;
     let parent = path

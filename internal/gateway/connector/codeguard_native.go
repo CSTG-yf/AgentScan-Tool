@@ -27,6 +27,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/defenseclaw/defenseclaw/internal/procattr"
 )
 
 const (
@@ -262,6 +264,7 @@ func runNativeCodeGuardCommand(ctx context.Context, name string, args ...string)
 	defer cancel()
 
 	cmd := exec.CommandContext(cmdCtx, name, args...)
+	procattr.Apply(cmd)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "NO_COLOR=1")
 	cmd.Stdin = strings.NewReader("")
 	out, err := cmd.CombinedOutput()

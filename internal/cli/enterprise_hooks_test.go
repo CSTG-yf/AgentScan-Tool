@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -47,6 +48,9 @@ func TestWriteEnterpriseHookGuardianState(t *testing.T) {
 	}
 	if len(state.Results) != 2 || state.Results[1].Error == "" {
 		t.Fatalf("results = %+v, want persisted rows", state.Results)
+	}
+	if runtime.GOOS == "windows" {
+		return // Unix mode bits do not describe Windows DACLs.
 	}
 	if info, statErr := os.Stat(authorizationDir); statErr != nil {
 		t.Fatalf("stat authorization dir: %v", statErr)
@@ -152,6 +156,12 @@ func TestEnterpriseHookScopedTokenUsesManagedDataDir(t *testing.T) {
 		t.Fatalf("chmod managed data dir: %v", err)
 	}
 	token, err := enterpriseHookScopedToken(dir, "codex")
+	if runtime.GOOS == "windows" {
+		if err == nil || !strings.Contains(err.Error(), "unsupported on Windows") {
+			t.Fatalf("enterpriseHookScopedToken error = %v, want explicit unsupported capability", err)
+		}
+		return
+	}
 	if err != nil {
 		t.Fatalf("enterpriseHookScopedToken: %v", err)
 	}

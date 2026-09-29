@@ -191,6 +191,7 @@ func (a *APIServer) recordHookRuntimeEvent(ctx context.Context, req agentHookReq
 		TraceID:     firstNonEmpty(env.TraceID, TraceIDFromContext(ctx)),
 		AgentName:   firstNonEmpty(req.AgentName, identity.AgentName, req.ConnectorName),
 		ToolName:    req.ToolName,
+		MCPServer:   firstNonEmpty(payloadString(req.Payload, "mcp_server_name"), serverFromMCPToolName(req.ToolName)),
 		Target:      hookToolTargetText(req.ToolName, req.ToolArgs),
 		Operation:   firstNonEmpty(req.ToolName, req.HookEventName),
 		Severity:    resp.Severity,
@@ -207,6 +208,18 @@ func (a *APIServer) recordHookRuntimeEvent(ctx context.Context, req agentHookReq
 		},
 	}
 	in.CanonicalAgentID = firstNonEmpty(req.AgentID, env.AgentID, identity.AgentID)
+	if eventType == audit.RuntimeEventToolPreCall {
+		caps := a.hookProfileForConnector(req.ConnectorName).Capabilities
+		in.Attributes["pre_call_block_capable"] = caps.CanBlock && eventIn(req.HookEventName, caps.BlockEvents)
+	}
+	if eventType == audit.RuntimeEventToolPreCall && (req.ConnectorName == "codex" || req.ConnectorName == "claudecode") {
+		var args map[string]interface{}
+		if json.Unmarshal(req.ToolArgs, &args) == nil {
+			if digest := fileReadDigestFromInput(req.ToolName, req.CWD, args); digest != "" {
+				in.Attributes["file_read_path_sha256"] = digest
+			}
+		}
+	}
 	if len(resp.Findings) > 0 {
 		in.Attributes["findings"] = resp.Findings
 	}
@@ -272,7 +285,12 @@ func recordGuardrailRuntimeEvent(ctx context.Context, direction, model string, v
 
 	outcome := "allowed"
 	if strings.EqualFold(verdict.Action, "block") {
-		outcome = "blocked"
+		// A block verdict alone is not proof that the upstream request was
+		// denied. Observe and externally reported verdicts stay advisory.
+		outcome = "flagged"
+		if direction == "prompt" && verdict.ProxyPreUpstreamBlocked {
+			outcome = "blocked"
+		}
 	} else if strings.EqualFold(verdict.Action, "alert") {
 		outcome = "flagged"
 	}
@@ -282,6 +300,9 @@ func recordGuardrailRuntimeEvent(ctx context.Context, direction, model string, v
 		"action":        verdict.Action,
 		"model":         model,
 		"finding_count": len(verdict.Findings),
+	}
+	if direction == "prompt" && verdict.ProxyPreUpstreamBlocked {
+		attrs["proxy_pre_upstream_blocked"] = true
 	}
 	if verdict.Scanner != "" {
 		attrs["scanner"] = verdict.Scanner

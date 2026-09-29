@@ -350,6 +350,8 @@ type ContinuousDiscoveryService struct {
 	// file remains the authoritative current view, and only history
 	// queries are disabled.
 	invStore         *InventoryStore
+	closeOnce        sync.Once
+	closeErr         error
 	confidenceParams ConfidenceParams
 	otel             *telemetry.Provider
 	events           *gatewaylog.Writer
@@ -599,6 +601,21 @@ func (s *ContinuousDiscoveryService) InventoryStore() *InventoryStore {
 		return nil
 	}
 	return s.invStore
+}
+
+// Close releases the optional history database. Call after Run has stopped
+// and no handlers are using the service; leaving the pool open prevents
+// temporary directories and Windows installations from being cleaned up.
+func (s *ContinuousDiscoveryService) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.closeOnce.Do(func() {
+		if s.invStore != nil {
+			s.closeErr = s.invStore.Close()
+		}
+	})
+	return s.closeErr
 }
 
 // ConfidenceParams returns the policy + tunables the engine uses
@@ -3275,7 +3292,7 @@ func projectRootForManifest(path string) string {
 			return strings.Join(parts[:i], "/")
 		}
 	}
-	return dir
+	return filepath.ToSlash(dir)
 }
 
 // shouldSkipDiscoveryDir is the universal "do not descend" rule used
