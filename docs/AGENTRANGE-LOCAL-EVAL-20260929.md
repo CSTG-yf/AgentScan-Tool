@@ -46,6 +46,17 @@ run is `bench/runs/20260929-probe600-rate150-1k/action`. These two short runs
 do not isolate the probe from the timeout change, and neither has a same-code
 CPU baseline or full-sample acceptance result.
 
+The 600 ms probe candidate then completed a 5,200-event action replay with
+80/80 confirmed blocks, no false positives, 5,120/5,120 normal successes,
+466.875 ms end-to-end p95, 101 ms inspection p95, and 3.328% combined defense
+CPU p95. Audit coverage was complete, but three inspections timed out at the
+600 ms deadline across three instances (one attack and two benign). Gateway
+audit records for the matching inspections arrived around or shortly after the
+sidecar deadline. This run fails the local zero-unavailable gate and is retained
+at `bench/runs/20260929-probe600-cache-full-rate150-v1/action`. The next
+candidate raises the deadline to 1,200 ms; it has not yet completed a full
+paired evaluation.
+
 The earlier full pair uses the same 5,200-event public corpus and semantic
 ground truth (seed 1337, 80 attacks, arena hash above) in baseline and action,
 both capped at 1.5 events/second. Measured throughput ratio is 1.000 and all

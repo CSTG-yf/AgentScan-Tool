@@ -13,7 +13,7 @@
     "token_env": "DEFENSECLAW_GATEWAY_TOKEN",
     "mode": "action",
     "fail_mode": "open",
-    "inspect_timeout_ms": 600
+    "inspect_timeout_ms": 1200
   },
   "services": {
     "opspilot": "opspilot-app",

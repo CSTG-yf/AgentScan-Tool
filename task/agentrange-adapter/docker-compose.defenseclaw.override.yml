@@ -34,7 +34,7 @@ services:
       DC_GATEWAY_BASE: http://host.docker.internal:18970
       DC_CONTEXT_RELAY_URL: http://defenseclaw-context-relay:9101
       DC_FAIL_MODE: open
-      DC_INSPECT_TIMEOUT_MS: '600'
+      DC_INSPECT_TIMEOUT_MS: '1200'
       DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: opspilot
@@ -71,7 +71,7 @@ services:
       DC_GATEWAY_BASE: http://host.docker.internal:18970
       DC_CONTEXT_RELAY_URL: http://defenseclaw-context-relay:9101
       DC_FAIL_MODE: open
-      DC_INSPECT_TIMEOUT_MS: '600'
+      DC_INSPECT_TIMEOUT_MS: '1200'
       DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: llm
@@ -96,7 +96,7 @@ services:
       DC_GATEWAY_BASE: http://host.docker.internal:18970
       DC_CONTEXT_RELAY_URL: http://defenseclaw-context-relay:9101
       DC_FAIL_MODE: open
-      DC_INSPECT_TIMEOUT_MS: '600'
+      DC_INSPECT_TIMEOUT_MS: '1200'
       DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: mcp
@@ -136,7 +136,7 @@ services:
       DC_GATEWAY_BASE: http://host.docker.internal:18970
       DC_CONTEXT_RELAY_URL: http://defenseclaw-context-relay:9101
       DC_FAIL_MODE: open
-      DC_INSPECT_TIMEOUT_MS: '600'
+      DC_INSPECT_TIMEOUT_MS: '1200'
       DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: langflow
