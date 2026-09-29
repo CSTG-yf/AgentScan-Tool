@@ -39,7 +39,8 @@ class FinalizeTests(unittest.TestCase):
             {"instance_id": "a", "detected": True, "evidence_refs": ["detection:d1"], "detection_scope_complete": False},
             {"instance_id": "b", "detected": None, "evidence_refs": [], "detection_scope_complete": False},
         ]), encoding="utf-8")
-        (run.path / "baseline-gateway-detections.json").write_text(json.dumps({"items": [
+        started_at = run.manifest()["modes"]["baseline"]["started_at"]
+        (run.path / "baseline-gateway-detections.json").write_text(json.dumps({"start_time": started_at, "end_time": started_at, "items": [
             {"session_id": "a", "detection_id": "d1"},
         ]}), encoding="utf-8")
         (run.path / "baseline-effect-observations.json").write_text(json.dumps([
@@ -94,7 +95,8 @@ class FinalizeTests(unittest.TestCase):
             (run.path / "action-receipts.jsonl").write_text(
                 json.dumps({"instance_id": "a", "status": "http_error", "http_status": 403}) + "\n", encoding="utf-8",
             )
-            (run.path / "action-gateway-detections.json").write_text(json.dumps({"items": [
+            started_at = run.manifest()["modes"]["action"]["started_at"]
+            (run.path / "action-gateway-detections.json").write_text(json.dumps({"start_time": started_at, "end_time": started_at, "items": [
                 {"session_id": "a", "detection_id": "d1"},
             ]}), encoding="utf-8")
             (run.path / "action-detection-observations.json").write_text(json.dumps([
@@ -114,7 +116,7 @@ class FinalizeTests(unittest.TestCase):
                 {"id": 11, "session_id": "a", "event_source": "proxy", "outcome": "blocked",
                  "attributes": {"phase": "result", "operation_result": "rejected", "call_id": "c1"}},
             ]
-            (run.path / "action-gateway-events.json").write_text(json.dumps({"items": events}), encoding="utf-8")
+            (run.path / "action-gateway-events.json").write_text(json.dumps({"start_time": started_at, "end_time": started_at, "items": events}), encoding="utf-8")
             (run.path / "action-enforcement-observations.json").write_text(
                 json.dumps(enforcement_observations(truth, events)), encoding="utf-8",
             )

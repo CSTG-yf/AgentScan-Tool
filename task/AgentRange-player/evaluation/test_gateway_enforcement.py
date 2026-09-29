@@ -79,6 +79,7 @@ class GatewayEnforcementTests(unittest.TestCase):
             saved = (run.path / "baseline-gateway-events.json").read_text(encoding="utf-8")
             self.assertNotIn("SECRET", saved)
             self.assertEqual(json.loads(saved)["count"], 2)
+            self.assertIn("end_time", json.loads(saved))
 
 
 if __name__ == "__main__":

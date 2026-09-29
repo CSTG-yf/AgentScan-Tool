@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,16 @@ def _validate_fields(rows: dict[str, dict[str, Any]], allowed: set[str], label: 
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _validate_gateway_window(snapshot: dict[str, Any], started_at: str, label: str) -> None:
+    try:
+        end = datetime.fromisoformat(str(snapshot["end_time"]).replace("Z", "+00:00"))
+        start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"{label} has no valid collection window") from exc
+    if snapshot.get("start_time") != started_at or end < start:
+        raise ValueError(f"{label} does not match mode collection window")
 
 
 def _target_absent(scenario: str, instance_id: str, after: dict[str, dict]) -> bool:
@@ -69,7 +80,9 @@ def finalize_mode(run_path: Path, mode: str) -> dict[str, Any]:
     _validate_fields(detection, {"instance_id", "detected", "evidence_refs", "detection_scope_complete"}, "detection observations")
     _validate_fields(effects, {"instance_id", "effect", "effect_evidence_ref"}, "effect observations")
     gateway_detections_path = run.path / f"{mode}-gateway-detections.json"
-    gateway_detections = _read_json(gateway_detections_path)["items"]
+    gateway_detections_snapshot = _read_json(gateway_detections_path)
+    _validate_gateway_window(gateway_detections_snapshot, manifest["modes"][mode]["started_at"], "Gateway detections")
+    gateway_detections = gateway_detections_snapshot["items"]
     if detection_observations(truth, gateway_detections) != [detection[item["instance_id"]] for item in truth]:
         raise ValueError("detection observations do not match Gateway detections")
     before_path = run.path / f"{mode}-mcp-before.json"
@@ -89,7 +102,9 @@ def finalize_mode(run_path: Path, mode: str) -> dict[str, Any]:
             raise ValueError("Gateway enforcement evidence is incomplete")
         enforcement = _by_id(_read_json(enforcement_path), expected, "enforcement observations")
         _validate_fields(enforcement, {"instance_id", "enforced_block", "evidence_refs"}, "enforcement observations")
-        gateway_events = _read_json(gateway_events_path)["items"]
+        gateway_events_snapshot = _read_json(gateway_events_path)
+        _validate_gateway_window(gateway_events_snapshot, manifest["modes"][mode]["started_at"], "Gateway events")
+        gateway_events = gateway_events_snapshot["items"]
         if enforcement_observations(truth, gateway_events) != [enforcement[item["instance_id"]] for item in truth]:
             raise ValueError("enforcement observations do not match Gateway events")
     receipts = [json.loads(line) for line in receipts_path.read_text(encoding="utf-8").splitlines()]

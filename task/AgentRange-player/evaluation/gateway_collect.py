@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -36,12 +37,13 @@ def collect_detections(run_path: Path, mode: str, *, base_url: str = "http://127
     if not token:
         raise ValueError("DEFENSECLAW_GATEWAY_TOKEN is required")
     started_at = manifest["modes"][mode]["started_at"]
+    collected_until = datetime.now(timezone.utc).isoformat()
     detections: list[dict[str, Any]] = []
     with httpx.Client(timeout=20, trust_env=False, headers={"Authorization": f"Bearer {token}"}) as client:
         offset = 0
         while True:
             response = client.get(f"{base_url.rstrip('/')}/api/v1/runtime-detections", params={
-                "start_time": started_at, "limit": 1000, "offset": offset,
+                "start_time": started_at, "end_time": collected_until, "limit": 1000, "offset": offset,
             })
             response.raise_for_status()
             payload = response.json()
@@ -62,6 +64,7 @@ def collect_detections(run_path: Path, mode: str, *, base_url: str = "http://127
     observations = detection_observations(truth, detections)
     _atomic_json(run.path / f"{mode}-gateway-detections.json", {
         "start_time": started_at,
+        "end_time": collected_until,
         "base_url": base_url.rstrip("/"),
         "count": len(detections),
         "items": detections,

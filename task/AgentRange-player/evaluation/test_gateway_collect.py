@@ -58,6 +58,7 @@ class GatewayCollectionTests(unittest.TestCase):
             saved = (run.path / "baseline-gateway-detections.json").read_text(encoding="utf-8")
             self.assertNotIn("SECRET", saved)
             self.assertEqual(json.loads(saved)["count"], 1)
+            self.assertIn("end_time", client.requests[0][1])
 
     def test_incomplete_pagination_fails_without_writing_observations(self):
         with tempfile.TemporaryDirectory() as root:

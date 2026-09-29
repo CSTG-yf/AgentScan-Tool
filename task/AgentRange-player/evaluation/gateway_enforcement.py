@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -67,12 +68,13 @@ def collect_enforcements(run_path: Path, mode: str, *, base_url: str = "http://1
     if not token:
         raise ValueError("DEFENSECLAW_GATEWAY_TOKEN is required")
     started_at = manifest["modes"][mode]["started_at"]
+    collected_until = datetime.now(timezone.utc).isoformat()
     events: list[dict[str, Any]] = []
     with httpx.Client(timeout=20, trust_env=False, headers={"Authorization": f"Bearer {token}"}) as client:
         offset = 0
         while True:
             response = client.get(f"{base_url.rstrip('/')}/api/v1/runtime-events", params={
-                "start_time": started_at, "limit": 2000, "offset": offset,
+                "start_time": started_at, "end_time": collected_until, "limit": 2000, "offset": offset,
             })
             response.raise_for_status()
             payload = response.json()
@@ -92,7 +94,8 @@ def collect_enforcements(run_path: Path, mode: str, *, base_url: str = "http://1
     truth = _read_json(run.path / "truth.json")
     observations = enforcement_observations(truth, events)
     _atomic_json(run.path / f"{mode}-gateway-events.json", {
-        "start_time": started_at, "base_url": base_url.rstrip("/"), "count": len(events), "items": events,
+        "start_time": started_at, "end_time": collected_until,
+        "base_url": base_url.rstrip("/"), "count": len(events), "items": events,
     })
     _atomic_json(run.path / f"{mode}-enforcement-observations.json", observations)
     return observations
