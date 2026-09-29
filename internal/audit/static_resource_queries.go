@@ -67,6 +67,8 @@ type StaticResourceFilter struct {
 	Status        string // active ⇒ status != 'missing'
 	ScanCompleted *bool  // last_scan_id IS NOT NULL
 	Keyword       string // matches name / target / resource_type
+	StartTime     string // inclusive RFC3339 lower bound for last scan / last seen
+	EndTime       string // inclusive RFC3339 upper bound for last scan / last seen
 	Page          int
 	PageSize      int
 }
@@ -92,7 +94,7 @@ type StaticResourceRow struct {
 type StaticResourcePage struct {
 	Total    int                 `json:"total"`
 	Page     int                 `json:"page"`
-	PageSize int                 `json:"page_size"`
+	PageSize int                 `json:"pageSize"`
 	Items    []StaticResourceRow `json:"items"`
 }
 
@@ -332,6 +334,17 @@ func staticResourceWhere(f StaticResourceFilter) (string, []any) {
 		pattern := "%" + strings.ToLower(kw) + "%"
 		args = append(args, pattern, pattern, pattern)
 	}
+	// Use the same effective timestamp for both COUNT and page rows. Scanned
+	// resources use their scan time; never-scanned resources use last_seen_at.
+	effectiveTime := `COALESCE(NULLIF((SELECT CAST(MIN(sr.timestamp) AS TEXT) FROM scan_results sr WHERE sr.id = r.last_scan_id AND COALESCE(sr."delete", 0) = 0), ''), r.last_seen_at)`
+	if f.StartTime != "" {
+		clauses = append(clauses, "julianday("+effectiveTime+") >= julianday(?)")
+		args = append(args, f.StartTime)
+	}
+	if f.EndTime != "" {
+		clauses = append(clauses, "julianday("+effectiveTime+") <= julianday(?)")
+		args = append(args, f.EndTime)
+	}
 	if len(clauses) == 0 {
 		return "1=1", args
 	}
@@ -346,6 +359,9 @@ func (s *Store) ListStaticResourcesPage(f StaticResourceFilter) (*StaticResource
 	}
 	if f.Page <= 0 {
 		f.Page = 1
+	}
+	if f.Page > 100_000 {
+		f.Page = 100_000
 	}
 	if f.PageSize <= 0 {
 		f.PageSize = 20

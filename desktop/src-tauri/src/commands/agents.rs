@@ -77,66 +77,103 @@ pub fn get_agent_detail(app: tauri::AppHandle, agent_id: String) -> Result<Agent
 }
 
 #[tauri::command]
-pub fn export_agents_report_pdf(
+pub async fn export_agents_report_pdf(
     agents: Vec<AgentInventory>,
     default_file_name: Option<String>,
-) -> Result<Option<String>, String> {
-    let file_name = safe_pdf_file_name(default_file_name.as_deref().unwrap_or("agents-report.pdf"));
-    let Some(output_path) = choose_pdf_output_path(&file_name)? else {
-        return Ok(None);
-    };
+    directory: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        export_agents_report_pdf_impl(agents, default_file_name, directory)
+    })
+    .await
+    .map_err(|error| format!("PDF 导出任务失败：{error}"))?
+}
 
-    let temp_dir = env::temp_dir().join(format!(
-        "defenseclaw-agent-report-{}",
-        Utc::now().timestamp_millis()
-    ));
-    fs::create_dir_all(&temp_dir).map_err(|err| format!("创建临时目录失败：{err}"))?;
+fn export_agents_report_pdf_impl(
+    agents: Vec<AgentInventory>,
+    default_file_name: Option<String>,
+    directory: String,
+) -> Result<String, String> {
+    // Validate the selected directory and filename before generating the PDF.
+    crate::commands::report_export::resolve_unique_export_path(
+        &directory,
+        default_file_name.as_deref().unwrap_or("agents-report.pdf"),
+        "agents-report.pdf",
+        &["pdf"],
+    )?;
+
+    let temp_dir = create_report_temp_dir("agent-report")?;
     let html_path = temp_dir.join("report.html");
+    let pdf_path = temp_dir.join("report.pdf");
     fs::write(&html_path, build_agents_report_html(&agents))
         .map_err(|err| format!("写入临时报告失败：{err}"))?;
 
-    let print_result = print_html_to_pdf(&html_path, &output_path);
-    let _ = fs::remove_file(&html_path);
+    let print_result = print_html_to_pdf(&html_path, &pdf_path)
+        .map_err(|error| format!("无法生成导出到“{directory}”的 PDF：{error}"));
+    let export_result = print_result.and_then(|_| {
+        crate::commands::report_export::copy_file_export(
+            &directory,
+            default_file_name.as_deref().unwrap_or("agents-report.pdf"),
+            &pdf_path,
+            &["pdf"],
+        )
+    });
     let _ = fs::remove_dir_all(&temp_dir);
-    print_result?;
-
-    Ok(Some(output_path.to_string_lossy().to_string()))
+    export_result
 }
 
 /// Export a pre-rendered, self-contained report from a desktop page. The HTML
 /// is produced by trusted application code and printed through the same local
 /// Edge/Chrome pipeline used by the Agent report.
 #[tauri::command]
-pub fn export_page_report_pdf(
+pub async fn export_page_report_pdf(
     html: String,
     default_file_name: Option<String>,
-) -> Result<Option<String>, String> {
+    directory: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        export_page_report_pdf_impl(html, default_file_name, directory)
+    })
+    .await
+    .map_err(|error| format!("PDF 导出任务失败：{error}"))?
+}
+
+fn export_page_report_pdf_impl(
+    html: String,
+    default_file_name: Option<String>,
+    directory: String,
+) -> Result<String, String> {
     if html.trim().is_empty() {
         return Err("导出内容不能为空".to_owned());
     }
-    let file_name = safe_pdf_file_name(
+    crate::commands::report_export::resolve_unique_export_path(
+        &directory,
         default_file_name
             .as_deref()
-            .unwrap_or("runtime-detections-current-page.pdf"),
-    );
-    let Some(output_path) = choose_pdf_output_path(&file_name)? else {
-        return Ok(None);
-    };
+            .unwrap_or("runtime-detections-report.pdf"),
+        "runtime-detections-report.pdf",
+        &["pdf"],
+    )?;
 
-    let temp_dir = env::temp_dir().join(format!(
-        "defenseclaw-page-report-{}",
-        Utc::now().timestamp_millis()
-    ));
-    fs::create_dir_all(&temp_dir).map_err(|err| format!("创建临时目录失败：{err}"))?;
+    let temp_dir = create_report_temp_dir("page-report")?;
     let html_path = temp_dir.join("report.html");
+    let pdf_path = temp_dir.join("report.pdf");
     fs::write(&html_path, html).map_err(|err| format!("写入临时报告失败：{err}"))?;
 
-    let print_result = print_html_to_pdf(&html_path, &output_path);
-    let _ = fs::remove_file(&html_path);
+    let print_result = print_html_to_pdf(&html_path, &pdf_path)
+        .map_err(|error| format!("无法生成导出到“{directory}”的 PDF：{error}"));
+    let export_result = print_result.and_then(|_| {
+        crate::commands::report_export::copy_file_export(
+            &directory,
+            default_file_name
+                .as_deref()
+                .unwrap_or("runtime-detections-report.pdf"),
+            &pdf_path,
+            &["pdf"],
+        )
+    });
     let _ = fs::remove_dir_all(&temp_dir);
-    print_result?;
-
-    Ok(Some(output_path.to_string_lossy().to_string()))
+    export_result
 }
 
 fn agent_list_path(query: Option<&AgentListQuery>) -> String {
@@ -188,86 +225,40 @@ fn agent_list_path(query: Option<&AgentListQuery>) -> String {
     format!("/api/v1/agents?{query}")
 }
 
-fn choose_pdf_output_path(default_file_name: &str) -> Result<Option<PathBuf>, String> {
-    #[cfg(windows)]
-    {
-        let file_name = default_file_name.replace('\'', "''");
-        let script = format!(
-            r#"
-$OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-Add-Type -AssemblyName System.Windows.Forms
-$dialog = New-Object System.Windows.Forms.SaveFileDialog
-$dialog.Title = '导出 Agent PDF 报告'
-$dialog.Filter = 'PDF 文件 (*.pdf)|*.pdf'
-$dialog.DefaultExt = 'pdf'
-$dialog.AddExtension = $true
-$dialog.OverwritePrompt = $true
-$dialog.FileName = '{file_name}'
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
-  Write-Output $dialog.FileName
-}}
-"#
-        );
-        let output = quiet_command("powershell.exe")
-            .args([
-                "-NoProfile",
-                "-STA",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                &script,
-            ])
-            .output()
-            .map_err(|err| format!("打开保存对话框失败：{err}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "保存对话框失败：{}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
-        }
-        let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if selected.is_empty() {
-            return Ok(None);
-        }
-        let mut path = PathBuf::from(selected);
-        if path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("")
-            .is_empty()
-        {
-            path.set_extension("pdf");
-        }
-        return Ok(Some(path));
-    }
-
-    #[cfg(not(windows))]
-    {
-        let mut path = env::current_dir().map_err(|err| format!("读取当前目录失败：{err}"))?;
-        path.push(default_file_name);
-        Ok(Some(path))
-    }
+fn create_report_temp_dir(kind: &str) -> Result<PathBuf, String> {
+    static NEXT_REPORT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let id = NEXT_REPORT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = env::temp_dir().join(format!(
+        "defenseclaw-{kind}-{}-{}-{id}",
+        std::process::id(),
+        Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    ));
+    fs::create_dir(&path).map_err(|error| format!("创建报告临时目录失败：{error}"))?;
+    Ok(path)
 }
 
 fn print_html_to_pdf(html_path: &Path, output_path: &Path) -> Result<(), String> {
-    let browser = find_pdf_browser().ok_or_else(|| {
-        "未找到 Microsoft Edge 或 Chrome，无法将 Agent 报告导出为 PDF".to_string()
-    })?;
+    let browser = match find_pdf_browser() {
+        Some(browser) => browser,
+        None => {
+            #[cfg(target_os = "linux")]
+            return crate::wsl_pdf::print_html_to_pdf(html_path, output_path);
+            #[cfg(not(target_os = "linux"))]
+            return Err("未找到 Microsoft Edge、Chrome 或 Chromium，请安装浏览器后重试导出 PDF".to_owned());
+        }
+    };
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent).map_err(|err| format!("创建导出目录失败：{err}"))?;
     }
-    let _ = fs::remove_file(output_path);
-    let profile_dir = env::temp_dir().join(format!(
-        "defenseclaw-agent-report-profile-{}",
-        Utc::now().timestamp_millis()
-    ));
-    fs::create_dir_all(&profile_dir).map_err(|err| format!("创建浏览器临时目录失败：{err}"))?;
+    let profile_dir = create_report_temp_dir("report-profile")?;
     let target = output_path.to_string_lossy().to_string();
     let source = file_url(html_path);
 
     let mut last_error = String::new();
     for headless_flag in ["--headless=new", "--headless"] {
+        // The output lives in our private temporary directory, so a failed
+        // Chromium attempt can be removed safely before retrying.
+        let _ = fs::remove_file(output_path);
         let output = quiet_command(&browser)
             .arg(headless_flag)
             .arg("--disable-gpu")
@@ -301,8 +292,10 @@ fn print_html_to_pdf(html_path: &Path, output_path: &Path) -> Result<(), String>
     }
 
     let _ = fs::remove_dir_all(&profile_dir);
+    let _ = fs::remove_file(output_path);
     Err(format!(
-        "浏览器生成 PDF 失败{}",
+        "浏览器生成 PDF“{}”失败{}",
+        output_path.display(),
         if last_error.is_empty() {
             "".to_string()
         } else {
@@ -323,27 +316,51 @@ fn wait_for_non_empty_file(path: &Path, timeout: Duration) -> bool {
 }
 
 fn find_pdf_browser() -> Option<String> {
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    for env_key in ["ProgramFiles", "ProgramFiles(x86)", "LocalAppData"] {
-        if let Some(base) = env::var_os(env_key) {
-            let base = PathBuf::from(base);
-            candidates.push(base.join("Microsoft\\Edge\\Application\\msedge.exe"));
-            candidates.push(base.join("Google\\Chrome\\Application\\chrome.exe"));
+    #[cfg(windows)]
+    {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        for env_key in ["ProgramFiles", "ProgramFiles(x86)", "LocalAppData"] {
+            if let Some(base) = env::var_os(env_key) {
+                let base = PathBuf::from(base);
+                candidates.push(base.join("Microsoft\\Edge\\Application\\msedge.exe"));
+                candidates.push(base.join("Google\\Chrome\\Application\\chrome.exe"));
+            }
+        }
+        for candidate in candidates {
+            if candidate.exists() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+        for name in ["msedge.exe", "chrome.exe"] {
+            if quiet_command("where.exe")
+                .arg(name)
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+            {
+                return Some(name.to_string());
+            }
         }
     }
-    for candidate in candidates {
-        if candidate.exists() {
-            return Some(candidate.to_string_lossy().to_string());
-        }
-    }
-    for name in ["msedge.exe", "chrome.exe"] {
-        if quiet_command("where.exe")
-            .arg(name)
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-        {
-            return Some(name.to_string());
+
+    #[cfg(target_os = "linux")]
+    {
+        for name in [
+            "google-chrome",
+            "google-chrome-stable",
+            "chromium",
+            "chromium-browser",
+            "microsoft-edge",
+            "microsoft-edge-stable",
+        ] {
+            if Command::new(name)
+                .arg("--version")
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+            {
+                return Some(name.to_owned());
+            }
         }
     }
     None
@@ -644,27 +661,6 @@ fn html_escape(value: &str) -> String {
     out
 }
 
-fn safe_pdf_file_name(input: &str) -> String {
-    let mut name = input
-        .chars()
-        .map(|ch| match ch {
-            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '-',
-            ch if ch.is_control() => '-',
-            ch => ch,
-        })
-        .collect::<String>()
-        .trim()
-        .trim_matches('.')
-        .to_string();
-    if name.is_empty() {
-        name = "agents-report".to_string();
-    }
-    if !name.to_ascii_lowercase().ends_with(".pdf") {
-        name.push_str(".pdf");
-    }
-    name
-}
-
 fn file_url(path: &Path) -> String {
     let raw = path.to_string_lossy().replace('\\', "/");
     format!("file:///{}", raw.replace(' ', "%20"))
@@ -701,4 +697,31 @@ fn quiet_command(program: &str) -> Command {
         command.creation_flags(CREATE_NO_WINDOW);
     }
     command
+}
+
+#[cfg(test)]
+mod pdf_tests {
+    use super::*;
+
+    #[test]
+    fn agent_report_preserves_linux_paths_and_escapes_names() {
+        let agent: AgentInventory = serde_json::from_value(serde_json::json!({
+            "id": "pdf-test-agent",
+            "product": "AgentRange / OpsPilot <测试>",
+            "vendor": "TraceBastion Lab",
+            "kind": "Agent Platform",
+            "runtimeStatus": "running",
+            "primaryPath": "/home/用户/AgentScan-Tool-linux/task/AgentRange-player",
+            "staticResourceCount": 17,
+            "riskResourceCount": 2,
+            "description": "Linux / WSL PDF 导出验证（测试数据）"
+        })).unwrap();
+        let html = build_agents_report_html(&[agent]);
+        assert!(html.contains("OpsPilot &lt;测试&gt;"));
+        assert!(html.contains("/home/用户/AgentScan-Tool-linux/task/AgentRange-player"));
+        // Optional artifact for manual rendering QA; normal test runs write nothing.
+        if let Some(path) = env::var_os("DEFENSECLAW_TEST_REPORT_HTML") {
+            fs::write(path, html).unwrap();
+        }
+    }
 }
