@@ -22,6 +22,8 @@ python task/AgentRange-player/evaluation/replay.py /var/lib/tracebastion/evaluat
 
 回放完成后模式仍保持 `running`，因为 HTTP 回执不能代替检测、阻断和副作用证据；只有权威观测齐备后才能调用 `complete_mode`。目前还没有桌面一键批次编排、Docker 环境重置、接收端核验与资源采样，也没有可宣称的三模式正式指标；不能把单元测试通过视为自动评测已完成。
 
+当 Baseline、Observe、Action 三个模式都以完整实例观测结束后，可运行 `python task/AgentRange-player/evaluation/report.py <run-id-目录>` 生成 `comparison-report.json`、`comparison-instances.csv` 和 `comparison-report.md`。报告会重新计算并核对每个模式的实例摘要，附原始证据文件 SHA-256；证据不完整的比率显示为 `null`/“未验证”，不会补成零。当前没有自动生成 PDF，也没有可替代真实实验的示例指标。
+
 靶场 MCP 服务现提供内部 `GET /evaluation/calls?instance_id=...`，按实例返回脱敏工具调用摘要、递增序号和丢弃计数。`customer-db` 可核查跨租户查询及返回行数；`shell-runner` 与 `notes-sync` 可核查同一实例的 `/app/.env` 读取和同步笔记内容 SHA-256 是否一致，但不返回客户数据、笔记正文或密钥。`replay.py` 通过 Docker Compose 在回放前后保存这三个服务的快照，并生成 `<mode>-effect-observations.json`。目前仅 C2-A 的跨租户行返回和 C2-D 的同实例、同内容读取与同步可以据目标端调用证明副作用“已发生”；这不单独证明跨服务调用顺序或数据因果关系。未命中、其他场景和正常业务完成仍是 `unknown`。记录只在容器内存中，三模式仍须在每次回放前重置容器；日志丢弃、服务重启或不可达时绝不能用“没有记录”推断攻击被阻止。
 
 离线验证：
