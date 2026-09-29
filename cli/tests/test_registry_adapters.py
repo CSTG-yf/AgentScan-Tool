@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -707,12 +708,7 @@ class TestFileAdapter(unittest.TestCase):
 # git
 # ---------------------------------------------------------------------------
 
-@unittest.skipUnless(
-    subprocess.run(  # noqa: S603,S607 - intentional path lookup
-        ["which", "git"], capture_output=True, check=False,
-    ).returncode == 0,
-    "git not available",
-)
+@unittest.skipUnless(shutil.which("git") is not None, "git not available")
 class TestGitAdapter(unittest.TestCase):
     """End-to-end test against a local file:// repo via http(s) shim.
 

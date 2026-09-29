@@ -32,10 +32,11 @@ def generate(seed: int = 1337, total: int = 5200, malicious_target: int = 80) ->
 
 
 def public_record(event: Event) -> dict:
-    # corpus 是对外回放输入，不能携带正负样本答案标签。
+    # corpus 是对外回放输入。真值、预期副作用及预设轨迹必须留在
+    # 操作者侧；轨迹只通过 runner 的受控管理接口注入 llm-stub。
     record = asdict(event)
-    record.pop("malicious", None)
-    record.pop("kind", None)
+    for private_field in ("malicious", "kind", "evidence", "trajectory"):
+        record.pop(private_field, None)
     return record
 
 

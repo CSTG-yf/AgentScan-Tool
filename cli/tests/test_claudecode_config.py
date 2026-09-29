@@ -24,6 +24,7 @@ import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -38,13 +39,17 @@ class _IsolatedHome:
     def __init__(self) -> None:
         self._tmp: tempfile.TemporaryDirectory | None = None
         self._prev_home: str | None = None
+        self._prev_userprofile: str | None = None
         self.home: str = ""
 
     def __enter__(self) -> str:
         self._tmp = tempfile.TemporaryDirectory(prefix="dc-cc-")
         self.home = self._tmp.name
         self._prev_home = os.environ.get("HOME")
+        self._prev_userprofile = os.environ.get("USERPROFILE")
         os.environ["HOME"] = self.home
+        if os.name == "nt":
+            os.environ["USERPROFILE"] = self.home
         return self.home
 
     def __exit__(self, *exc):
@@ -52,6 +57,10 @@ class _IsolatedHome:
             os.environ.pop("HOME", None)
         else:
             os.environ["HOME"] = self._prev_home
+        if self._prev_userprofile is None:
+            os.environ.pop("USERPROFILE", None)
+        else:
+            os.environ["USERPROFILE"] = self._prev_userprofile
         if self._tmp is not None:
             self._tmp.cleanup()
 
@@ -60,7 +69,7 @@ class MakeClaudeCodeSettingsShapeTests(unittest.TestCase):
     def test_default_seeds_empty_hooks_and_mcp(self):
         with _IsolatedHome() as home:
             path = make_claudecode_settings(home)
-            self.assertTrue(path.endswith(".claude/settings.json"))
+            self.assertEqual(Path(path), Path(home) / ".claude" / "settings.json")
             with open(path) as fh:
                 doc = json.load(fh)
             self.assertEqual(doc["hooks"], [])

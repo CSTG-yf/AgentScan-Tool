@@ -50,6 +50,7 @@ func NewKnownMaliciousResourceRule() Rule {
 				Remediation:   "立即停止使用该资源；按静态扫描报告清除或隔离该 MCP/Skill，并审查本次会话中它已接触的数据。",
 				Attributes: map[string]any{
 					"static_resource_id": res.ResourceID,
+					"resource_type":      res.ResourceType,
 					"resource_name":      res.Name,
 					"resource_target":    res.Target,
 					"risk_level":         res.RiskLevel,

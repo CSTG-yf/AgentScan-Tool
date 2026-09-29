@@ -136,7 +136,7 @@ func TestReadMCPServersCodex_MergesGlobalAndProjectLocal(t *testing.T) {
 	homeDir := t.TempDir()
 	cwdDir := t.TempDir()
 
-	t.Setenv("HOME", homeDir)
+	setTestUserHome(t, homeDir)
 
 	chdir(t, cwdDir)
 

@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/defenseclaw/defenseclaw/internal/enforce"
 	"github.com/defenseclaw/defenseclaw/internal/gateway/connector"
 )
 
@@ -83,6 +86,22 @@ func canonicalReadPath(path, cwd string) (string, error) {
 		path = strings.ToLower(path)
 	}
 	return path, nil
+}
+
+func fileReadDigestFromInput(tool, cwd string, input map[string]interface{}) string {
+	target, _, supported := fileReadTarget(tool, input)
+	if !supported {
+		return ""
+	}
+	if workdir, ok := input["workdir"].(string); ok && filepath.IsAbs(workdir) {
+		cwd = workdir
+	}
+	canonical, err := canonicalReadPath(target, cwd)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(sum[:])
 }
 
 func (p fileReadPolicy) match(path, cwd string) *fileReadRule {
@@ -195,6 +214,17 @@ func (a *APIServer) rewriteFileRead(name, event, mode, tool, cwd string, input m
 	}
 	if workdir, ok := input["workdir"].(string); ok && filepath.IsAbs(workdir) {
 		cwd = workdir
+	}
+	if a.store != nil && (name == "codex" || name == "claudecode") {
+		if digest := fileReadDigestFromInput(tool, cwd, input); digest != "" {
+			blocked, blockErr := enforce.NewPolicyEngine(a.store).IsBlockedForConnector("file_read_sha256", digest, name)
+			if blockErr != nil {
+				return nil, "", errors.New("file read policy lookup failed; denying the read")
+			}
+			if blocked {
+				return nil, "", errors.New("file read denied by persistent pre-read policy")
+			}
+		}
 	}
 	rule := policy.match(target, cwd)
 	if rule == nil {

@@ -157,7 +157,7 @@ func TestLoadHookAPITokensValidatesExistingFiles(t *testing.T) {
 }
 
 func TestConnectorHookWriterPreservesScopedAPITokenFormat(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := hookAPITestDir(t)
 	token, err := EnsureHookAPIToken(dataDir, "codex")
 	if err != nil {
 		t.Fatalf("EnsureHookAPIToken: %v", err)

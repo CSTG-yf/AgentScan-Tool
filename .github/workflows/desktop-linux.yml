@@ -33,6 +33,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Linux desktop dependencies
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libfuse2 fuse3
+      - name: Prepare bundled Linux gateway resource
+        run: |
+          mkdir -p desktop/src-tauri/resources
+          go build -buildvcs=false -trimpath -ldflags '-s -w' -o desktop/src-tauri/resources/defenseclaw-gateway ./cmd/defenseclaw
+          chmod 0755 desktop/src-tauri/resources/defenseclaw-gateway
       - name: Test desktop host
         working-directory: desktop/src-tauri
         run: cargo test --locked

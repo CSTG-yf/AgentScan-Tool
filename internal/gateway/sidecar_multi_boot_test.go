@@ -497,7 +497,7 @@ func TestConnectorSetupTokensUnmanagedFallsBackToMasterToken(t *testing.T) {
 }
 
 func TestConnectorSetupTokensProxyKeepsMasterOutOfScopedSidecar(t *testing.T) {
-	tokens, err := connectorSetupTokensFor(t.TempDir(), connector.NewOpenClawConnector(), "gateway-master", false)
+	tokens, err := connectorSetupTokensFor(trustedTokenTestDir(t), connector.NewOpenClawConnector(), "gateway-master", false)
 	if err != nil {
 		t.Fatalf("connectorSetupTokensFor proxy: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestConnectorSetupTokensProxyKeepsMasterOutOfScopedSidecar(t *testing.T) {
 }
 
 func TestConnectorSetupTokensOmnigentGetsScopedToken(t *testing.T) {
-	tokens, err := connectorSetupTokensFor(t.TempDir(), connector.NewOmnigentConnector(), "gateway-master", false)
+	tokens, err := connectorSetupTokensFor(trustedTokenTestDir(t), connector.NewOmnigentConnector(), "gateway-master", false)
 	if err != nil {
 		t.Fatalf("connectorSetupTokensFor omnigent: %v", err)
 	}
@@ -550,7 +550,7 @@ func TestRunGuardrailMulti_FailFastProxyGuard(t *testing.T) {
 }
 
 func TestRunGuardrailManagedEnterpriseSingleHookSkipsServiceHomeLifecycle(t *testing.T) {
-	dir := t.TempDir()
+	dir := trustedTokenTestDir(t)
 	codexConfig := filepath.Join(t.TempDir(), ".codex", "config.toml")
 	prevCodex := connector.CodexConfigPathOverride
 	connector.CodexConfigPathOverride = codexConfig
@@ -590,7 +590,7 @@ func TestRunGuardrailManagedEnterpriseSingleHookSkipsServiceHomeLifecycle(t *tes
 }
 
 func TestRunGuardrailMultiManagedEnterpriseSkipsServiceHomeLifecycle(t *testing.T) {
-	dir := t.TempDir()
+	dir := trustedTokenTestDir(t)
 	codexConfig := filepath.Join(t.TempDir(), ".codex", "config.toml")
 	claudeSettings := filepath.Join(t.TempDir(), ".claude", "settings.json")
 	prevCodex := connector.CodexConfigPathOverride

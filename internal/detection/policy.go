@@ -61,13 +61,17 @@ func NewPolicyEngine(store *audit.Store) *PolicyEngine {
 	}
 	p.blocklist.setPersistTarget(store)
 	p.RegisterExecutor(ProcessExecutor{})
+	p.RegisterExecutor(GuardrailBlockExecutor{Store: store})
+	p.RegisterExecutor(MCPBlockExecutor{Store: store})
+	p.RegisterExecutor(AgentHookBlockExecutor{Store: store})
+	p.RegisterExecutor(FileBlockExecutor{Store: store})
 	p.reloadMode()
 	return p
 }
 
 // RegisterExecutor attaches a concrete enforcement implementation to a
 // policy point. Sidecar integrations can replace the built-in process
-// executor, while tests and future MCP/file executors stay dependency-free.
+// executor; persisted pre-call gates remain bounded by connector capability.
 func (p *PolicyEngine) RegisterExecutor(executor RuntimeExecutor) {
 	if p == nil || executor == nil || strings.TrimSpace(executor.Point()) == "" {
 		return

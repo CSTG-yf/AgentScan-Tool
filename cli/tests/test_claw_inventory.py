@@ -31,6 +31,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
+from tests.helpers import home_env
 from defenseclaw.config import (
     ClawConfig,
     Config,
@@ -2223,7 +2224,7 @@ class TestBuildAibomFromFilesystem(unittest.TestCase):
                 f,
             )
 
-        with patch.dict(os.environ, {"HOME": home}, clear=False):
+        with patch.dict(os.environ, home_env(home), clear=False):
             inv = build_claw_aibom(cfg, live=True)
 
         self.assertEqual(inv["connector"], "opencode")
@@ -2251,7 +2252,7 @@ class TestBuildAibomFromFilesystem(unittest.TestCase):
         with open(os.path.join(command_dir, "triage.md"), "w", encoding="utf-8") as f:
             f.write("---\ndescription: Triage issues\n---\n")
 
-        with patch.dict(os.environ, {"HOME": home}, clear=False):
+        with patch.dict(os.environ, home_env(home), clear=False):
             inv = build_claw_aibom(cfg, live=True)
 
         self.assertEqual(inv["connector"], "antigravity")

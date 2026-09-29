@@ -718,15 +718,16 @@ func TestParseMCPServersJSON_Empty(t *testing.T) {
 }
 
 func TestSkillDirsForOpenClaw_NoOpenclawJSON(t *testing.T) {
-	dirs := SkillDirsForOpenClaw("/tmp/nonexistent-home")
+	home := filepath.Join(t.TempDir(), "nonexistent-home")
+	dirs := SkillDirsForOpenClaw(home)
 	if len(dirs) < 2 {
 		t.Fatalf("expected workspace and global skill dirs, got %v", dirs)
 	}
-	if dirs[0] != "/tmp/nonexistent-home/workspace/skills" {
-		t.Errorf("first dir = %q, want /tmp/nonexistent-home/workspace/skills", dirs[0])
+	if want := filepath.Join(home, "workspace", "skills"); dirs[0] != want {
+		t.Errorf("first dir = %q, want %q", dirs[0], want)
 	}
-	if dirs[len(dirs)-1] != "/tmp/nonexistent-home/skills" {
-		t.Errorf("last dir = %q, want /tmp/nonexistent-home/skills", dirs[len(dirs)-1])
+	if want := filepath.Join(home, "skills"); dirs[len(dirs)-1] != want {
+		t.Errorf("last dir = %q, want %q", dirs[len(dirs)-1], want)
 	}
 }
 
@@ -817,7 +818,7 @@ func TestConfig_InstalledSkillCandidates(t *testing.T) {
 func TestConfig_WorkspaceScopedOpenHandsPathsUsePinnedWorkspace(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	workspace := filepath.Join(root, "repo")
 	cfg := &Config{
 		Claw: ClawConfig{
@@ -939,7 +940,7 @@ func TestConfig_PluginDirs(t *testing.T) {
 	if len(dirs) != 1 {
 		t.Fatalf("expected 1 plugin dir, got %d", len(dirs))
 	}
-	want := "/tmp/test-oc-home/extensions"
+	want := filepath.Join(cfg.Claw.HomeDir, "extensions")
 	if dirs[0] != want {
 		t.Errorf("PluginDirs()[0] = %q, want %q", dirs[0], want)
 	}

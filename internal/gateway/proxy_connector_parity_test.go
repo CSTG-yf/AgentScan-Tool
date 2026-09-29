@@ -277,6 +277,12 @@ func TestSwitchConnector_PerConnectorPersistsState(t *testing.T) {
 			}
 
 			p.switchConnectorLocked(target)
+			if !connector.ConnectorSupportedOnHostOS(target) {
+				if p.connector.Name() != "codex" || connector.LoadActiveConnector(dir) != "" {
+					t.Fatalf("unsupported connector %q changed active connector or persisted state", target)
+				}
+				return
+			}
 
 			if p.connector.Name() != target {
 				t.Errorf("connector after switchConnectorLocked(%q) = %q",
@@ -361,6 +367,12 @@ func TestApplyRuntime_PerConnectorSwitch(t *testing.T) {
 			}
 
 			p.applyRuntime(map[string]any{"connector": target})
+			if !connector.ConnectorSupportedOnHostOS(target) {
+				if p.connector.Name() != "codex" {
+					t.Fatalf("unsupported connector %q changed active connector to %q", target, p.connector.Name())
+				}
+				return
+			}
 
 			if p.connector.Name() != target {
 				t.Errorf("applyRuntime({connector=%q}) -> %q",

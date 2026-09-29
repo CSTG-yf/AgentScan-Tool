@@ -123,6 +123,7 @@ def adapt(
     click.echo(f"  override: {bundle.override_path}")
     click.echo(f"  plan:     {bundle.plan_path}")
     click.echo(f"  readme:   {bundle.readme_path}")
+    click.echo(f"  sidecar:  {bundle.sidecar_path}")
     click.echo()
     click.echo("Run with:")
     click.echo(

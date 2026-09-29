@@ -13,6 +13,7 @@ import type {
   BackendScanSchedule,
   BackendScanSchedulesResponse,
   ChangeCursor,
+  ConnectorProfilesResponse,
   EnvironmentSnapshot,
   GatewayAuditSnapshot,
   GatewayDesktopSettings,
@@ -86,6 +87,115 @@ import type {
 } from "./types";
 
 const inTauri = (): boolean => "__TAURI_INTERNALS__" in window;
+let changeStreamTransition: Promise<void> = Promise.resolve();
+
+function queueChangeStreamTransition<T>(action: () => Promise<T>): Promise<T> {
+  const operation = changeStreamTransition.then(action, action);
+  changeStreamTransition = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+export interface PrivacySettings {
+  redactionEnabled: boolean;
+  retainJudgeBodies: boolean;
+}
+
+export interface NotificationSettings {
+  enabled: boolean;
+  blockEnforced: boolean;
+  blockWouldBlock: boolean;
+  hitlApproval: boolean;
+  hook: boolean;
+  guardrail: boolean;
+  assetPolicy: boolean;
+  dedupSeconds: number;
+  maxPerMinute: number;
+}
+
+export interface SavedSystemSettings<T> {
+  settings: T;
+  changed: string[];
+  restartRequired: string[];
+  live: boolean;
+}
+
+export async function getPrivacySettings(): Promise<PrivacySettings> {
+  if (!inTauri()) throw new Error("设置需要在桌面应用中读取 Gateway");
+  return invoke<PrivacySettings>("get_privacy_settings");
+}
+
+export async function savePrivacySettings(settings: PrivacySettings): Promise<SavedSystemSettings<PrivacySettings>> {
+  if (!inTauri()) throw new Error("浏览器预览无法保存设置");
+  return invoke<SavedSystemSettings<PrivacySettings>>("save_privacy_settings", { settings });
+}
+
+export async function getNotificationSettings(): Promise<NotificationSettings> {
+  if (!inTauri()) throw new Error("设置需要在桌面应用中读取 Gateway");
+  return invoke<NotificationSettings>("get_notification_settings");
+}
+
+export async function saveNotificationSettings(settings: NotificationSettings): Promise<SavedSystemSettings<NotificationSettings>> {
+  if (!inTauri()) throw new Error("浏览器预览无法保存设置");
+  return invoke<SavedSystemSettings<NotificationSettings>>("save_notification_settings", { settings });
+}
+
+export interface StorageFileStatus {
+  path: string;
+  bytes: number;
+  exists: boolean;
+  error?: string;
+}
+
+export interface StorageSettings {
+  dataDir: string;
+  auditDb: StorageFileStatus;
+  judgeBodiesDb: StorageFileStatus;
+  gatewayLog: StorageFileStatus;
+  knownStoredBytes: number;
+  note: string;
+}
+
+export interface GatewayVersionSettings {
+  gatewayVersion: string;
+  schemaVersion: number;
+  configGeneration: number;
+  os: string;
+  architecture: string;
+}
+
+export interface VersionSettings {
+  desktopVersion: string;
+  gateway: GatewayVersionSettings | null;
+  gatewayError: string | null;
+}
+
+export interface DiagnosticReport {
+  capturedAt: string;
+  checks: Array<{ name: string; status: string; detail: string }>;
+  versions: GatewayVersionSettings;
+  storage: { auditBytes: number; judgeBodiesBytes: number; gatewayLogBytes: number };
+}
+
+export async function getStorageSettings(): Promise<StorageSettings> {
+  if (!inTauri()) throw new Error("存储状态需要在桌面应用中读取 Gateway");
+  return invoke<StorageSettings>("get_storage_settings");
+}
+
+export async function getVersionSettings(): Promise<VersionSettings> {
+  if (!inTauri()) throw new Error("版本状态需要在桌面应用中读取 Gateway");
+  return invoke<VersionSettings>("get_version_settings");
+}
+
+export async function runDiagnostics(): Promise<DiagnosticReport> {
+  if (!inTauri()) throw new Error("诊断需要在桌面应用中运行 Gateway");
+  return invoke<DiagnosticReport>("run_diagnostics");
+}
+
+export async function exportDiagnostics(): Promise<{ path: string; bytes: number }> {
+  if (!inTauri()) throw new Error("诊断导出需要在桌面应用中运行 Gateway");
+  return invoke<{ path: string; bytes: number }>("export_diagnostics");
+}
+
 export const isDesktopRuntime = (): boolean => inTauri();
 
 export async function selectExportDirectory(title = "选择导出文件夹"): Promise<string | null> {
@@ -341,6 +451,16 @@ export async function getChanges(cursor = 0, domains?: string[]): Promise<Change
     cursor,
     domains: domains?.join(","),
   });
+}
+
+export async function startChangeStream(cursor: number, domains: string[]): Promise<void> {
+  if (!inTauri()) throw new Error("Gateway 变更流需要在桌面应用中启动");
+  return queueChangeStreamTransition(() => invoke<void>("start_change_stream", { cursor, domains }));
+}
+
+export async function stopChangeStream(): Promise<void> {
+  if (!inTauri()) return;
+  return queueChangeStreamTransition(() => invoke<void>("stop_change_stream"));
 }
 
 export async function getStaticResourceScans(resourceId: string, limit = 50): Promise<StaticResourceScanHistoryResponse> {
@@ -920,6 +1040,11 @@ export async function getAgents(query: AgentListQuery = {}): Promise<AgentSnapsh
     return { capturedAt: new Date().toISOString(), agents: [], processes: [], warning: "浏览器预览模式不具备本机进程访问权限" };
   }
   return invoke<AgentSnapshot>("get_agents", { query });
+}
+
+export async function getConnectorProfiles(): Promise<ConnectorProfilesResponse> {
+  if (!inTauri()) throw new Error("连接器能力档案需要在桌面应用中读取本机 Gateway");
+  return invoke<ConnectorProfilesResponse>("get_connector_profiles");
 }
 
 export async function rollbackRuntimeEnforcement(enforcementId: string): Promise<RuntimeEnforcementResult> {

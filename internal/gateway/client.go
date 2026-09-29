@@ -625,7 +625,7 @@ func persistRefreshedToken(dataDir, newToken string) error {
 	hookTokenPath := filepath.Join(dataDir, "hooks", ".token")
 	if _, err := os.Stat(filepath.Dir(hookTokenPath)); err == nil {
 		content := fmt.Sprintf("DEFENSECLAW_GATEWAY_TOKEN=%q\n", newToken)
-		if err := os.WriteFile(hookTokenPath, []byte(content), 0o600); err != nil {
+		if err := atomicWritePrivateFile(hookTokenPath, []byte(content)); err != nil {
 			return fmt.Errorf("write hooks/.token: %w", err)
 		}
 	}
@@ -679,7 +679,7 @@ func updateEnvFileToken(path, newToken string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(out), 0o600)
+	return atomicWritePrivateFile(path, []byte(out))
 }
 
 // shouldAutoRepair returns true when auth auto-repair should be attempted.

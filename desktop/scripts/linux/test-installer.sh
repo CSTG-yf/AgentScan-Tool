@@ -11,6 +11,9 @@ trap 'rm -f "$LISTING"' EXIT
 dpkg-deb --contents "$PACKAGE" >"$LISTING"
 grep -q 'defenseclaw-desktop' "$LISTING"
 grep -q 'README-Linux.md' "$LISTING"
+grep -q 'resources/defenseclaw-gateway' "$LISTING"
+grep -q 'agentrange_sidecar.py' "$LISTING"
+grep -q -- '--run-controlled-agent' "$REPO_ROOT/desktop/src-tauri/README-Linux.md"
 
 if [ "${TRACEBASTION_INSTALL_SMOKE:-0}" = 1 ]; then
   sudo apt-get install -y "$PACKAGE"

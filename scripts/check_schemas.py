@@ -91,6 +91,14 @@ RUNTIME_SPAN_SCHEMA_NAMES = (
 )
 
 
+def _schema_label(path: Path) -> str:
+    """Return a platform-neutral path relative to the active schema root."""
+    try:
+        return path.relative_to(SCHEMA_DIR).as_posix()
+    except ValueError:
+        return path.name
+
+
 def load_json(path: Path) -> dict:
     def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
         out = {}
@@ -108,10 +116,10 @@ def load_json(path: Path) -> dict:
             object_pairs_hook=reject_duplicate_keys,
         )
     except json.JSONDecodeError as exc:
-        print(f"check_schemas: {path} is not valid JSON: {exc}", file=sys.stderr)
+        print(f"check_schemas: {_schema_label(path)} is not valid JSON: {exc}", file=sys.stderr)
         raise SystemExit(1)
     except ValueError as exc:
-        print(f"check_schemas: {path} is not valid JSON: {exc}", file=sys.stderr)
+        print(f"check_schemas: {_schema_label(path)} is not valid JSON: {exc}", file=sys.stderr)
         raise SystemExit(1)
 
 
@@ -132,7 +140,7 @@ def ensure_valid_meta(doc: dict, path: Path) -> bool:
         jsonschema.Draft202012Validator.check_schema(doc)
         return True
     except jsonschema.exceptions.SchemaError as exc:
-        print(f"check_schemas: {path} fails Draft 2020-12 meta-validation: {exc.message}", file=sys.stderr)
+        print(f"check_schemas: {_schema_label(path)} fails Draft 2020-12 meta-validation: {exc.message}", file=sys.stderr)
         return False
 
 

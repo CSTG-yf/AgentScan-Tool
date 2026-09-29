@@ -185,6 +185,10 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	}
 	tmpName := tmp.Name()
 	defer func() { _ = os.Remove(tmpName) }()
+	if err := secureConfigTemp(tmpName); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("config: secure temp %s: %w", tmpName, err)
+	}
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("config: write temp %s: %w", tmpName, err)

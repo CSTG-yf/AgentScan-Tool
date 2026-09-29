@@ -208,12 +208,20 @@ Sync everything that's enabled (the typical CI/CD pattern):
 defenseclaw registry sync --all --json
 ```
 
-> **No built-in scheduler today.** The `auto_sync` and
-> `sync_interval_hours` fields on `RegistrySource` are persisted for a
-> future release but no runtime component reads them. Run
-> `defenseclaw registry sync --all` from cron / a systemd timer / your
-> existing CI cadence; v1 is intentionally a manual ingest pipeline so
-> the operator stays in the loop on every promotion.
+An opt-in persistent scheduler is available for CLI installations:
+
+```bash
+defenseclaw registry scheduler run
+```
+
+Keep that foreground process alive with your service manager; use
+`defenseclaw registry scheduler run --once` for one due-source pass or
+`defenseclaw registry scheduler status` to inspect saved state. It reloads
+configuration each pass, syncs only enabled sources with `auto_sync: true`,
+and applies `sync_interval_hours` plus bounded retry backoff. The desktop
+installer does **not** bundle or start this Python scheduler, so setting
+`auto_sync: true` in a desktop-only install does not enable background ingest.
+Manual `defenseclaw registry sync --all` remains available.
 
 Dry-run a source before the first sync so credentials and the
 manifest's shape are validated without touching `index.json`,

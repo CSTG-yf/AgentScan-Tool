@@ -390,7 +390,7 @@ def _rsync_overwrite(
     preserve_norm = tuple(p.strip("/") for p in preserve if p)
 
     for root, dirs, files in os.walk(src):
-        rel_root = os.path.relpath(root, src)
+        rel_root = Path(os.path.relpath(root, src)).as_posix()
         if rel_root == ".":
             rel_root = ""
 
@@ -399,7 +399,7 @@ def _rsync_overwrite(
         # caller can show what survived.
         kept_dirs: list[str] = []
         for d in dirs:
-            rel_dir = os.path.join(rel_root, d) if rel_root else d
+            rel_dir = f"{rel_root}/{d}" if rel_root else d
             if _path_is_preserved(rel_dir, preserve_norm):
                 preserved.append(rel_dir)
                 continue
@@ -407,13 +407,13 @@ def _rsync_overwrite(
         dirs[:] = kept_dirs
 
         for fname in files:
-            rel_file = os.path.join(rel_root, fname) if rel_root else fname
+            rel_file = f"{rel_root}/{fname}" if rel_root else fname
             if _path_is_preserved(rel_file, preserve_norm):
                 preserved.append(rel_file)
                 continue
 
             src_path = os.path.join(root, fname)
-            dest_path = os.path.join(str(dest), rel_file)
+            dest_path = os.path.join(str(dest), *rel_file.split("/"))
             try:
                 os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
                 _atomic_copy_file(src_path, dest_path)

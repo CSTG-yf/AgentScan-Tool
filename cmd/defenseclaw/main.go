@@ -18,6 +18,8 @@ package main
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/defenseclaw/defenseclaw/internal/cli"
 )
@@ -29,7 +31,26 @@ var (
 )
 
 func main() {
+	if isAntigravityLauncher(os.Args[0]) {
+		launcher, err := os.Executable()
+		if err != nil {
+			os.Exit(1)
+		}
+		if _, err := os.Stat(launcher + ".disabled"); err == nil {
+			os.Exit(0)
+		} else if !os.IsNotExist(err) {
+			os.Exit(1)
+		}
+		if err := os.Setenv("DEFENSECLAW_HOME", filepath.Dir(filepath.Dir(launcher))); err != nil {
+			os.Exit(1)
+		}
+		os.Args = append([]string{os.Args[0], "hook", "--connector", "antigravity"}, os.Args[1:]...)
+	}
 	cli.SetVersion(version)
 	cli.SetBuildInfo(commit, date)
 	os.Exit(cli.Execute())
+}
+
+func isAntigravityLauncher(path string) bool {
+	return strings.EqualFold(filepath.Base(path), "defenseclaw-antigravity-hook.exe")
 }

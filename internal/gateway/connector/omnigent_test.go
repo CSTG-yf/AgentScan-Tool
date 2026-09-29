@@ -38,6 +38,22 @@ func withOmnigentPathOverrides(t *testing.T, configPath, sitePackages string) {
 	})
 }
 
+func pythonForOmnigentTests(t *testing.T) string {
+	t.Helper()
+	name := "python3"
+	if runtime.GOOS == "windows" {
+		name = "python" // WindowsApps python3.exe may be a nonfunctional Store alias.
+	}
+	path, err := exec.LookPath(name)
+	if err != nil {
+		t.Skipf("%s is required: %v", name, err)
+	}
+	if err := exec.Command(path, "-c", "import sys; assert sys.version_info.major == 3").Run(); err != nil {
+		t.Skipf("%s is not a working Python 3 interpreter: %v", path, err)
+	}
+	return path
+}
+
 func TestOmnigentSetupAndTeardown(t *testing.T) {
 	root := t.TempDir()
 	dataDir := filepath.Join(root, "defenseclaw")
@@ -299,10 +315,7 @@ func TestOmnigentSetupRefreshesBackupsWhenTargetsMove(t *testing.T) {
 }
 
 func TestOmnigentRawPolicyTemplateImportsFailOpen(t *testing.T) {
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 is required for the raw-template import test")
-	}
+	python := pythonForOmnigentTests(t)
 	templateBytes, err := hookFS.ReadFile("hooks/omnigent-policy.py")
 	if err != nil {
 		t.Fatal(err)
@@ -332,10 +345,7 @@ print(json.dumps(module.defenseclaw_policy({"type": "request", "data": "hello"})
 }
 
 func TestOmnigentPolicyPayloadRejectsNonFiniteNumbers(t *testing.T) {
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 is required for the policy payload test")
-	}
+	python := pythonForOmnigentTests(t)
 	templateBytes, err := hookFS.ReadFile("hooks/omnigent-policy.py")
 	if err != nil {
 		t.Fatal(err)
@@ -369,10 +379,7 @@ print(json.dumps(payload, allow_nan=False))
 }
 
 func TestOmnigentPolicyBridgeMapsBlockToDeny(t *testing.T) {
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 is required for the policy bridge integration test")
-	}
+	python := pythonForOmnigentTests(t)
 
 	var received map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -454,10 +461,7 @@ print(json.dumps(module.defenseclaw_policy({
 }
 
 func TestOmnigentPolicyBridgeFailMode(t *testing.T) {
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 is required for the policy bridge fail-mode test")
-	}
+	python := pythonForOmnigentTests(t)
 	templateBytes, err := hookFS.ReadFile("hooks/omnigent-policy.py")
 	if err != nil {
 		t.Fatal(err)
@@ -515,10 +519,7 @@ func TestOmnigentConfirmIsNativeOnlyBeforeActions(t *testing.T) {
 }
 
 func TestOmnigentPolicyBridgeVerdictMappingAndEmptyToken(t *testing.T) {
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 is required for the policy bridge integration test")
-	}
+	python := pythonForOmnigentTests(t)
 	responses := map[string]string{"deny-case": "block", "ask-case": "confirm", "allow-case": "allow"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "" {
@@ -571,10 +572,7 @@ for name in ("deny-case", "ask-case", "allow-case"):
 }
 
 func TestOmnigentPolicyEventFixture(t *testing.T) {
-	python, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 is required for the policy event fixture test")
-	}
+	python := pythonForOmnigentTests(t)
 	templateBytes, err := hookFS.ReadFile("hooks/omnigent-policy.py")
 	if err != nil {
 		t.Fatal(err)

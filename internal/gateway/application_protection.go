@@ -176,12 +176,12 @@ func (c *applicationProtectionController) OnDiscoveryReport(ctx context.Context,
 			skipped = append(skipped, skippedRow(name, "manual_connector_configured", "connector source is manual setup", sig))
 			continue
 		}
-		if !connector.ConnectorSupportedOnHostOS(conn.Name()) {
-			skipped = append(skipped, skippedRow(name, "unsupported_os", "connector is not supported on this host OS", sig))
-			continue
-		}
 		if proxyShouldBindForConnector(conn, &cfg.Guardrail) || connector.IsProxyConnector(conn.Name()) {
 			skipped = append(skipped, skippedRow(name, "proxy_connector_setup_only", "proxy connectors remain setup-only", sig))
+			continue
+		}
+		if !connector.ConnectorSupportedOnHostOS(conn.Name()) {
+			skipped = append(skipped, skippedRow(name, "unsupported_os", "connector is not supported on this host OS", sig))
 			continue
 		}
 		if !cfg.ApplicationProtection.AllowsConnector(name) {

@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from auth.jwt_auth import Identity, issue_token, verify_token
 from auth.roles import in_scope
 from policy.propagation import trace_headers
+from api.runtime_stack import runtime_stack_frames
 from skills.loader import load_skill
 
 # 预置用户代表靶场里的固定身份，登录阶段只根据用户名发放对应 JWT。
@@ -366,10 +367,19 @@ def run_tool_calls(llm_response: dict, headers: dict) -> list[dict]:
 
 
 def call_mcp(endpoint: str, tool: str, args: dict, headers: dict | None = None) -> dict:
-    # MCP 使用 JSON-RPC 2.0 HTTP 传输，Trace ID 只用于跨服务取证。
+    # This is sampled from the live OpsPilot call path (run_agent ->
+    # run_stub_agent -> run_tool_calls -> call_mcp), not inferred from event
+    # labels. Only project-relative function frames and line numbers leave the
+    # process; arguments and source text are never included.
+    outbound_headers = dict(headers or {})
+    frames = runtime_stack_frames()
+    if frames:
+        encoded_frames = json.dumps(frames, separators=(",", ":"))
+        if len(encoded_frames) <= 4096:
+            outbound_headers["X-DefenseClaw-Agent-Stack"] = encoded_frames
     response = requests.post(
         endpoint,
-        headers=headers or {},
+        headers=outbound_headers,
         json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}},
         timeout=10,
     )

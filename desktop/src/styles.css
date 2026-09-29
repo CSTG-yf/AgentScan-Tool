@@ -506,6 +506,11 @@ body { min-height: 100vh; background: #f5f8fc; }
 .settings-danger-zone .ant-card-head-title { color: #c92534 !important; }
 .settings-danger-zone .ant-card-body > div { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .settings-danger-zone .ant-card-body > div > div { display: grid; gap: 4px; }
+.settings-form-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 0; border-bottom: 1px solid #eef1f5; }
+.settings-form-row:last-of-type { border-bottom: 0; }
+.settings-form-row > div:first-child { min-width: 0; }
+.settings-form-row .ant-typography { overflow-wrap: anywhere; }
+.settings-form-row .ant-switch, .settings-form-row .ant-input-number { flex: 0 0 auto; }
 .capability-placeholder .ant-card-body { min-height: 350px; display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; }
 .capability-icon { display: grid; place-items: center; width: 58px; height: 58px; margin-bottom: 12px; color: #1677ff; border-radius: 16px; background: #eaf3ff; font-size: 26px; }
 .capability-placeholder h4 { margin: 0 0 7px !important; }
@@ -1451,6 +1456,8 @@ body { min-height: 100vh; background: #f5f8fc; }
 .runtime-chain-step { padding:12px; border:1px solid #2a405c; border-radius:8px; background:#10243c; }
 .runtime-chain-step .ant-descriptions { margin-top:10px; }
 .runtime-record-text { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.7; }
+.runtime-stack-evidence { margin-top:10px; }
+.runtime-stack-evidence pre { margin:6px 0 0; padding:10px; border-radius:6px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; background:#091827; color:#c2d2e3; font-size:12px; line-height:1.6; }
 .runtime-raw-record { margin:12px 0; color:#a2b6ce; }
 .runtime-raw-record summary { cursor:pointer; }
 /* Runtime detection and attack-chain pages share the static-resource workbench language. */

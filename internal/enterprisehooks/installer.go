@@ -73,6 +73,9 @@ type InstallResult struct {
 }
 
 func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
+	if err := validateInstallerPlatform(); err != nil {
+		return InstallResult{}, err
+	}
 	home, err := validateUserHome(opts.UserHome)
 	if err != nil {
 		return InstallResult{}, err
