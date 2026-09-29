@@ -20,6 +20,13 @@ from bench import agentrange_replay
 from bench.merge_observation_run import merge as merge_observation_run
 
 
+def write_replay_timing(run_dir: Path) -> None:
+    (run_dir / "replay-process.json").write_text(json.dumps({
+        "started_at": "2026-09-29T00:00:00+00:00",
+        "finished_at": "2026-09-29T00:10:00+00:00",
+    }), encoding="utf-8")
+
+
 class AgentRangeBenchmarkTest(unittest.TestCase):
     def test_action_requires_enforced_block_not_would_block(self):
         truth = [{"instance_id": "attack", "label": "malicious", "scenario_id": "C2-A"}]
@@ -488,6 +495,9 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
                 "\n".join(json.dumps({"mode": "action", "container": "mcp", "cpu_pct": value}) for value in (2.0, 3.0)) + "\n",
                 encoding="utf-8",
             )
+            self.assertEqual(score_run(action_dir)["resources"]["baseline"]["status"], "throughput_unverified")
+            write_replay_timing(baseline_dir)
+            write_replay_timing(action_dir)
             report = score_run(action_dir)
             self.assertEqual(report["resources"]["baseline"]["status"], "complete")
             self.assertEqual(report["resources"]["baseline"]["run_dir"], str(baseline_dir.resolve()))
@@ -550,6 +560,8 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
                 "\n".join(json.dumps({"mode": "action", "container": "mcp", "cpu_pct": value}) for value in action_values) + "\n",
                 encoding="utf-8",
             )
+            write_replay_timing(baseline_dir)
+            write_replay_timing(action_dir)
             report = score_run(action_dir)
             self.assertEqual(report["resources"]["cpu_increment_statistic"], "p95")
             self.assertEqual(report["resources"]["cpu_increment_by_container"]["mcp"], 1.0)
@@ -576,6 +588,8 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
                 "\n".join(json.dumps({"mode": "action", "container": container, "cpu_pct": 2.0}) for container in ("mcp", "new-sidecar")) + "\n",
                 encoding="utf-8",
             )
+            write_replay_timing(baseline_dir)
+            write_replay_timing(action_dir)
             report = score_run(action_dir)
             self.assertEqual(report["resources"]["baseline"]["status"], "partial_container_overlap")
             self.assertEqual(report["resources"]["cpu_increment_pct"], 1.0)

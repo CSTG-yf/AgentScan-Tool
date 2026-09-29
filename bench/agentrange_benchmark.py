@@ -542,6 +542,8 @@ def _score_resources(
         baseline_status = "mode_mismatch"
     elif manifest_compatibility == "manifest_mismatch":
         baseline_status = "manifest_mismatch"
+    elif baseline_run_dir is not None and throughput_ratio is None:
+        baseline_status = "throughput_unverified"
     elif throughput_ratio is not None and not 0.8 <= throughput_ratio <= 1.25:
         baseline_status = "throughput_mismatch"
     elif set(action_rows) != set(baseline_rows):
