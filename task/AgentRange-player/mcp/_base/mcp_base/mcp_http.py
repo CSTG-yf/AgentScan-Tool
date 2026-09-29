@@ -24,12 +24,15 @@ def create_server(name: str, tools: list[Tool], on_start: Callable | None = None
     app.state.evaluation_dropped = 0
 
     @app.get("/evaluation/calls")
-    def evaluation_calls(instance_id: str):
+    def evaluation_calls(instance_id: str | None = None, since: int = 0, summary: bool = False):
         # 内部靶场诊断接口只返回脱敏事实，不暴露工具原始参数/结果。
         # 若环形窗口已丢弃记录，调用方不得据“无命中”推断阻断成功。
-        if not instance_id or len(instance_id) > 128:
+        if instance_id is not None and (not instance_id or len(instance_id) > 128):
             return {"error": "invalid instance_id"}
-        items = [item for item in app.state.evaluation_calls if item["instance_id"] == instance_id]
+        items = [] if summary else [
+            item for item in app.state.evaluation_calls
+            if item["seq"] > since and (instance_id is None or item["instance_id"] == instance_id)
+        ]
         return {
             "server": name,
             "instance_id": instance_id,

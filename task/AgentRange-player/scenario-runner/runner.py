@@ -81,7 +81,11 @@ def clear_trajectories() -> None:
     response.raise_for_status()
 
 
-def replay_events(events: list[dict], only: str | None = None, receipt_sink: Callable[[dict], None] | None = None) -> list[dict]:
+def replay_events(
+    events: list[dict], only: str | None = None,
+    receipt_sink: Callable[[dict], None] | None = None,
+    continue_on_http_error: bool = False,
+) -> list[dict]:
     if only and only != "all":
         events = [event for event in events if event["scenario"] == only]
     # 网络执行只在人工 make replay 时发生，离线测试验证 plan_actions。
@@ -102,7 +106,7 @@ def replay_events(events: list[dict], only: str | None = None, receipt_sink: Cal
                 receipt["http_status"] = response.status_code
                 receipt["status"] = "completed"
             except Exception as exc:
-                receipt["status"] = "failed"
+                receipt["status"] = "http_error" if isinstance(exc, httpx.HTTPStatusError) else "failed"
                 receipt["error_type"] = type(exc).__name__
                 if isinstance(exc, httpx.HTTPStatusError):
                     receipt["http_status"] = exc.response.status_code
@@ -110,6 +114,8 @@ def replay_events(events: list[dict], only: str | None = None, receipt_sink: Cal
                 receipts.append(receipt)
                 if receipt_sink:
                     receipt_sink(receipt)
+                if continue_on_http_error and isinstance(exc, httpx.HTTPStatusError):
+                    continue
                 raise
             receipt["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 3)
             receipts.append(receipt)
@@ -163,7 +169,8 @@ def fire_cat1(client: httpx.Client, action: dict, langflow_token: str):
 def fire_opspilot(client: httpx.Client, action: dict, tokens: dict):
     username = action["username"]
     # 同一用户 token 缓存复用，避免回放里产生不必要登录噪声。
-    tokens.setdefault(username, login_token(client, username))
+    if username not in tokens:
+        tokens[username] = login_token(client, username)
     headers = dict(action.get("headers", {}))
     headers["Authorization"] = f"Bearer {tokens[username]}"
     body = action["body"]

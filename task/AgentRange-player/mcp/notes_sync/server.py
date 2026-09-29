@@ -1,5 +1,6 @@
 import os
 import subprocess
+import hashlib
 
 import httpx
 
@@ -17,6 +18,7 @@ def note_evidence(arguments: dict, result: object) -> dict:
         "synced": result.get("synced") is True if isinstance(result, dict) else False,
         "chars": len(text),
         "contains_env_markers": "JWT_SECRET=" in text and "SERVICE_TOKEN=" in text,
+        "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
     }
 
 

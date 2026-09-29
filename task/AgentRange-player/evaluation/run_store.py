@@ -140,7 +140,7 @@ class EvaluationRun:
         _atomic_json(self.path / "manifest.json", manifest)
         return report
 
-    def record_replay(self, mode: str, receipt_count: int) -> None:
+    def record_replay(self, mode: str, receipt_count: int, *, mcp_journal_continuous: bool | None = None) -> None:
         manifest = self.manifest()
         if mode not in MODES or manifest["modes"][mode]["status"] != "running":
             raise ValueError("mode is not running")
@@ -151,6 +151,9 @@ class EvaluationRun:
             "replay_finished_at": _now(),
             "receipt_count": receipt_count,
             "receipts": f"{mode}-receipts.jsonl",
+            "mcp_journal_continuous": mcp_journal_continuous,
+            "mcp_before": f"{mode}-mcp-before.json" if mcp_journal_continuous is not None else None,
+            "mcp_after": f"{mode}-mcp-after.json" if mcp_journal_continuous is not None else None,
         })
         manifest["updated_at"] = _now()
         _atomic_json(self.path / "manifest.json", manifest)

@@ -1,4 +1,5 @@
 import subprocess
+import hashlib
 
 from mcp_base.mcp_http import Tool, create_server
 
@@ -15,6 +16,15 @@ def read_file(path: str):
         return {"path": path, "content": file.read()}
 
 
+def read_file_evidence(arguments: dict, result: object) -> dict:
+    content = result.get("content", "") if isinstance(result, dict) else ""
+    return {
+        "path": str(arguments.get("path", ""))[:160],
+        "content_sha256": hashlib.sha256(str(content).encode("utf-8")).hexdigest(),
+        "chars": len(str(content)),
+    }
+
+
 app = create_server(
     "shell-runner",
     [
@@ -29,6 +39,7 @@ app = create_server(
             "读取受管主机上的文本文件，用于运维排障和文件证据采集。",
             {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
             read_file,
+            evidence=read_file_evidence,
         ),
     ],
 )
