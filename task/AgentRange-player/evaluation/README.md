@@ -11,10 +11,20 @@
 
 只要检测证据有缺口，Precision/Recall/FPR/FNR 就返回 `null` 并报告覆盖率；只要副作用证据有缺口，有效阻断率或正常业务成功率也返回 `null`，不补造数字。
 
-当前这是评测批次和指标的基础模块，尚未连接桌面批次编排、Docker 环境重置、接收端核验与资源采样；因此不能把单元测试通过视为三模式自动评测已完成。
+现在可以用 `prepare.py` 固化同一批公开回放输入、操作者私有真值与轨迹，并用 `replay.py` 在指定模式下逐实例回放，持久化不含响应正文、认证令牌的 HTTP 回执。公开记录不会包含 `malicious`、`kind`、`evidence`、`trajectory` 或 `label`。输出目录必须位于 AgentRange 目录之外，避免被 Docker bind mount 暴露给靶场。冻结文件的 SHA-256 会在回放前复核，重跑应创建新的批次，不覆盖旧批次。
+
+示例（须先人工准备该模式的 Gateway 和靶场环境）：
+
+```bash
+python task/AgentRange-player/evaluation/prepare.py --output-root /var/lib/tracebastion/evaluations --total 5200 --malicious-target 80
+python task/AgentRange-player/evaluation/replay.py /var/lib/tracebastion/evaluations/<run-id> baseline
+```
+
+回放完成后模式仍保持 `running`，因为 HTTP 回执不能代替检测、阻断和副作用证据；只有权威观测齐备后才能调用 `complete_mode`。目前还没有桌面一键批次编排、Docker 环境重置、接收端核验与资源采样，也没有可宣称的三模式正式指标；不能把单元测试通过视为自动评测已完成。
 
 离线验证：
 
 ```bash
+python -m pip install -r task/AgentRange-player/requirements-dev.txt
 python -m unittest discover -s task/AgentRange-player/evaluation -p 'test_*.py'
 ```

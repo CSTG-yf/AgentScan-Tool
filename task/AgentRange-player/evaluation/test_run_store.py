@@ -51,6 +51,19 @@ class EvaluationRunTests(unittest.TestCase):
                 run.complete_mode("baseline", [], {})
             self.assertEqual(run.manifest()["modes"]["baseline"]["status"], "running")
 
+    def test_frozen_corpus_rejects_truth_leak_and_overwrite(self):
+        with tempfile.TemporaryDirectory() as root:
+            run = EvaluationRun.create(Path(root), [{"instance_id": "a", "label": "attack"}], {})
+            with self.assertRaises(ValueError):
+                run.save_corpus([{"instance_id": "a", "evidence": {"outcome": "exfiltration"}}], {})
+            self.assertNotIn("corpus", run.manifest())
+            run.save_corpus([{"instance_id": "a", "input": {"prompt": "test"}}], {"a": []})
+            manifest = run.manifest()
+            self.assertEqual(manifest["corpus"]["instances"], 1)
+            self.assertEqual(len(manifest["corpus"]["public_sha256"]), 64)
+            with self.assertRaises(ValueError):
+                run.save_corpus([{"instance_id": "a"}], {})
+
 
 if __name__ == "__main__":
     unittest.main()

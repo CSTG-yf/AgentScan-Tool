@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -77,6 +78,33 @@ class EvaluationRun:
     def manifest(self) -> dict[str, Any]:
         return _read_json(self.path / "manifest.json")
 
+    def save_corpus(self, public_events: list[dict[str, Any]], trajectories: dict[str, list[dict[str, Any]]]) -> None:
+        """Freeze one replay input for all modes without publishing private truth."""
+        manifest = self.manifest()
+        if manifest["status"] != "prepared" or "corpus" in manifest:
+            raise ValueError("corpus can only be frozen once before replay")
+        truth = _read_json(self.path / "truth.json")
+        ids = [event.get("instance_id") for event in public_events]
+        if len(ids) != len(truth) or set(ids) != {item["instance_id"] for item in truth}:
+            raise ValueError("public corpus must match private truth instance IDs")
+        if len(set(ids)) != len(ids):
+            raise ValueError("public corpus contains duplicate instance IDs")
+        if any(private in event for event in public_events for private in ("malicious", "kind", "evidence", "trajectory", "label")):
+            raise ValueError("public corpus contains private truth or trajectory fields")
+        if not set(trajectories).issubset(set(ids)):
+            raise ValueError("trajectory contains an unknown instance ID")
+        _atomic_json(self.path / "public-corpus.json", public_events)
+        _atomic_json(self.path / "trajectories.json", trajectories)
+        manifest["corpus"] = {
+            "instances": len(ids),
+            "public_path": "public-corpus.json",
+            "public_sha256": hashlib.sha256((self.path / "public-corpus.json").read_bytes()).hexdigest(),
+            "trajectories_path": "trajectories.json",
+            "trajectories_sha256": hashlib.sha256((self.path / "trajectories.json").read_bytes()).hexdigest(),
+        }
+        manifest["updated_at"] = _now()
+        _atomic_json(self.path / "manifest.json", manifest)
+
     def start_mode(self, mode: str) -> None:
         manifest = self.manifest()
         if mode not in MODES or manifest["status"] in TERMINAL:
@@ -95,6 +123,8 @@ class EvaluationRun:
         manifest = self.manifest()
         if mode not in MODES or manifest["modes"][mode]["status"] != "running":
             raise ValueError("mode is not running")
+        if "corpus" in manifest and manifest["modes"][mode].get("replay_status") != "completed":
+            raise ValueError("frozen corpus replay has not completed")
         truth = _read_json(self.path / "truth.json")
         if len(observations) != len(truth):
             raise ValueError("mode cannot complete while instance observations are missing")
@@ -109,6 +139,21 @@ class EvaluationRun:
         manifest["updated_at"] = _now()
         _atomic_json(self.path / "manifest.json", manifest)
         return report
+
+    def record_replay(self, mode: str, receipt_count: int) -> None:
+        manifest = self.manifest()
+        if mode not in MODES or manifest["modes"][mode]["status"] != "running":
+            raise ValueError("mode is not running")
+        if "corpus" not in manifest or receipt_count != manifest["corpus"]["instances"]:
+            raise ValueError("replay receipt count does not match frozen corpus")
+        manifest["modes"][mode].update({
+            "replay_status": "completed",
+            "replay_finished_at": _now(),
+            "receipt_count": receipt_count,
+            "receipts": f"{mode}-receipts.jsonl",
+        })
+        manifest["updated_at"] = _now()
+        _atomic_json(self.path / "manifest.json", manifest)
 
     def interrupt(self, mode: str, reason: str, *, cancelled: bool = False) -> None:
         manifest = self.manifest()
