@@ -4,6 +4,7 @@ import { EyeInvisibleOutlined, EyeOutlined, MenuFoldOutlined, MenuUnfoldOutlined
 import { Badge, Button, Layout, Menu, message, Modal, Result, Segmented, Space, Tag, Tooltip, Typography } from "antd";
 import {
   applyProcessGuardPolicy,
+  clearGatewayExitState,
   ensureGatewayReady,
   getAgents,
   getChanges,
@@ -12,6 +13,8 @@ import {
   getAttackChains,
   getEnvironment,
   getGatewayAudit,
+  getGatewayExitState,
+  getGatewaySettings,
   getGuardPolicy,
   getProcessGuardAudit,
   getRangeReplayStatus,
@@ -23,6 +26,7 @@ import {
   startProcessGuard,
   stopProcessGuard,
   saveDefenseMode,
+  saveGatewaySettings,
   saveGuardPolicy,
   saveScanScheduleSettings,
   saveStaticResourceScanSettings,
@@ -88,6 +92,9 @@ export default function App() {
     const saved = localStorage.getItem("tracebastion.gatewayStartup");
     return saved === "manual" || saved === "disabled" ? saved : "auto";
   });
+  // Persisted in desktop-settings.json instead of localStorage: the Rust
+  // close/exit handlers read it while no webview is running.
+  const [keepGatewayRunning, setKeepGatewayRunning] = useState(false);
 
   const persistPolicy = async (next: GuardPolicy) => {
     setSavingPolicy(true);
@@ -221,6 +228,10 @@ export default function App() {
         if (gatewayStartup === "auto") {
           const result = await ensureGatewayReady();
           if (!result.success) throw new Error(result.message || "内置 Go Gateway 启动失败");
+          // Another DefenseClaw home (CLI gateway, AgentRange session) may hold
+          // 18970; the desktop then serves from 18971+ and says so once, instead
+          // of failing or silently showing the other home's data.
+          if (result.notice) message.info({ key: "gateway-bootstrap", content: result.notice, duration: 8 });
         }
         setGatewayBootState("ready");
       } catch (error) {
@@ -231,9 +242,28 @@ export default function App() {
         return;
       }
 
-      const settings = await Promise.allSettled([getScanScheduleSettings(), getStaticResourceScanSettings()]);
+      const settings = await Promise.allSettled([
+        getScanScheduleSettings(),
+        getStaticResourceScanSettings(),
+        getGatewaySettings(),
+        getGatewayExitState(),
+      ]);
       if (settings[0].status === "fulfilled") setScanSettings(settings[0].value);
       if (settings[1].status === "fulfilled") setStaticScanSettings(settings[1].value);
+      if (settings[2].status === "fulfilled") setKeepGatewayRunning(settings[2].value.keepRunningOnClose);
+      // Surface a previous exit that could not stop the gateway. The window
+      // is gone by then, so this warning on the next launch is the only place
+      // the user can learn about a surviving listener.
+      if (settings[3].status === "fulfilled" && settings[3].value && !settings[3].value.stopped) {
+        Modal.warning({
+          title: "上次退出时未能停止 Gateway",
+          content: `${settings[3].value.message || "Gateway 可能仍在后台运行。"}请在此页面点“停止”，或在正确的 home 下执行 defenseclaw-gateway stop。`,
+          okText: "我知道了",
+          onOk: () => { void clearGatewayExitState().catch(() => undefined); },
+        });
+      } else if (settings[3].status === "fulfilled" && settings[3].value?.stopped) {
+        void clearGatewayExitState().catch(() => undefined);
+      }
       await refresh();
   };
 
@@ -245,6 +275,21 @@ export default function App() {
     localStorage.setItem("tracebastion.gatewayStartup", value);
     setGatewayStartup(value);
     message.success("Gateway 启动方式已保存");
+  };
+
+  const changeKeepGatewayRunning = async (value: boolean) => {
+    const previous = keepGatewayRunning;
+    setKeepGatewayRunning(value);
+    try {
+      const saved = await saveGatewaySettings({ keepRunningOnClose: value });
+      setKeepGatewayRunning(saved.keepRunningOnClose);
+      message.success(saved.keepRunningOnClose
+        ? "已开启：关闭窗口后窗口会收进系统托盘；若托盘里看不到图标，请展开任务栏的“隐藏的图标”(^)，把 TraceBastion 拖到任务栏上固定"
+        : "关闭窗口时将停止网关并退出");
+    } catch (error) {
+      setKeepGatewayRunning(previous);
+      message.error(`保存关闭窗口行为失败：${String(error)}`);
+    }
   };
 
   const changeCursorRef = useRef(0);
@@ -632,11 +677,13 @@ export default function App() {
             guardComponent={guardComponent}
             defenseMode={defenseMode}
             gatewayStartup={gatewayStartup}
+            keepGatewayRunning={keepGatewayRunning}
             refreshedAt={environment?.capturedAt}
             busy={loading}
             onRefresh={() => void refresh()}
             onGatewayAction={(action) => void requestGatewayAction(action)}
             onGatewayStartupChange={changeGatewayStartup}
+            onKeepGatewayRunningChange={(value) => void changeKeepGatewayRunning(value)}
             onGuardAction={(action) => void requestGuardAction(action)}
           />
         );

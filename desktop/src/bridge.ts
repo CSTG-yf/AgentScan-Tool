@@ -16,6 +16,8 @@ import type {
   ConnectorProfilesResponse,
   EnvironmentSnapshot,
   GatewayAuditSnapshot,
+  GatewayDesktopSettings,
+  GatewayExitState,
   GovernanceAdmissionEvaluateInput,
   GovernanceAdmissionEvaluateResponse,
   GovernanceAdmissionMatrixResponse,
@@ -1162,6 +1164,8 @@ export interface LifecycleResult {
   action: string;
   success: boolean;
   message: string;
+  /** Set when the desktop had to leave 18970 because another DefenseClaw home holds it. */
+  notice?: string;
 }
 
 export async function startProcessGuard(): Promise<void> {
@@ -1184,6 +1188,37 @@ export async function ensureGatewayReady(): Promise<LifecycleResult> {
 export async function setGatewayRunning(running: boolean): Promise<LifecycleResult> {
   if (!inTauri()) throw new Error("仅桌面应用可以控制网关");
   return invoke<LifecycleResult>(running ? "start_gateway" : "stop_gateway");
+}
+
+/**
+ * Reads the desktop-level gateway preference. In browser preview the setting
+ * is meaningless (there is no window to close and no managed gateway), so the
+ * default "stop on close" is returned instead of throwing.
+ */
+export async function getGatewaySettings(): Promise<GatewayDesktopSettings> {
+  if (!inTauri()) return { keepRunningOnClose: false };
+  return invoke<GatewayDesktopSettings>("get_gateway_settings");
+}
+
+export async function saveGatewaySettings(
+  settings: GatewayDesktopSettings,
+): Promise<GatewayDesktopSettings> {
+  if (!inTauri()) return settings;
+  return invoke<GatewayDesktopSettings>("set_gateway_settings", { settings });
+}
+
+/**
+ * Result of the gateway stop performed while the desktop was last closed.
+ * `null` means the previous exit left nothing to report.
+ */
+export async function getGatewayExitState(): Promise<GatewayExitState | null> {
+  if (!inTauri()) return null;
+  return invoke<GatewayExitState | null>("get_gateway_exit_state");
+}
+
+export async function clearGatewayExitState(): Promise<void> {
+  if (!inTauri()) return;
+  await invoke("clear_gateway_exit_state");
 }
 
 export async function getRangeStatus(): Promise<RangeStatus> {

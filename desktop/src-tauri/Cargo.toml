@@ -18,7 +18,7 @@ tauri-build = { version = "2", features = [] }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 windows-service = "0.8.1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 quick-xml = "0.37"

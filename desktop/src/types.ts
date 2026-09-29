@@ -5,6 +5,8 @@ export interface EnvironmentComponent {
   label: string;
   state: ComponentState;
   detail: string;
+  /** Concrete address this component is reached at (gateway port is dynamic). */
+  endpoint?: string;
   version?: string;
   requiresElevation?: boolean;
 }
@@ -870,6 +872,23 @@ export interface StaticResourceScanSettings {
   promptIntervalMin: number;
   credentialIntervalMin: number;
   environmentIntervalMin: number;
+}
+
+/**
+ * Desktop-level gateway preferences. Unlike the localStorage-only settings in
+ * App.tsx these live in `desktop-settings.json`, because the Rust close/exit
+ * handlers have to read them while no webview is running.
+ */
+export interface GatewayDesktopSettings {
+  /** When true, closing the window hides it to the tray and the gateway keeps running. */
+  keepRunningOnClose: boolean;
+}
+
+/** Outcome of the gateway stop performed during the previous exit. */
+export interface GatewayExitState {
+  stopped: boolean;
+  message: string;
+  recordedAt: string;
 }
 
 export type StaticRisk = "critical" | "high" | "medium" | "low" | "info";
