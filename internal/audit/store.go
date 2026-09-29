@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -186,6 +187,24 @@ type ActionEntry struct {
 type Store struct {
 	db                      *sql.DB
 	runtimeSettingsRevision atomic.Uint64
+	agentrangeRuntimeCache  agentrangeRuntimeCache
+}
+
+type agentrangeRuntimeCache struct {
+	mu         sync.Mutex
+	agents     map[string]cachedAgentRangeAgent
+	sessions   map[agentrangeSessionKey]time.Time
+	generation uint64
+}
+
+type agentrangeSessionKey struct {
+	agentID   string
+	sessionID string
+}
+
+type cachedAgentRangeAgent struct {
+	agent   CanonicalAgent
+	expires time.Time
 }
 
 // auditPragmas is the pragma set applied to every connection in the

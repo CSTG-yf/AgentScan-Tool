@@ -90,6 +90,7 @@ def load_audit_events(audit_db: Path) -> list[dict[str, Any]]:
             "connector": row["connector"] or structured.get("connector") or "agentrange",
             "trace_id": row["trace_id"] or structured.get("trace_id") or "",
             "session_id": row["session_id"] or structured.get("session_id") or "",
+            "instance_id": structured.get("instance_id") or row["session_id"] or structured.get("session_id") or "",
             "destination_app": row["destination_app"] or structured.get("destination") or "",
             "tool_name": row["tool_name"] or structured.get("tool_name") or "",
             "mcp_server": structured.get("mcp_server") or "",
@@ -174,7 +175,7 @@ def event_summary(event: dict[str, Any]) -> str:
 def build_chains(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for event in events:
-        key = str(event.get("session_id") or event.get("trace_id") or event.get("event_id"))
+        key = str(event.get("instance_id") or event.get("session_id") or event.get("trace_id") or event.get("event_id"))
         grouped[key].append(event)
     chains: list[dict[str, Any]] = []
     for key in sorted(grouped):
@@ -194,19 +195,24 @@ def build_chains(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "stage": event.get("stage"),
                     "asset_id": event.get("destination_app") or event.get("proxy_kind") or "agentrange",
                     "summary": event_summary(event),
+                    "evidence_level": "direct" if event.get("raw_ref") else "time_window_inference",
                     "decision": event.get("decision"),
                     "severity": event.get("severity"),
-                    "raw_ref": event.get("raw_ref"),
+                    "raw_ref": str(event.get("raw_ref") or ""),
                     "tool_name": event.get("tool_name"),
                     "reason": event.get("reason"),
                 }
             )
             if index > 1:
-                edges.append({"from": f"n{index - 1}", "to": node_id, "relation": "observed_before"})
+                edges.append({
+                    "from": f"n{index - 1}", "to": node_id,
+                    "relation": "observed_before", "evidence_level": "time_window_inference",
+                })
         chains.append(
             {
                 "chain_id": f"chain:{key}",
-                "session_id": key,
+                "instance_id": key,
+                "session_id": rows[0].get("session_id") or key,
                 "trace_id": rows[0].get("trace_id") or key,
                 "blocked": block_node_id is not None,
                 "block_node_id": block_node_id,

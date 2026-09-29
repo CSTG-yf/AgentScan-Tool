@@ -11,6 +11,7 @@ import yaml
 from integration.static_inventory import (
     DEFAULT_CONTRACTS_DIR,
     DEFAULT_RANGE_ROOT,
+    DEFAULT_TAXONOMY,
     asset_for_source,
     compose_service_lines,
     discover_assets,
@@ -22,6 +23,187 @@ from integration.static_eval import evaluate
 
 
 class AgentRangeStaticInventoryTest(unittest.TestCase):
+    def test_structured_config_holdout_ignores_comments_and_placeholders(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arena = root / "arena"
+            arena.mkdir()
+            (arena / "docker-compose.yml").write_text("""
+services:
+  assistant-app:
+    environment:
+      LLM_BASE: http://model:8000/v1
+      JWT_SECRET: weak-rotated-key
+      OPSPILOT_PROPAGATION: service_account
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+  langflow-engine:
+    image: langflowai/langflow:1.8
+    build: ./langflow-engine
+    environment:
+      LANGFLOW_AUTO_LOGIN: true
+      LANGFLOW_SKIP_AUTH_AUTO_LOGIN: false
+""".lstrip(), encoding="utf-8")
+            (arena / ".env.example").write_text("""
+# JWT_SECRET=change-me-weak-secret
+JWT_SECRET=dev-secret-123
+POSTGRES_PASSWORD='other-password'
+OPSPILOT_SERVICE_TOKEN=${SERVICE_TOKEN}
+export LANGFLOW_AUTO_LOGIN=true
+LANGFLOW_SKIP_AUTH_AUTO_LOGIN=false
+LANGFLOW_SUPERUSER_PASSWORD=${LF_PASSWORD}
+""".lstrip(), encoding="utf-8")
+            app = arena / "assistant-app" / "api"
+            app.mkdir(parents=True)
+            (app / "app.py").write_text("# Agent entrypoint\n", encoding="utf-8")
+            (app.parent / "settings.yaml").write_text("""
+JWT_SECRET: ${JWT_SECRET}
+POSTGRES_PASSWORD: ${DB_PASSWORD}
+LANGFLOW_AUTO_LOGIN: false
+note: "JWT_SECRET=change-me-weak-secret"
+""".lstrip(), encoding="utf-8")
+            framework = arena / "langflow-engine"
+            framework.mkdir()
+            (framework / "Dockerfile").write_text("""
+# ENV LANGFLOW_SUPERUSER_PASSWORD=admin
+FROM python:3.12-slim
+ENV LANGFLOW_SUPERUSER_PASSWORD=separatepass
+""".lstrip(), encoding="utf-8")
+
+            contract_dir = root / "scanner-contract"
+            contract_dir.mkdir()
+            (contract_dir / "assets.yaml").write_text("assets: []\nedges: []\n", encoding="utf-8")
+            scan_path = root / "scan.json"
+            scan_path.write_text(
+                json.dumps(scan(arena, contracts_dir=contract_dir, taxonomy_path=DEFAULT_TAXONOMY)),
+                encoding="utf-8",
+            )
+            digest = hashlib.sha256()
+            for path in sorted(path for path in arena.rglob("*") if path.is_file()):
+                digest.update(path.relative_to(arena).as_posix().encode("utf-8"))
+                digest.update(hashlib.sha256(path.read_bytes()).hexdigest().encode("ascii"))
+            truth_path = root / "holdout-truth.yaml"
+            truth_path.write_text(yaml.safe_dump({
+                "arena_sha256": digest.hexdigest(),
+                "asset_ids": ["agent.assistant", "framework.langflow-engine"],
+                "risk_pairs": [
+                    ["AR-CONFIG-WEAK-JWT", "agent.assistant"],
+                    ["AR-CONFIG-SERVICE-ACCOUNT", "agent.assistant"],
+                    ["AR-CONFIG-PLAINTEXT-PASSWORD", "agent.assistant"],
+                    ["AR-CONFIG-LANGFLOW-AUTOLOGIN", "framework.langflow-engine"],
+                    ["AR-CONFIG-PLAINTEXT-PASSWORD", "framework.langflow-engine"],
+                ],
+            }), encoding="utf-8")
+            result = evaluate(scan_path, truth_path, arena)
+            self.assertEqual((result["asset"]["fp"], result["asset"]["fn"]), (0, 0))
+            self.assertEqual((result["risk"]["fp"], result["risk"]["fn"]), (0, 0))
+            findings = json.loads(scan_path.read_text(encoding="utf-8"))["findings"]
+            self.assertIn(
+                ("AR-CONFIG-LANGFLOW-AUTOLOGIN", "framework.langflow-engine", ".env.example"),
+                {(row["rule_id"], row["asset_id"], row["source"]) for row in findings},
+            )
+
+    def test_mutated_layout_holdout_uses_independent_truth(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arena = root / "arena"
+            arena.mkdir()
+            (arena / "docker-compose.yml").write_text("""
+services:
+  assistant:
+    build: ./services/assistant
+    environment:
+      LLM_BASE: http://model-core:8000/v1
+      MODEL_NAME: nova-v2
+      MCP_NOTES: http://sync-worker:8000/mcp
+      MCP_BAD: http://[broken
+    ports: ["127.0.0.1:8100:8000", "8101:8001"]
+  model-core:
+    build: ./services/model
+  helper:
+    environment:
+      LLM_BASE: http://model-core:8000/v1
+  sync-worker:
+    build: ./services/tools
+    environment: {SERVER: sync.entrypoint}
+  standalone-service:
+    build: ./services/extra
+    environment: {SERVER: extra.server}
+  unrelated-worker:
+    build: ./workers
+    environment: {SERVER: worker.server}
+""".lstrip(), encoding="utf-8")
+            agent = arena / "services" / "assistant" / "api"
+            agent.mkdir(parents=True)
+            (agent / "app.py").write_text(
+                'import os\nDEFAULT_MODEL = os.getenv("MODEL_NAME", "fallback")\n', encoding="utf-8",
+            )
+            (agent.parent / "unsafe.py").write_text(
+                'import subprocess\ndef execute(cmd):\n    subprocess.run(cmd, shell=True)\n', encoding="utf-8",
+            )
+            model = arena / "services" / "model"
+            model.mkdir(parents=True)
+            (model / "app.py").write_text("# Model endpoint\n", encoding="utf-8")
+            helper = arena / "helper" / "api"
+            helper.mkdir(parents=True)
+            (helper / "app.py").write_text(
+                'import os\nDEFAULT_MODEL = os.environ.get("MODEL_ID", "aux-v1")\n', encoding="utf-8",
+            )
+            renamed_mcp = arena / "services" / "tools" / "sync"
+            renamed_mcp.mkdir(parents=True)
+            (renamed_mcp / "entrypoint.py").write_text(
+                'import subprocess\ndef execute(cmd):\n    subprocess.run(cmd, shell=True)\n', encoding="utf-8",
+            )
+            standalone_mcp = arena / "services" / "extra" / "extra"
+            standalone_mcp.mkdir(parents=True)
+            (standalone_mcp / "server.py").write_text(
+                'from mcp.server.fastmcp import FastMCP\napp = FastMCP("standalone")\n', encoding="utf-8",
+            )
+            unrelated = arena / "workers" / "worker"
+            unrelated.mkdir(parents=True)
+            (unrelated / "server.py").write_text("def serve():\n    return 1\n", encoding="utf-8")
+            nested_skill = arena / "skills" / "group" / "audit"
+            nested_skill.mkdir(parents=True)
+            (nested_skill / "SKILL.md").write_text("# Audit\n", encoding="utf-8")
+
+            contract_dir = root / "scanner-contract"
+            contract_dir.mkdir()
+            (contract_dir / "assets.yaml").write_text("assets: []\nedges: []\n", encoding="utf-8")
+            report = scan(arena, contracts_dir=contract_dir, taxonomy_path=DEFAULT_TAXONOMY)
+            report_path = root / "scan.json"
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+
+            digest = hashlib.sha256()
+            for path in sorted(path for path in arena.rglob("*") if path.is_file()):
+                digest.update(path.relative_to(arena).as_posix().encode("utf-8"))
+                digest.update(hashlib.sha256(path.read_bytes()).hexdigest().encode("ascii"))
+            truth_path = root / "holdout-truth.yaml"
+            truth_path.write_text(yaml.safe_dump({
+                "arena_sha256": digest.hexdigest(),
+                "asset_ids": [
+                    "agent.assistant", "model.nova-v2", "agent.helper", "model.aux-v1",
+                    "mcp.sync-worker", "mcp.standalone-service",
+                    "skill.group.audit", "port.assistant.8100", "port.assistant.8101",
+                ],
+                "risk_pairs": [
+                    ["AR-STATIC-SHELL-TRUE", "mcp.sync-worker"],
+                    ["AR-STATIC-SHELL-TRUE", "agent.assistant"],
+                ],
+            }), encoding="utf-8")
+            evaluation = evaluate(report_path, truth_path, arena)
+            self.assertEqual((evaluation["asset"]["fp"], evaluation["asset"]["fn"]), (0, 0))
+            self.assertEqual((evaluation["risk"]["fp"], evaluation["risk"]["fn"]), (0, 0))
+            self.assertNotIn("mcp.unrelated-worker", {asset["id"] for asset in report["assets"]})
+            self.assertEqual(discover_assets(arena)["agent.assistant"]["source"], "services/assistant/api/app.py")
+            self.assertEqual(discover_assets(arena)["model.nova-v2"]["source"], "services/model/app.py")
+            self.assertIn(renamed_mcp / "entrypoint.py", set(iter_sources(arena, discover_assets(arena))))
+            compose_path = arena / "docker-compose.yml"
+            compose_path.write_text(
+                compose_path.read_text(encoding="utf-8").replace(
+                    "LLM_BASE: http://model-core:8000/v1", "LLM_BASE: http://[broken",
+                ), encoding="utf-8",
+            )
+            self.assertIn("agent.assistant", discover_assets(arena))
+
     def test_python_risks_follow_syntax_not_comments_or_spacing(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "server.py"

@@ -126,7 +126,7 @@ func (a *APIServer) beginInspectRuntime(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	started := time.Now()
-	id, err := a.store.RecordRuntimeEvent(audit.RuntimeEventInput{
+	id, err := a.store.RecordAgentRangeRuntimeEvent(audit.RuntimeEventInput{
 		IngestKey: c.key(), EventType: kind, EventSource: audit.RuntimeSourceGuardrail,
 		// Agent identity is server-owned; request context cannot impersonate
 		// an arbitrary canonical inventory id or executable.
@@ -296,7 +296,7 @@ func (a *APIServer) handleInspectRuntimeResult(w http.ResponseWriter, r *http.Re
 	if req.Outcome == "rejected" || req.Outcome == "response_blocked" {
 		outcome = "blocked"
 	}
-	id, err := a.store.RecordRuntimeEvent(audit.RuntimeEventInput{IngestKey: c.key(), EventType: audit.RuntimeEventContentInspected, EventSource: audit.RuntimeSourceProxy, AgentName: "AgentRange / OpsPilot", SessionID: c.SessionID, TraceID: c.TraceID, Operation: "proxy.result", Outcome: outcome, Target: safeRuntimeLabel(c.ProxyKind), Attributes: map[string]any{"connector": "agentrange", "call_id": c.CallID, "phase": "result", "proxy_kind": c.ProxyKind, "operation_result": req.Outcome, "http_status": req.HTTPStatus, "inspection_event_ids": req.InspectionEventIDs}})
+	id, err := a.store.RecordAgentRangeRuntimeEvent(audit.RuntimeEventInput{IngestKey: c.key(), EventType: audit.RuntimeEventContentInspected, EventSource: audit.RuntimeSourceProxy, AgentName: "AgentRange / OpsPilot", SessionID: c.SessionID, TraceID: c.TraceID, Operation: "proxy.result", Outcome: outcome, Target: safeRuntimeLabel(c.ProxyKind), Attributes: map[string]any{"connector": "agentrange", "call_id": c.CallID, "phase": "result", "proxy_kind": c.ProxyKind, "operation_result": req.Outcome, "http_status": req.HTTPStatus, "inspection_event_ids": req.InspectionEventIDs}})
 	if err == nil {
 		ev, exists, readErr := a.store.GetRuntimeEvent(id)
 		if readErr != nil || !exists {

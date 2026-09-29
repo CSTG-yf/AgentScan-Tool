@@ -5,17 +5,27 @@ not an official hidden-set result. The arena SHA-256 manifest is
 `bcd51ef41b2bfd2871a06e03e6835d26c41e45436e86121c722981b06dcc5d5b`.
 Ground truth was used by the offline scorer, not the online detector.
 
-| Measure | Pooled retry full action | Earlier full matched-rate pair | Earlier natural-rate action | 1,000-event matched-rate pair |
-| --- | ---: | ---: | ---: | ---: |
-| Events / attacks | 5,200 / 80 | 5,200 / 80 | 5,200 / 80 | 1,000 / 16 |
-| True positives / false negatives / unknown | 80 / 0 / 0 | 80 / 0 / 0 | 80 / 0 / 0 | 16 / 0 / 0 |
-| False positives | 0 | 0 | 0 | 0 |
-| Normal business successes | 5,120 / 5,120 | 5,120 / 5,120 | 5,120 / 5,120 | 984 / 984 |
-| Inspection p95 | 128 ms (5,200/5,200) | 157 ms (5,200/5,200) | 175 ms | 115 ms |
-| End-to-end p95 | 548.247 ms | 955.270 ms | 1,003.966 ms | 861.870 ms |
-| Per-container CPU p95 increment | Unverified against same code | 1.45 percentage points | Unverified | 1.14 percentage points |
-| Host Gateway plus defense containers CPU p95 | 4.240% | 4.867% | Unverified | Unverified |
-| Inspection unavailable events / affected instances | 8 / 6 | 1,582 / 1,190 | Unmeasured | Unmeasured |
+| Measure | Agent transaction full pair | Pooled retry full action | Earlier full matched-rate pair | Earlier natural-rate action | 1,000-event matched-rate pair |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Events / attacks | 5,200 / 80 | 5,200 / 80 | 5,200 / 80 | 5,200 / 80 | 1,000 / 16 |
+| True positives / false negatives / unknown | 80 / 0 / 0 | 80 / 0 / 0 | 80 / 0 / 0 | 80 / 0 / 0 | 16 / 0 / 0 |
+| False positives | 0 | 0 | 0 | 0 | 0 |
+| Normal business successes | 5,120 / 5,120 | 5,120 / 5,120 | 5,120 / 5,120 | 5,120 / 5,120 | 984 / 984 |
+| Inspection p95 | 145 ms (5,200/5,200) | 128 ms (5,200/5,200) | 157 ms (5,200/5,200) | 175 ms | 115 ms |
+| End-to-end p95 | 667.005 ms | 548.247 ms | 955.270 ms | 1,003.966 ms | 861.870 ms |
+| Per-container CPU p95 increment | 1.08 percentage points | Unverified against same code | 1.45 percentage points | Unverified | 1.14 percentage points |
+| Host Gateway plus defense containers CPU p95 | 5.015% | 4.240% | 4.867% | Unverified | Unverified |
+| Inspection unavailable events / affected instances | 33 / 24 | 8 / 6 | 1,582 / 1,190 | Unmeasured | Unmeasured |
+
+The agent transaction action and baseline each exited 0 with 5,200 valid
+observations, identical commit, arena, public corpus, seed, and semantic truth
+hashes. The measured throughput ratio was 1.001, all 19 containers matched,
+and the host and container CPU windows were complete. Per-container CPU p95
+increment passed the local 5-point gate, while 33 unavailable inspections and
+5.015% combined defense CPU p95 failed their local gates. The action audit join
+covered all 5,200 instances; the 33 unavailable events affected 24 benign
+instances. This pair used the pre-cache Gateway binary and is retained at
+`bench/runs/20260929-agent-tx-full-rate150-v1/{action,baseline}`.
 
 The earlier full pair uses the same 5,200-event public corpus and semantic
 ground truth (seed 1337, 80 attacks, arena hash above) in baseline and action,
@@ -94,8 +104,8 @@ identity, and writes the Agent and aliases in one transaction. Its same-input
 p95, 124 ms inspection p95, and 4.147% combined defense CPU p95. The diagnostic
 and candidate runs are at `bench/runs/20260929-diagnostic-backfill-1k-v1/action`
 and `bench/runs/20260929-agent-tx-rate150-1k/action`. The latter has complete
-host and container CPU samples, but no same-code baseline. A new 5,200-event
-action replay and matched-rate, same-code baseline are still required.
+host and container CPU samples, but no same-code baseline; the full pair above
+supplies that comparison for the pre-cache Gateway.
 
 The earlier natural-rate action replay had an end-to-end p95 that exceeded
 the local 1,000 ms gate by 3.966 ms, even though its inspection p95 is below
@@ -115,14 +125,14 @@ before scoring.
 The frozen local static fixture reports 27/27 assets and 13/13 risk pairs,
 with no false positives or misses. It covers this arena hash only and does not
 measure unseen assets or attack variants. Current Python-focused tests pass
-(43 tests); the targeted Go AgentRange rule test also passes. The broad Go
+(43 tests); targeted audit and Gateway runtime Go tests also pass. The broad Go
 gateway test package has unrelated Windows-only failures in WSL/bash, Unix
 permission, and symlink-dependent cases.
 
 Raw observations, resource samples, audit databases, and generated reports are
-kept under ignored local run directories. The latest score is at
-`bench/runs/20260929-full-rate150-v2/action/summary.json`, paired with
-`bench/runs/20260929-full-rate150-v1/baseline`. The earlier matched-rate action
+kept under ignored local run directories. The latest completed paired score is at
+`bench/runs/20260929-agent-tx-full-rate150-v1/action/summary.json`, paired with
+`bench/runs/20260929-agent-tx-full-rate150-v1/baseline`. The earlier matched-rate action
 is at `bench/runs/20260929-full-rate150-v1/action`. Older scores remain at
 `bench/runs/20260929-full-v6/action` and
 `bench/runs/20260929-cpu-rate120-1k/{baseline,action}`. Do not combine the

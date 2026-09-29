@@ -530,7 +530,10 @@ def _score_resources(
         if action_manifest.get("mode") != "action" or baseline_manifest.get("mode") != "baseline":
             manifest_compatibility = "mode_mismatch"
         else:
-            for key in ("ground_truth_semantic_sha256", "seed", "total", "malicious_target", "arena_sha256"):
+            for key in (
+                "ground_truth_semantic_sha256", "public_corpus_sha256", "git_commit",
+                "seed", "total", "malicious_target", "arena_sha256",
+            ):
                 action_value = action_manifest.get(key)
                 baseline_value = baseline_manifest.get(key)
                 if action_value is None or baseline_value is None:

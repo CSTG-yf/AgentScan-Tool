@@ -6,6 +6,7 @@ import argparse
 import ast
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -24,6 +25,12 @@ PYTHON_AST_RULES = {
     "AR-STATIC-HIDDEN-TOOL",
     "AR-STATIC-SHELL-TRUE",
     "AR-STATIC-ARBITRARY-FILE",
+}
+CONFIG_RULES = {
+    "AR-CONFIG-WEAK-JWT",
+    "AR-CONFIG-SERVICE-ACCOUNT",
+    "AR-CONFIG-PLAINTEXT-PASSWORD",
+    "AR-CONFIG-LANGFLOW-AUTOLOGIN",
 }
 
 
@@ -59,6 +66,31 @@ def python_ast_matches(path: Path) -> dict[str, set[int]]:
     return matches
 
 
+def _mcp_module(path: Path) -> bool:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (SyntaxError, UnicodeError, OSError):
+        return False
+    mcp_import = any(
+        isinstance(node, ast.ImportFrom) and "mcp" in (node.module or "").casefold()
+        or isinstance(node, ast.Import) and any("mcp" in alias.name.casefold() for alias in node.names)
+        for node in ast.walk(tree)
+    )
+    calls = {
+        node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+        for node in ast.walk(tree) if isinstance(node, ast.Call)
+        and isinstance(node.func, (ast.Name, ast.Attribute))
+    }
+    return "FastMCP" in calls or (mcp_import and "create_server" in calls)
+
+
+def _hostname(value: str) -> str:
+    try:
+        return urlsplit(value).hostname or ""
+    except ValueError:
+        return ""
+
+
 def iter_sources(root: Path, discovered: dict[str, dict[str, str]]):
     scan_roots = {"docker-compose.yml", ".env.example"}
     for asset in discovered.values():
@@ -87,8 +119,7 @@ def _environment(service: dict) -> dict[str, str]:
     return {}
 
 
-def _default_model(root: Path, agent_name: str) -> str | None:
-    path = root / agent_name / "api" / "app.py"
+def _default_model(path: Path, env: dict[str, str]) -> str | None:
     if not path.is_file():
         return None
     try:
@@ -101,6 +132,27 @@ def _default_model(root: Path, agent_name: str) -> str | None:
         ):
             if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
                 return node.value.value
+            value = node.value
+            if not isinstance(value, ast.Call) or not value.args or not isinstance(value.args[0], ast.Constant):
+                continue
+            key = value.args[0].value
+            if not isinstance(key, str):
+                continue
+            getenv = isinstance(value.func, ast.Attribute) and (
+                (isinstance(value.func.value, ast.Name) and value.func.value.id == "os" and value.func.attr == "getenv")
+                or (isinstance(value.func.value, ast.Attribute) and isinstance(value.func.value.value, ast.Name)
+                    and value.func.value.value.id == "os" and value.func.value.attr == "environ"
+                    and value.func.attr == "get")
+            )
+            if not getenv:
+                continue
+            configured = env.get(key, "")
+            if configured.startswith("${") and configured.endswith("}") and ":-" in configured:
+                configured = configured[2:-1].split(":-", 1)[1]
+            if configured and "$" not in configured:
+                return configured
+            if len(value.args) > 1 and isinstance(value.args[1], ast.Constant) and isinstance(value.args[1].value, str):
+                return value.args[1].value
     return None
 
 
@@ -110,6 +162,12 @@ def discover_assets(root: Path) -> dict[str, dict[str, str]]:
     compose = load_yaml(compose_path)
     services = compose.get("services") or {}
     discovered: dict[str, dict[str, str]] = {}
+    mcp_references = {
+        hostname
+        for service in services.values() if isinstance(service, dict)
+        for key, value in _environment(service).items() if key.startswith("MCP_")
+        if (hostname := _hostname(value))
+    }
 
     def add(asset_id: str, kind: str, name: str, source: str, service_name: str = "") -> None:
         discovered[asset_id] = {"id": asset_id, "type": kind, "name": name, "source": source}
@@ -124,25 +182,32 @@ def discover_assets(root: Path) -> dict[str, dict[str, str]]:
         build = service.get("build") or ""
         build_context = build if isinstance(build, str) else str(build.get("context") or "") if isinstance(build, dict) else ""
         service_source = "docker-compose.yml"
+        context = str(build_context).removeprefix("./")
+        module = str(env.get("SERVER") or "").split(":", 1)[0].replace(".", "/")
+        candidate = f"{context}/{module}.py" if context and module else ""
+        module_source_exists = bool(candidate and (root / candidate).is_file())
         if "SERVER" in env and (
             service_name.startswith("mcp-")
             or Path(build_context).name.startswith("mcp")
             or image.rsplit("/", 1)[-1].startswith("mcp-")
+            or service_name in mcp_references
+            or (module_source_exists and _mcp_module(root / candidate))
         ):
             name = service_name.removeprefix("mcp-")
-            module = str(env["SERVER"]).split(".", 1)[0]
-            context = str(build_context).removeprefix("./") or "mcp"
-            candidate = f"{context}/{module}/server.py"
+            context = context or "mcp"
+            candidate = f"{context}/{module}.py"
             source = candidate if (root / candidate).is_file() else service_source
             add(f"mcp.{name}", "mcp_server", name, source, service_name)
         elif "LLM_BASE" in env:
             name = service_name.removesuffix("-app")
-            candidate = f"{service_name}/api/app.py"
-            source = candidate if (root / candidate).is_file() else service_source
+            candidates = [f"{service_name}/api/app.py"]
+            if context:
+                candidates.append(f"{context}/api/app.py")
+            source = next((item for item in candidates if (root / item).is_file()), service_source)
             add(f"agent.{name}", "agent", name, source, service_name)
-            model = _default_model(root, service_name)
+            model = _default_model(root / source, env)
             if model:
-                model_service_name = urlsplit(env["LLM_BASE"]).hostname or ""
+                model_service_name = _hostname(env["LLM_BASE"])
                 model_service = services.get(model_service_name) or {}
                 model_build = (model_service.get("build") or "") if isinstance(model_service, dict) else ""
                 if isinstance(model_build, str):
@@ -152,8 +217,13 @@ def discover_assets(root: Path) -> dict[str, dict[str, str]]:
                 else:
                     model_context = ""
                 model_root = model_context.removeprefix("./")
-                model_candidate = f"{model_root}/{model_service_name.replace('-', '_')}/app.py"
-                model_source = model_candidate if model_root and (root / model_candidate).is_file() else source
+                model_candidates = (
+                    f"{model_root}/{model_service_name.replace('-', '_')}/app.py",
+                    f"{model_root}/api/app.py", f"{model_root}/app.py",
+                )
+                model_source = next(
+                    (item for item in model_candidates if model_root and (root / item).is_file()), source,
+                )
                 add(f"model.{model}", "model", model, model_source)
         elif "langflow" in service_name.lower() or "langflow" in image:
             candidate = f"{str(build_context).removeprefix('./')}/Dockerfile"
@@ -166,17 +236,25 @@ def discover_assets(root: Path) -> dict[str, dict[str, str]]:
         port_name = service_name.removesuffix("-app")
         if image.startswith("postgres:"):
             port_name = "postgres"
+        published_ports = []
         for port in service.get("ports") or []:
-            host_port = str(port).split(":")[0] if isinstance(port, str) else str(port.get("published") or "")
+            parts = port.rsplit(":", 2) if isinstance(port, str) else []
+            host_port = parts[-2] if len(parts) >= 2 else str(port.get("published") or "") if isinstance(port, dict) else ""
             if host_port:
-                add(f"port.{port_name}", "host_port", host_port, service_source)
+                published_ports.append(host_port)
+        for host_port in published_ports:
+            asset_id = f"port.{port_name}"
+            if len(published_ports) > 1:
+                asset_id += f".{host_port}"
+            add(asset_id, "host_port", host_port, service_source)
 
     for network_name in (compose.get("networks") or {}):
         name = str(network_name).removesuffix("-net")
         add(f"network.{name}", "network", str(network_name), "docker-compose.yml")
-    for skill_file in sorted((root / "skills").glob("*/SKILL.md")):
+    for skill_file in sorted((root / "skills").rglob("SKILL.md")):
+        skill_path = skill_file.parent.relative_to(root / "skills")
         name = skill_file.parent.name
-        add(f"skill.{name}", "skill", name, skill_file.relative_to(root).as_posix())
+        add(f"skill.{'.'.join(skill_path.parts)}", "skill", name, skill_file.relative_to(root).as_posix())
     return discovered
 
 
@@ -194,6 +272,79 @@ def compose_service_lines(path: Path) -> dict[int, str]:
                         lines[line] = service_key.value
             return lines
     return {}
+
+
+def _assignment(value: str) -> tuple[str, str] | None:
+    if "=" not in value:
+        return None
+    key, raw = value.split("=", 1)
+    key = key.strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", key):
+        return None
+    raw = raw.strip()
+    if raw.startswith(("'", '"')) and raw.endswith(raw[0]):
+        raw = raw[1:-1]
+    else:
+        raw = raw.split(" #", 1)[0].strip()
+    return key, raw
+
+
+def _config_entries(path: Path):
+    if path.suffix.lower() in {".yaml", ".yml"}:
+        try:
+            document = yaml.compose(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, yaml.YAMLError):
+            return
+
+        def walk(node):
+            if not isinstance(node, yaml.MappingNode):
+                return
+            for key, value in node.value:
+                if not isinstance(key, yaml.ScalarNode):
+                    continue
+                if isinstance(value, yaml.ScalarNode):
+                    yield key.start_mark.line + 1, key.value, value.value
+                elif key.value == "environment" and isinstance(value, yaml.SequenceNode):
+                    for item in value.value:
+                        if isinstance(item, yaml.ScalarNode) and (entry := _assignment(item.value)):
+                            yield item.start_mark.line + 1, *entry
+                yield from walk(value)
+
+        if document is not None:
+            yield from walk(document)
+    elif path.name == "Dockerfile" or path.suffix.lower() in {".env", ".example"}:
+        for line_number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if path.name == "Dockerfile":
+                if not stripped.startswith("ENV "):
+                    continue
+                stripped = stripped[4:].strip()
+            elif stripped.startswith("export "):
+                stripped = stripped[7:].strip()
+            if entry := _assignment(stripped):
+                yield line_number, *entry
+
+
+def _config_rule_ids(key: str, value: str) -> set[str]:
+    value = value.strip()
+    if not value or "$" in value or "{{" in value or (value.startswith("<") and value.endswith(">")):
+        return set()
+    lowered = value.casefold()
+    if key == "JWT_SECRET":
+        obvious = re.search(r"(?:^|[-_])(?:change|changeme|default|dev|demo|test|example|weak)(?:[-_]|$)", lowered)
+        if len(value) < 16 or len(value) <= 40 and obvious:
+            return {"AR-CONFIG-WEAK-JWT"}
+    if key == "OPSPILOT_PROPAGATION" and lowered.replace("_", "-") == "service-account":
+        return {"AR-CONFIG-SERVICE-ACCOUNT"}
+    if key == "OPSPILOT_SERVICE_TOKEN" and any(marker in lowered for marker in ("root", "all-access", "admin")):
+        return {"AR-CONFIG-SERVICE-ACCOUNT"}
+    if key in {"POSTGRES_PASSWORD", "LANGFLOW_SUPERUSER_PASSWORD"}:
+        return {"AR-CONFIG-PLAINTEXT-PASSWORD"}
+    if key in {"LANGFLOW_AUTO_LOGIN", "LANGFLOW_SKIP_AUTH_AUTO_LOGIN"} and lowered in {"true", "yes", "on", "1"}:
+        return {"AR-CONFIG-LANGFLOW-AUTOLOGIN"}
+    return set()
 
 
 def asset_for_source(source: str, assets: list[dict], *, service: str = "", discovered: dict | None = None) -> str:
@@ -218,10 +369,18 @@ def asset_for_source(source: str, assets: list[dict], *, service: str = "", disc
             exact.setdefault(asset["source"].replace("\\", "/"), asset["id"])
     if normalized in exact:
         return exact[normalized]
-    for asset in assets:
+    for asset in sorted(assets, key=lambda item: len(item["source"]), reverse=True):
         asset_source = asset["source"].replace("\\", "/")
         if "/" in asset_source and normalized.startswith(asset_source.rsplit("/", 1)[0] + "/"):
             return asset["id"]
+    source_roots: dict[str, set[str]] = {}
+    for asset in assets:
+        source_parts = asset["source"].replace("\\", "/").split("/")
+        if asset["type"] == "agent" and len(source_parts) >= 3:
+            source_roots.setdefault("/".join(source_parts[:-2]), set()).add(asset["id"])
+    for source_root in sorted(source_roots, key=len, reverse=True):
+        if normalized.startswith(source_root + "/") and len(source_roots[source_root]) == 1:
+            return next(iter(source_roots[source_root]))
     if normalized in {".env.example", "docker-compose.yml"}:
         agents = [asset["id"] for asset in assets if asset["type"] == "agent"]
         if len(agents) == 1:
@@ -245,19 +404,31 @@ def scan(
         relative = path.relative_to(range_root).as_posix()
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         semantic_matches = python_ast_matches(path) if path.suffix == ".py" else {}
+        config_matches: dict[str, dict[int, str]] = {rule_id: {} for rule_id in CONFIG_RULES}
+        for line_number, key, value in _config_entries(path):
+            for rule_id in _config_rule_ids(key, value):
+                config_matches[rule_id][line_number] = key
         for rule in taxonomy["rules"]:
             if rule["id"] in semantic_matches:
-                candidates = ((line_number, lines[line_number - 1]) for line_number in sorted(semantic_matches[rule["id"]]))
+                candidates = ((line_number, lines[line_number - 1], "") for line_number in sorted(semantic_matches[rule["id"]]))
+            elif rule["id"] in CONFIG_RULES:
+                candidates = ((line_number, lines[line_number - 1], config_matches[rule["id"]][line_number])
+                              for line_number in sorted(config_matches[rule["id"]]))
             else:
                 candidates = (
-                    (line_number, line)
+                    (line_number, line, "")
                     for pattern in rule["patterns"]
                     for line_number, line in enumerate(lines, 1)
                     if pattern.casefold() in line.casefold()
                 )
-            for line_number, line in candidates:
+            for line_number, line, config_key in candidates:
                 service = compose_lines.get(line_number, "") if relative == "docker-compose.yml" else ""
                 asset_id = asset_for_source(relative, list(discovered.values()), service=service, discovered=discovered)
+                if path.name.endswith(".env.example") and config_key.startswith("LANGFLOW_"):
+                    frameworks = [asset["id"] for asset in discovered.values()
+                                  if asset["type"] == "supply_chain_framework" and "langflow" in asset["name"].casefold()]
+                    if len(frameworks) == 1:
+                        asset_id = frameworks[0]
                 identity = (rule["id"], asset_id, relative, line_number)
                 if identity in seen:
                     continue

@@ -56,7 +56,7 @@ docker compose --env-file .\task\AgentRange-player-full\.env.example -f .\task\A
 
 示例直接将靶场的 `.env.example` 作为 Compose 输入。需要自定义时，在项目侧保存环境文件并替换 `--env-file`。适配默认失败放行；若评测要求检查服务异常时也拒绝请求，生成 overlay 时添加 `--fail-mode closed`。更改 overlay 后需要重新执行 Compose `up`。
 
-靶场的数据初始化、健康检查与回放步骤见 [选手手册](../task/AgentRange-player-full/docs/README.md)；也可在桌面“靶场控制”中配置路径并运行回放。切换 `observe/action` 需更新网关 Guardrail 配置并重启；`baseline` 使用原始 Compose、不加载适配 overlay。
+靶场的数据初始化、健康检查与回放步骤见 [选手手册](../task/AgentRange-player-full/docs/README.md)；也可在桌面“靶场控制”中配置路径并运行回放。切换 `observe/action` 需更新网关 Guardrail 配置并重启；用于 CPU 对照的 `baseline` 保持同一适配 overlay 和容器拓扑，仅将四个检查侧车的 `DC_BYPASS_INSPECTION` 设为 `1`。
 
 ## 生成证据和报告
 
@@ -106,9 +106,9 @@ the three subdirectories share the same public-corpus hash and semantic Ground
 Truth hash (the per-mode file hash also includes its mode metadata).
 
 The scorer only compares CPU samples when the action and baseline manifests
-agree on the corpus seed/size, semantic Ground Truth hash, arena hash, and
-mode and the measured replay rates are comparable. For each exactly matching
-container it compares p95 CPU in both windows;
+agree on the code commit, public corpus hash, corpus seed/size, semantic Ground
+Truth hash, arena hash, and mode, and the measured replay rates are comparable.
+For each exactly matching container it compares p95 CPU in both windows;
 the reported increment is the largest per-container p95 difference. It also
 records mean/max/p95 distributions. If action introduces containers absent from
 baseline, the result is `partial_container_overlap` and CPU acceptance remains

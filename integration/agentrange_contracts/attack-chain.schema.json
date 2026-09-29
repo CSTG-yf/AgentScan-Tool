@@ -7,6 +7,7 @@
   "properties": {
     "chain_id": {"type": "string"},
     "instance_id": {"type": "string"},
+    "session_id": {"type": "string"},
     "trace_id": {"type": "string"},
     "blocked": {"type": "boolean"},
     "block_node_id": {"type": ["string", "null"]},

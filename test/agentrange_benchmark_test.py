@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from pathlib import Path
@@ -15,7 +17,7 @@ from bench.agentrange_benchmark import (
     _confusion, _score_combined_defense_cpu, _score_host_gateway_cpu, prepare_all, prepare_run, score_run,
 )
 from bench.benchmark import summarize_modes
-from bench.enrich_observations import enrich
+from bench.enrich_observations import audit_rows, enrich
 from bench.resource_sampler import docker_stats, sample
 from bench.side_effect_probes import c2_delta, evaluate_side_effects
 from bench.live_replay import run as run_live_replay
@@ -400,6 +402,37 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
             self.assertIsNone(observation["inspect_unavailable_count"])
             self.assertEqual(score_run(run_dir)["overall"]["inspection_availability"]["status"], "unverified")
 
+    def test_audit_rows_filters_indexed_window_and_keeps_unavailable_events(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "audit.db"
+            with closing(sqlite3.connect(db_path)) as connection:
+                connection.execute(
+                    "CREATE TABLE audit_events (timestamp TEXT, session_id TEXT, action TEXT, structured_json TEXT)"
+                )
+                connection.execute("CREATE INDEX idx_audit_timestamp ON audit_events(timestamp)")
+                for timestamp, instance, mode, decision in (
+                    ("2026-09-29T11:59:59.999Z", "before", "action", "allow"),
+                    ("2026-09-29T12:00:00.400Z", "early", "action", "allow"),
+                    ("2026-09-29T12:00:00.500Z", "inside", "action", "allow"),
+                    ("2026-09-29T12:00:01Z", "unavailable", "", "inspect_unavailable"),
+                    ("2026-09-29T12:00:01.100Z", "observe", "observe", "allow"),
+                    ("2026-09-29T12:00:02.100Z", "late", "action", "allow"),
+                ):
+                    connection.execute(
+                        "INSERT INTO audit_events VALUES (?, ?, ?, ?)",
+                        (timestamp, instance, "agentrange-runtime-pre", json.dumps({
+                            "instance_id": instance, "mode": mode, "decision": decision,
+                        })),
+                    )
+                connection.commit()
+            rows = audit_rows(
+                db_path, "action", window=(
+                    datetime(2026, 9, 29, 12, 0, 0, 500000, tzinfo=UTC),
+                    datetime(2026, 9, 29, 12, 0, 2, tzinfo=UTC),
+                ),
+            )
+            self.assertEqual(set(rows), {"inside", "unavailable"})
+
     def test_cat1_replay_uses_full_arena_public_shape(self):
         runner_root = Path(__file__).resolve().parents[1] / "task" / "AgentRange-player-full" / "scenario-runner"
         sys.path.insert(0, str(runner_root))
@@ -645,7 +678,8 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
             baseline_dir.mkdir()
             action_dir.mkdir()
             manifest = {"seed": 1, "total": 100, "malicious_target": 1,
-                        "ground_truth_semantic_sha256": "same", "arena_sha256": "same"}
+                        "ground_truth_semantic_sha256": "same", "public_corpus_sha256": "same",
+                        "git_commit": "same", "arena_sha256": "same"}
             for folder, mode, minutes in ((baseline_dir, "baseline", 10), (action_dir, "action", 30)):
                 (folder / "run.json").write_text(json.dumps({**manifest, "mode": mode}), encoding="utf-8")
                 (folder / "replay-process.json").write_text(json.dumps({
@@ -661,6 +695,46 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
             self.assertEqual(result["baseline"]["status"], "throughput_mismatch")
             self.assertEqual(result["baseline"]["throughput_ratio"], 0.333)
             self.assertIsNone(result["cpu_increment_pct"])
+
+    def test_score_rejects_cpu_comparison_with_different_commit_or_public_corpus(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline_dir = root / "baseline"
+            action_dir = root / "action"
+            baseline_dir.mkdir()
+            action_dir.mkdir()
+            manifest = {
+                "seed": 1337, "total": 4, "malicious_target": 1,
+                "ground_truth_semantic_sha256": "same", "public_corpus_sha256": "same",
+                "git_commit": "same", "arena_sha256": "same",
+            }
+            for folder, mode in ((baseline_dir, "baseline"), (action_dir, "action")):
+                (folder / "run.json").write_text(json.dumps({**manifest, "mode": mode}), encoding="utf-8")
+                write_replay_timing(folder)
+                (folder / "resources.jsonl").write_text(json.dumps({
+                    "mode": mode, "container": "mcp", "cpu_pct": 1.0,
+                }) + "\n", encoding="utf-8")
+            from bench.agentrange_benchmark import _score_resources, read_jsonl
+            action_resources = read_jsonl(action_dir / "resources.jsonl")
+            self.assertEqual(_score_resources(
+                action_dir, action_resources, baseline_run_dir=baseline_dir, run_mode="action",
+            )["baseline"]["status"], "complete")
+            for key in ("git_commit", "public_corpus_sha256"):
+                for baseline_value in ("different", None):
+                    with self.subTest(key=key, baseline_value=baseline_value):
+                        changed = {**manifest, "mode": "baseline", key: baseline_value}
+                        (baseline_dir / "run.json").write_text(json.dumps(changed), encoding="utf-8")
+                        result = _score_resources(
+                            action_dir, action_resources, baseline_run_dir=baseline_dir, run_mode="action",
+                        )
+                        self.assertEqual(result["baseline"]["status"], "manifest_mismatch")
+                        self.assertEqual(result["baseline"]["manifest_mismatches"][key], {
+                            "action": "same", "baseline": baseline_value,
+                        })
+                        self.assertIsNone(result["cpu_increment_pct"])
+                (baseline_dir / "run.json").write_text(
+                    json.dumps({**manifest, "mode": "baseline"}), encoding="utf-8",
+                )
 
     def test_score_cpu_uses_symmetric_p95_instead_of_action_max(self):
         with tempfile.TemporaryDirectory() as directory:

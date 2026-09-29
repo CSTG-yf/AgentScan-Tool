@@ -88,21 +88,33 @@ def audit_rows(
     window: tuple[datetime | None, datetime | None] = (None, None),
 ) -> dict[str, list[dict[str, Any]]]:
     """Return sidecar runtime events grouped by instance id."""
+    start, end = window
+    predicates = ["action LIKE ?"]
+    params: list[str] = ["agentrange-runtime-%"]
+    # SQLite's timestamp index narrows large long-lived audit databases.
+    # The store writes UTC ISO timestamps. A one-second margin accommodates
+    # fractional seconds; parsing below enforces the exact replay window.
+    if start:
+        predicates.append("timestamp >= ?")
+        params.append((start.astimezone(UTC) - timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%S"))
+    if end:
+        predicates.append("timestamp < ?")
+        params.append((end.astimezone(UTC) + timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%S"))
     connection = sqlite3.connect(str(db_path))
     connection.row_factory = sqlite3.Row
     try:
         rows = connection.execute(
-            """
+            f"""
             SELECT timestamp, session_id, action, structured_json
             FROM audit_events
-            WHERE action LIKE 'agentrange-runtime-%'
+            WHERE {' AND '.join(predicates)}
             ORDER BY rowid
-            """
+            """,
+            params,
         ).fetchall()
     finally:
         connection.close()
 
-    start, end = window
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         timestamp = _parse_timestamp(row["timestamp"])
