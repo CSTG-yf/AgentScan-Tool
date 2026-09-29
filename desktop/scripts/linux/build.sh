@@ -12,6 +12,10 @@ for command in pnpm cargo go; do
 done
 
 mkdir -p "$RESOURCE_DIR" "$ARTIFACT_DIR"
+# Tauri bundles every file under resources/*. A prior Windows build in the
+# same checkout may have left its .exe Gateway here; keep Linux packages
+# architecture-pure by removing that generated foreign-platform sidecar.
+rm -f -- "$RESOURCE_DIR/defenseclaw-gateway.exe"
 cd "$REPO_ROOT"
 go build -buildvcs=false -trimpath -ldflags '-s -w' -o "$RESOURCE_DIR/defenseclaw-gateway" ./cmd/defenseclaw
 chmod 0755 "$RESOURCE_DIR/defenseclaw-gateway"
