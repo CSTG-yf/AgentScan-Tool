@@ -27,9 +27,11 @@ pub fn run_controlled_agent(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(commands::jobs::ChangeStreamController::default())
         .invoke_handler(tauri::generate_handler![
             commands::environment::get_environment_snapshot,
             commands::agents::get_agents,
+            commands::agents::get_connector_profiles,
             commands::agents::trigger_agent_scan,
             commands::agents::get_agent_detail,
             commands::agents::export_agents_report_pdf,
@@ -128,6 +130,8 @@ pub fn run() {
             commands::jobs::get_scan_job,
             commands::jobs::cancel_scan_job,
             commands::jobs::get_changes,
+            commands::jobs::start_change_stream,
+            commands::jobs::stop_change_stream,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run TraceBastion Desktop");

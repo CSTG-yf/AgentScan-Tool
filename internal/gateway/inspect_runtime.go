@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -18,19 +19,27 @@ import (
 // Runtime context is optional; legacy inspect clients keep their old contract.
 // The normal tokenAuth middleware protects both inspect and result routes.
 type InspectRuntimeContext struct {
-	Connector  string `json:"connector"`
-	SessionID  string `json:"session_id"`
-	TraceID    string `json:"trace_id"`
-	CallID     string `json:"call_id"`
-	EventID    string `json:"event_id"`
-	ProxyKind  string `json:"proxy_kind"`
-	Phase      string `json:"phase"`
-	Operation  string `json:"operation"`
-	ToolName   string `json:"tool_name,omitempty"`
-	MCPServer  string `json:"mcp_server,omitempty"`
-	HTTPMethod string `json:"http_method"`
-	HTTPPath   string `json:"http_path"`
-	Target     string `json:"target"`
+	Connector   string                     `json:"connector"`
+	SessionID   string                     `json:"session_id"`
+	TraceID     string                     `json:"trace_id"`
+	CallID      string                     `json:"call_id"`
+	EventID     string                     `json:"event_id"`
+	ProxyKind   string                     `json:"proxy_kind"`
+	Phase       string                     `json:"phase"`
+	Operation   string                     `json:"operation"`
+	ToolName    string                     `json:"tool_name,omitempty"`
+	MCPServer   string                     `json:"mcp_server,omitempty"`
+	HTTPMethod  string                     `json:"http_method"`
+	HTTPPath    string                     `json:"http_path"`
+	Target      string                     `json:"target"`
+	StackSource string                     `json:"stack_source,omitempty"`
+	StackFrames []InspectRuntimeStackFrame `json:"stack_frames,omitempty"`
+}
+
+type InspectRuntimeStackFrame struct {
+	File     string `json:"file"`
+	Function string `json:"function"`
+	Line     int    `json:"line"`
 }
 
 func (c *InspectRuntimeContext) validate(r *http.Request) error {
@@ -61,10 +70,32 @@ func (c *InspectRuntimeContext) validate(r *http.Request) error {
 			return fmt.Errorf("invalid runtime metadata")
 		}
 	}
+	if len(c.StackFrames) > 16 {
+		return fmt.Errorf("too many runtime stack frames")
+	}
+	if len(c.StackFrames) > 0 && c.StackSource != "python.traceback" {
+		return fmt.Errorf("unsupported runtime stack source")
+	}
+	if len(c.StackFrames) == 0 && c.StackSource != "" {
+		return fmt.Errorf("runtime stack source has no frames")
+	}
+	for _, frame := range c.StackFrames {
+		cleanPath := path.Clean(frame.File)
+		if frame.File == "" || len(frame.File) > 256 || cleanPath != frame.File || strings.HasPrefix(frame.File, "/") || strings.ContainsAny(frame.File, "\\:\r\n\x00") {
+			return fmt.Errorf("invalid runtime stack file")
+		}
+		if !(strings.HasPrefix(frame.File, "api/") || strings.HasPrefix(frame.File, "policy/") || strings.HasPrefix(frame.File, "skills/")) {
+			return fmt.Errorf("runtime stack file is outside application modules")
+		}
+		if !runtimeStackFunctionPattern.MatchString(frame.Function) || frame.Line < 1 || frame.Line > 10_000_000 {
+			return fmt.Errorf("invalid runtime stack frame")
+		}
+	}
 	return nil
 }
 
 var runtimeLabelPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.:/-]{0,159}$`)
+var runtimeStackFunctionPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 
 func safeRuntimeLabel(value string) string {
 	if value == "" {
@@ -119,6 +150,11 @@ func (a *APIServer) beginInspectRuntime(w http.ResponseWriter, r *http.Request, 
 			tool = "langflow.validate_code"
 		}
 	}
+	attributes := map[string]any{"connector": "agentrange", "call_id": c.CallID, "phase": c.Phase, "proxy_kind": c.ProxyKind, "pre_call_block_capable": kind == audit.RuntimeEventToolPreCall && c.ProxyKind == "mcp" && c.Phase == "pre", "inspection_status": "pending", "http_method": c.HTTPMethod, "http_path": redaction.ForSinkMessageContent(strings.Split(c.HTTPPath, "?")[0])}
+	if len(c.StackFrames) > 0 {
+		attributes["stack_source"] = c.StackSource
+		attributes["stack_frames"] = c.StackFrames
+	}
 	id, err := a.store.RecordRuntimeEvent(audit.RuntimeEventInput{
 		IngestKey: c.key(), EventType: kind, EventSource: audit.RuntimeSourceGuardrail,
 		// Agent identity is server-owned; request context cannot impersonate
@@ -127,7 +163,7 @@ func (a *APIServer) beginInspectRuntime(w http.ResponseWriter, r *http.Request, 
 		Operation: safeRuntimeLabel(c.Operation), Target: safeRuntimeLabel(c.ProxyKind),
 		ToolName: safeRuntimeLabel(tool), MCPServer: safeRuntimeLabel(c.MCPServer),
 		Outcome: "observed", Timestamp: time.Now().UTC(),
-		Attributes: map[string]any{"connector": "agentrange", "call_id": c.CallID, "phase": c.Phase, "proxy_kind": c.ProxyKind, "pre_call_block_capable": kind == audit.RuntimeEventToolPreCall && c.ProxyKind == "mcp" && c.Phase == "pre", "inspection_status": "pending", "http_method": c.HTTPMethod, "http_path": redaction.ForSinkMessageContent(strings.Split(c.HTTPPath, "?")[0])},
+		Attributes: attributes,
 	})
 	if err != nil {
 		w.Header().Set("X-DefenseClaw-Runtime-Status", "failed")

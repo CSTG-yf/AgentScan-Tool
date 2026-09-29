@@ -155,6 +155,63 @@ export interface AgentRuntimeCatalog {
   commands: CommandKnowledge[];
 }
 
+export interface ConnectorSurfaceCapability {
+  supported: boolean;
+  scope?: string;
+  install_targets?: string[];
+  discovery_only?: boolean;
+  requires_opt_in?: boolean;
+  supports_backup?: boolean;
+  supports_restore?: boolean;
+  notes?: string[];
+}
+
+export interface ConnectorProfile {
+  name: string;
+  description: string;
+  source: string;
+  tool_inspection_mode: string;
+  subprocess_policy: string;
+  llm_traffic_mode: string;
+  hook_capabilities?: {
+    can_block: boolean;
+    can_ask_native: boolean;
+    ask_events?: string[];
+    block_events?: string[];
+    supports_fail_closed: boolean;
+    scope: string;
+  };
+  capabilities?: {
+    llm_traffic_mode: string;
+    hooks: NonNullable<ConnectorProfile["hook_capabilities"]>;
+    mcp: ConnectorSurfaceCapability;
+    skills: ConnectorSurfaceCapability;
+    rules: ConnectorSurfaceCapability;
+    plugins: ConnectorSurfaceCapability;
+    agents: ConnectorSurfaceCapability;
+    codeguard: { supported: boolean; opt_in_only: boolean; auto_install: boolean; notes?: string[] };
+    telemetry: { native_otlp: boolean; native_signals?: string[]; hook_signals?: string[]; source_modes?: string[]; notes?: string[] };
+  };
+  hook_contracts?: Array<{
+    id: string;
+    min_agent_version?: string;
+    max_agent_version?: string;
+    default_for_unversioned: boolean;
+    events?: string[];
+    aid_surfaces?: string[];
+    supports_traceparent: boolean;
+    native_otlp: boolean;
+    can_block: boolean;
+    can_ask_native: boolean;
+    supports_fail_closed: boolean;
+  }>;
+}
+
+export interface ConnectorProfilesResponse {
+  active: string;
+  connectors: ConnectorProfile[];
+}
+
 export type GuardMode = "observe" | "enforce";
 export type RangeMode = "baseline" | "observe" | "action";
 
@@ -568,6 +625,8 @@ export interface AttackChainStep {
   evidence: string;
   decision: string;
   stack: string[];
+  stackStatus: "captured" | "not_collected" | "unsupported";
+  stackSource?: string;
   sourceEventId: string;
   source: string;
   traceId: string;
@@ -1004,12 +1063,26 @@ export interface StaticResourceRelationItem {
   relation_type: string;
   risk_level: string;
   malicious: boolean;
+  evidence?: {
+    source: string;
+    references: string[];
+    confidence: string;
+    explanation: string;
+  };
 }
 
 export interface StaticResourceRelationsResponse {
   resource_id?: string;
   supported?: boolean;
   reason?: string;
+  graph?: {
+    builder_version: string;
+    generated_at: string;
+    completeness: "partial" | "complete" | "unknown";
+    supported_edge_types: string[];
+    unsupported_edge_types: string[];
+    note: string;
+  };
   items: StaticResourceRelationItem[];
 }
 

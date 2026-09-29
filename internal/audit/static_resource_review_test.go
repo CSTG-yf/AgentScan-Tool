@@ -192,3 +192,53 @@ func TestGetStaticResourceDetail_ScanCapabilities(t *testing.T) {
 		t.Fatalf("unknown resource must return nil detail, got %v err=%v", detail, err)
 	}
 }
+
+func TestListStaticResourceRelationsReturnsIdentityEvidence(t *testing.T) {
+	store, done := newTestStore(t)
+	defer done()
+
+	owner := ensureRuleTestAgent(t, store, "graph-owner")
+	other := ensureRuleTestAgent(t, store, "graph-other")
+	baseID, err := store.EnsureStaticResource(StaticResourceInput{
+		CanonicalAgentID: owner, ResourceType: "skill", Name: "base",
+		Target: `C:\agents\skills\base`, Source: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownedID, err := store.EnsureStaticResource(StaticResourceInput{
+		CanonicalAgentID: owner, ResourceType: "mcp", Name: "owned",
+		Target: `C:\agents\mcp\owned`, Source: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasID, err := store.EnsureStaticResource(StaticResourceInput{
+		CanonicalAgentID: other, ResourceType: "config", Name: "same-target",
+		Target: `C:\agents\skills\base`, Source: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := store.ListStaticResourceRelations(baseID, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected same-agent and same-target edges, got %+v", items)
+	}
+	byID := map[string]StaticResourceRelation{}
+	for _, item := range items {
+		byID[item.ResourceID] = item
+	}
+	for id, relationType := range map[string]string{ownedID: "same_agent", aliasID: "same_target"} {
+		item, ok := byID[id]
+		if !ok || item.RelationType != relationType {
+			t.Fatalf("relation %s = %+v, want %s", id, item, relationType)
+		}
+		if item.Evidence.Source != "static_resource_inventory" || len(item.Evidence.References) != 2 || item.Evidence.Confidence == "" || item.Evidence.Explanation == "" {
+			t.Fatalf("relation %s lacks explainable identity evidence: %+v", id, item.Evidence)
+		}
+	}
+}

@@ -16,8 +16,8 @@ import {
 import { theme, ConfigProvider, Avatar, Button, Card, Descriptions, Drawer, Empty, Input, Select, Space, Spin, Table, Tag, Tooltip, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { formatUptime } from "../app/display";
-import { exportAgentsReportPdf, getAgentDetail, getScanStatus, triggerAgentScan } from "../bridge";
-import type { AgentInventory, AgentStatus } from "../types";
+import { exportAgentsReportPdf, getAgentDetail, getConnectorProfiles, getScanStatus, triggerAgentScan } from "../bridge";
+import type { AgentInventory, AgentStatus, ConnectorProfile, ConnectorProfilesResponse } from "../types";
 
 const { Text, Title } = Typography;
 
@@ -286,6 +286,61 @@ async function waitForAgentScan(scanId?: string): Promise<void> {
   throw new Error("Agent 发现扫描等待超时，请稍后刷新");
 }
 
+function ConnectorCapabilityDetails({ profile }: { profile: ConnectorProfile }) {
+  const capabilities = profile.capabilities;
+  const hooks = profile.hook_capabilities ?? capabilities?.hooks;
+  const surfaces = [
+    ["MCP", capabilities?.mcp],
+    ["Skills", capabilities?.skills],
+    ["Rules", capabilities?.rules],
+    ["Plugins", capabilities?.plugins],
+    ["子 Agent", capabilities?.agents],
+  ] as const;
+  const contracts = profile.hook_contracts ?? [];
+  const yesNo = (value: boolean | undefined) => value ? "支持" : "不支持/未声明";
+
+  return (
+    <div className="connector-capability-details">
+      <Descriptions size="small" bordered column={2}>
+        <Descriptions.Item label="连接器">{profile.name} · {profile.description || profile.source || "内置档案"}</Descriptions.Item>
+        <Descriptions.Item label="模型流量路径">{profile.llm_traffic_mode === "proxy" ? "代理检查模型流量" : "仅生命周期 Hooks，不检查 Agent 模型流量"}</Descriptions.Item>
+        <Descriptions.Item label="工具检查">{profile.tool_inspection_mode || "未声明"}</Descriptions.Item>
+        <Descriptions.Item label="子进程策略">{profile.subprocess_policy || "未声明"}</Descriptions.Item>
+        <Descriptions.Item label="Hooks" span={2}>
+          {hooks ? (
+            <Space wrap>
+              <Tag color={hooks.can_block ? "green" : "default"}>阻断：{yesNo(hooks.can_block)}</Tag>
+              <Tag color={hooks.can_ask_native ? "blue" : "default"}>原生确认：{yesNo(hooks.can_ask_native)}</Tag>
+              <Tag color={hooks.supports_fail_closed ? "green" : "orange"}>Fail-closed：{yesNo(hooks.supports_fail_closed)}</Tag>
+              {hooks.scope ? <Tag>范围：{hooks.scope}</Tag> : null}
+              {hooks.block_events?.length ? <Text>可阻断事件：{hooks.block_events.join(", ")}</Text> : null}
+              {hooks.ask_events?.length ? <Text>确认事件：{hooks.ask_events.join(", ")}</Text> : null}
+            </Space>
+          ) : <Text type="secondary">没有声明生命周期 Hook 控制面</Text>}
+        </Descriptions.Item>
+        <Descriptions.Item label="MCP / Skills / Rules / Plugins / 子 Agent" span={2}>
+          <Space wrap>{surfaces.map(([label, value]) => <Tag key={label} color={value?.supported ? "green" : "default"}>{label}：{yesNo(value?.supported)}{value?.discovery_only ? "（仅发现）" : ""}{value?.requires_opt_in ? "（需显式启用）" : ""}</Tag>)}</Space>
+        </Descriptions.Item>
+        <Descriptions.Item label="CodeGuard">
+          {capabilities?.codeguard ? <Space wrap><Tag color={capabilities.codeguard.supported ? "green" : "default"}>{yesNo(capabilities.codeguard.supported)}</Tag><Text type="secondary">{capabilities.codeguard.opt_in_only ? "仅在选择后安装" : capabilities.codeguard.auto_install ? "允许自动安装" : "安装策略未声明"}</Text></Space> : <Text type="secondary">未声明</Text>}
+        </Descriptions.Item>
+        <Descriptions.Item label="遥测">
+          {capabilities?.telemetry ? <Space wrap><Tag color={capabilities.telemetry.native_otlp ? "blue" : "default"}>原生 OTLP：{yesNo(capabilities.telemetry.native_otlp)}</Tag>{capabilities.telemetry.native_signals?.map((signal) => <Tag key={`native-${signal}`}>Native {signal}</Tag>)}{capabilities.telemetry.hook_signals?.map((signal) => <Tag key={`hook-${signal}`}>Hook {signal}</Tag>)}</Space> : <Text type="secondary">未声明</Text>}
+        </Descriptions.Item>
+        <Descriptions.Item label="支持的 Hook 合同" span={2}>
+          {contracts.length ? <Space direction="vertical" size={4}>{contracts.map((contract) => <Space wrap key={contract.id}>
+            <Tag color="geekblue">{contract.id}</Tag>
+            <Text type="secondary">版本 {contract.min_agent_version || "最早版本未限定"}{contract.max_agent_version ? ` – ${contract.max_agent_version}` : "及以上"}{contract.default_for_unversioned ? "；未识别版本采用此合同" : ""}</Text>
+            <Text type="secondary">事件：{contract.events?.join(", ") || "未声明"}</Text>
+            <Text type="secondary">检查面：{contract.aid_surfaces?.join(", ") || "未声明"}；W3C Trace Context：{yesNo(contract.supports_traceparent)}；Native OTLP：{yesNo(contract.native_otlp)}</Text>
+          </Space>)}</Space> : <Text type="secondary">无 Hook 版本合同</Text>}
+          <div><Text type="secondary">版本合同仅表示程序支持范围，不证明本机 Agent 版本已识别、配置已安装或 Hook 正在运行。</Text></div>
+        </Descriptions.Item>
+      </Descriptions>
+    </div>
+  );
+}
+
 export function AgentsPage({ agents, totalAgents, warning, loading = false, onRefresh }: AgentsPageProps) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -299,6 +354,28 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
   const [listRefreshing, setListRefreshing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [selectedExportIds, setSelectedExportIds] = useState<string[]>([]);
+  const [connectorProfiles, setConnectorProfiles] = useState<ConnectorProfilesResponse>();
+  const [selectedConnectorName, setSelectedConnectorName] = useState("");
+  const [connectorProfileError, setConnectorProfileError] = useState("");
+  const [connectorProfileLoading, setConnectorProfileLoading] = useState(false);
+
+  const loadConnectorProfiles = async () => {
+    setConnectorProfileLoading(true);
+    setConnectorProfileError("");
+    try {
+      const response = await getConnectorProfiles();
+      setConnectorProfiles(response);
+      setSelectedConnectorName((current) => current || response.active);
+    } catch (error) {
+      setConnectorProfileError(String(error));
+    } finally {
+      setConnectorProfileLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadConnectorProfiles();
+  }, []);
 
   const normalizedQuery = query.trim().toLowerCase();
   const filteredAgents = useMemo(() => {
@@ -330,6 +407,9 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
   const unknownCount = agents.filter((agent) => agentStatus(agent) === "unknown").length;
   const latestScan = newestTimestamp(agents.map(lastSeen));
   const displayAgentTotal = totalAgents && totalAgents > 0 ? totalAgents : agents.length;
+  const activeConnectorName = connectorProfiles?.active || "";
+  const viewedConnector = connectorProfiles?.connectors.find((item) => item.name === selectedConnectorName)
+    || connectorProfiles?.connectors.find((item) => item.name === activeConnectorName);
 
   const openAgentDetail = async (agent: AgentInventory) => {
     setSelectedAgentId(agent.id);
@@ -545,6 +625,31 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
       </div>
 
       {warning ? <div className="agent-warning">{warning}</div> : null}
+
+      <Card
+        bordered={false}
+        className="agent-table-card"
+        title="连接器能力档案"
+        extra={activeConnectorName ? <Tag color="blue">当前启用：{activeConnectorName}</Tag> : null}
+      >
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Space wrap>
+            <Text type="secondary">查看某连接器的静态能力声明；选择仅用于查看，不会切换或安装连接器。</Text>
+            <Select
+              aria-label="选择连接器能力档案"
+              style={{ minWidth: 220 }}
+              loading={connectorProfileLoading}
+              value={viewedConnector?.name}
+              placeholder="读取连接器能力档案中…"
+              options={(connectorProfiles?.connectors ?? []).map((item) => ({ label: `${item.name}${item.name === activeConnectorName ? "（当前启用）" : ""}`, value: item.name }))}
+              onChange={setSelectedConnectorName}
+            />
+            <Button size="small" icon={<ReloadOutlined />} loading={connectorProfileLoading} onClick={() => void loadConnectorProfiles()}>刷新档案</Button>
+          </Space>
+          {connectorProfileError ? <Text type="danger">读取失败：{connectorProfileError}</Text> : null}
+          {viewedConnector ? <ConnectorCapabilityDetails profile={viewedConnector} /> : connectorProfileLoading ? <Spin size="small" /> : <Text type="secondary">暂无可显示的连接器能力档案</Text>}
+        </Space>
+      </Card>
 
       <div className="agent-stat-grid">
         <Card bordered={false} className="agent-stat-card">

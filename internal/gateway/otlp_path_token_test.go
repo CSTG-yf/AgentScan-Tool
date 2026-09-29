@@ -45,7 +45,7 @@ func writePathTokenFile(t *testing.T, dataDir string, scope connector.OTLPPathTo
 // settings.json and the on-disk token were correct.
 func TestLookupOTLPPathToken_LazyReloadOnMiss(t *testing.T) {
 	t.Parallel()
-	tmp := t.TempDir()
+	tmp := otlpTokenTestDir(t)
 	const minted = "deadbeef" + "cafef00d" + "deadbeef" + "cafef00d" +
 		"deadbeef" + "cafef00d" + "deadbeef" + "cafef00d"
 	writePathTokenFile(t, tmp, connector.OTLPScopeGeminiCLI, minted)
@@ -77,7 +77,7 @@ func TestLookupOTLPPathToken_LazyReloadOnMiss(t *testing.T) {
 // not be able to convert the auth path into a disk-stampede primitive.
 func TestLookupOTLPPathToken_IgnoresUnknownScopes(t *testing.T) {
 	t.Parallel()
-	tmp := t.TempDir()
+	tmp := otlpTokenTestDir(t)
 	cfg := &config.Config{}
 	cfg.DataDir = tmp
 	api := &APIServer{scannerCfg: cfg}
@@ -113,7 +113,7 @@ func TestLookupOTLPPathToken_IgnoresUnknownScopes(t *testing.T) {
 // reload-at map, which only records actual full reloads).
 func TestLookupOTLPPathToken_StatThrottlesRepeatedMisses(t *testing.T) {
 	t.Parallel()
-	tmp := t.TempDir()
+	tmp := otlpTokenTestDir(t)
 	cfg := &config.Config{}
 	cfg.DataDir = tmp
 	api := &APIServer{scannerCfg: cfg}
@@ -161,7 +161,7 @@ func TestLookupOTLPPathToken_StatThrottlesRepeatedMisses(t *testing.T) {
 // within a second."
 func TestLookupOTLPPathToken_ReloadAfterWindowAllowsRetry(t *testing.T) {
 	t.Parallel()
-	tmp := t.TempDir()
+	tmp := otlpTokenTestDir(t)
 	cfg := &config.Config{}
 	cfg.DataDir = tmp
 	api := &APIServer{scannerCfg: cfg}
@@ -217,7 +217,7 @@ func TestLookupOTLPPathToken_NoDataDirSkipsReload(t *testing.T) {
 // loopback OTLP request 401s after the rotation until restart.
 func TestLookupOTLPPathToken_DetectsRotation(t *testing.T) {
 	t.Parallel()
-	tmp := t.TempDir()
+	tmp := otlpTokenTestDir(t)
 	const original = "aaaaaaaaaaaaaaaa" + "bbbbbbbbbbbbbbbb" +
 		"cccccccccccccccc" + "dddddddddddddddd"
 	const rotated = "1111111111111111" + "2222222222222222" +
@@ -270,7 +270,7 @@ func TestLookupOTLPPathToken_DetectsRotation(t *testing.T) {
 // continuing to authenticate a removed token.
 func TestLookupOTLPPathToken_DropsCacheOnFileRemoval(t *testing.T) {
 	t.Parallel()
-	tmp := t.TempDir()
+	tmp := otlpTokenTestDir(t)
 	const minted = "feedface" + "feedface" + "feedface" + "feedface" +
 		"feedface" + "feedface" + "feedface" + "feedface"
 	writePathTokenFile(t, tmp, connector.OTLPScopeGeminiCLI, minted)
@@ -308,7 +308,7 @@ func TestLookupOTLPPathToken_DropsCacheOnFileRemoval(t *testing.T) {
 // regressions in lookupOTLPPathToken's slow path.
 func TestLookupOTLPPathToken_ConcurrentRotation(t *testing.T) {
 	t.Parallel()
-	tmp := t.TempDir()
+	tmp := otlpTokenTestDir(t)
 	const a = "aaaaaaaa" + "aaaaaaaa" + "aaaaaaaa" + "aaaaaaaa" +
 		"aaaaaaaa" + "aaaaaaaa" + "aaaaaaaa" + "aaaaaaaa"
 	const b = "bbbbbbbb" + "bbbbbbbb" + "bbbbbbbb" + "bbbbbbbb" +

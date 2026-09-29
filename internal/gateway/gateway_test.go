@@ -6860,7 +6860,7 @@ func TestMaxBodyMiddleware_RejectsOversizedBody(t *testing.T) {
 }
 
 func TestHookScopedTokenOnlyAuthenticatesHookRoutes(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := trustedTokenTestDir(t)
 	reg := connector.NewDefaultRegistry()
 	scoped := map[string]string{}
 	hookPaths := map[string]string{}
@@ -6961,7 +6961,7 @@ func TestHookScopedTokenOnlyAuthenticatesHookRoutes(t *testing.T) {
 }
 
 func TestHookScopedTokenRevalidatesDeletionAndRotation(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir := trustedTokenTestDir(t)
 	oldToken, err := connector.EnsureHookAPIToken(dataDir, "codex")
 	if err != nil {
 		t.Fatalf("EnsureHookAPIToken: %v", err)

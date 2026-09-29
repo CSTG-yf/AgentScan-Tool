@@ -13,6 +13,7 @@ import type {
   BackendScanSchedule,
   BackendScanSchedulesResponse,
   ChangeCursor,
+  ConnectorProfilesResponse,
   EnvironmentSnapshot,
   GatewayAuditSnapshot,
   GovernanceAdmissionEvaluateInput,
@@ -84,6 +85,13 @@ import type {
 } from "./types";
 
 const inTauri = (): boolean => "__TAURI_INTERNALS__" in window;
+let changeStreamTransition: Promise<void> = Promise.resolve();
+
+function queueChangeStreamTransition<T>(action: () => Promise<T>): Promise<T> {
+  const operation = changeStreamTransition.then(action, action);
+  changeStreamTransition = operation.then(() => undefined, () => undefined);
+  return operation;
+}
 
 export interface PrivacySettings {
   redactionEnabled: boolean;
@@ -425,6 +433,16 @@ export async function getChanges(cursor = 0, domains?: string[]): Promise<Change
     cursor,
     domains: domains?.join(","),
   });
+}
+
+export async function startChangeStream(cursor: number, domains: string[]): Promise<void> {
+  if (!inTauri()) throw new Error("Gateway 变更流需要在桌面应用中启动");
+  return queueChangeStreamTransition(() => invoke<void>("start_change_stream", { cursor, domains }));
+}
+
+export async function stopChangeStream(): Promise<void> {
+  if (!inTauri()) return;
+  return queueChangeStreamTransition(() => invoke<void>("stop_change_stream"));
 }
 
 export async function getStaticResourceScans(resourceId: string, limit = 50): Promise<StaticResourceScanHistoryResponse> {
@@ -1004,6 +1022,11 @@ export async function getAgents(query: AgentListQuery = {}): Promise<AgentSnapsh
     return { capturedAt: new Date().toISOString(), agents: [], processes: [], warning: "浏览器预览模式不具备本机进程访问权限" };
   }
   return invoke<AgentSnapshot>("get_agents", { query });
+}
+
+export async function getConnectorProfiles(): Promise<ConnectorProfilesResponse> {
+  if (!inTauri()) throw new Error("连接器能力档案需要在桌面应用中读取本机 Gateway");
+  return invoke<ConnectorProfilesResponse>("get_connector_profiles");
 }
 
 export async function rollbackRuntimeEnforcement(enforcementId: string): Promise<RuntimeEnforcementResult> {

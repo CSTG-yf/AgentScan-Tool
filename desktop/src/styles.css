@@ -1436,6 +1436,8 @@ body { min-height: 100vh; background: #f5f8fc; }
 .runtime-chain-step { padding:12px; border:1px solid #2a405c; border-radius:8px; background:#10243c; }
 .runtime-chain-step .ant-descriptions { margin-top:10px; }
 .runtime-record-text { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.7; }
+.runtime-stack-evidence { margin-top:10px; }
+.runtime-stack-evidence pre { margin:6px 0 0; padding:10px; border-radius:6px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; background:#091827; color:#c2d2e3; font-size:12px; line-height:1.6; }
 .runtime-raw-record { margin:12px 0; color:#a2b6ce; }
 .runtime-raw-record summary { cursor:pointer; }
 /* Runtime detection and attack-chain pages share the static-resource workbench language. */

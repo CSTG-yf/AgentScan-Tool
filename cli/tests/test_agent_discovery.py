@@ -23,6 +23,8 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from defenseclaw.connector_paths import KNOWN_CONNECTORS
 from defenseclaw.inventory import agent_discovery as ad
 
@@ -49,6 +51,13 @@ def _discovery(*installed: str, cache_hit: bool = False) -> ad.AgentDiscovery:
 def _pin_home(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DEFENSECLAW_HOME", str(tmp_path / ".defenseclaw"))
     monkeypatch.setenv("HOME", str(tmp_path))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_windows_acl_from_posix_prefix_logic(monkeypatch):
+    """Keep path-prefix tests platform-neutral; Windows DACLs have direct tests."""
+    if os.name == "nt":
+        monkeypatch.setattr(ad.windows_acl, "trusted_path", lambda _path: True)
 
 
 def test_discovery_trust_config_honors_config_override(monkeypatch, tmp_path):
@@ -85,7 +94,11 @@ def test_cache_miss_hit_and_ttl_expiry(monkeypatch, tmp_path):
 
     cache_file = Path(os.environ["DEFENSECLAW_HOME"]) / ad.CACHE_FILENAME
     assert cache_file.is_file()
-    assert stat.S_IMODE(cache_file.stat().st_mode) == 0o600
+    if os.name != "nt":
+        # POSIX exposes chmod permissions through st_mode. On Windows,
+        # Python's chmod only controls the read-only attribute; ACLs are
+        # the authoritative permission mechanism instead.
+        assert stat.S_IMODE(cache_file.stat().st_mode) == 0o600
 
     calls.clear()
     monkeypatch.setattr(ad, "_scan_agent", lambda name, **_kwargs: (_ for _ in ()).throw(AssertionError(name)))
@@ -129,7 +142,8 @@ def test_schema_version_mismatch_rescans(monkeypatch, tmp_path):
 
 def test_timeout_sets_error_and_does_not_mark_binary_only_install(monkeypatch, tmp_path):
     _pin_home(monkeypatch, tmp_path)
-    monkeypatch.setattr(ad.shutil, "which", lambda name: "/usr/local/bin/codex")
+    monkeypatch.setattr(ad, "_which", lambda name: "/usr/local/bin/codex")
+    monkeypatch.setattr(ad, "_first_existing_path", lambda _candidates: "")
     # M-4: bypass the trusted-prefix file-existence check so we can
     # exercise the timeout branch with a path the test doesn't have to
     # actually create on disk.
@@ -151,7 +165,7 @@ def test_timeout_sets_error_and_does_not_mark_binary_only_install(monkeypatch, t
 def test_version_probe_uses_no_shell_and_list_args(monkeypatch, tmp_path):
     _pin_home(monkeypatch, tmp_path)
     calls = []
-    monkeypatch.setattr(ad.shutil, "which", lambda name: "/opt/bin/codex")
+    monkeypatch.setattr(ad, "_which", lambda name: "/opt/bin/codex")
     # M-4: this fake binary lives in /opt/bin (not a default trusted
     # prefix); waive the trust check so the test focuses on subprocess
     # invocation contract.
@@ -178,7 +192,7 @@ def test_version_probe_uses_no_shell_and_list_args(monkeypatch, tmp_path):
 def test_openhands_version_probe_prefers_cli_line_after_banner(monkeypatch, tmp_path):
     _pin_home(monkeypatch, tmp_path)
     calls = []
-    monkeypatch.setattr(ad.shutil, "which", lambda name: "/opt/bin/openhands")
+    monkeypatch.setattr(ad, "_which", lambda name: "/opt/bin/openhands")
     monkeypatch.setattr(ad, "_is_trusted_binary_path", lambda path: True)
 
     banner = """+----------------------------------------------------------------------+
@@ -380,7 +394,7 @@ def test_trust_check_accepts_homebrew_symlink_targets(monkeypatch, tmp_path):
     monkeypatch.delenv("DEFENSECLAW_TRUSTED_BIN_PREFIXES", raising=False)
     monkeypatch.setenv(
         "DEFENSECLAW_TRUSTED_BIN_PREFIXES",
-        ":".join((str(link_dir), str(homebrew / "lib" / "node_modules"))),
+        os.pathsep.join((str(link_dir), str(homebrew / "lib" / "node_modules"))),
     )
 
     assert ad._is_trusted_binary_path(str(link)) is True
@@ -456,12 +470,13 @@ def test_trust_check_accepts_claude_local_share_target(monkeypatch, tmp_path):
     monkeypatch.delenv("DEFENSECLAW_TRUSTED_BIN_PREFIXES", raising=False)
     monkeypatch.setenv(
         "DEFENSECLAW_TRUSTED_BIN_PREFIXES",
-        ":".join((str(link_dir), str(tmp_path / ".local" / "share" / "claude"))),
+        os.pathsep.join((str(link_dir), str(tmp_path / ".local" / "share" / "claude"))),
     )
 
     assert ad._is_trusted_binary_path(str(link)) is True
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode-bit case; Windows DACL is tested separately")
 def test_trust_check_rejects_world_writable_parent(monkeypatch, tmp_path):
     binary = tmp_path / "bin" / "codex"
     binary.parent.mkdir(parents=True, exist_ok=True)

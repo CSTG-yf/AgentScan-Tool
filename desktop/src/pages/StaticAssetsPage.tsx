@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CopyOutlined, DownloadOutlined, EyeOutlined, FileTextOutlined, FolderOpenOutlined, ReloadOutlined, SearchOutlined, SecurityScanOutlined } from "@ant-design/icons";
+import { CopyOutlined, DownloadOutlined, EyeOutlined, FileTextOutlined, FolderOpenOutlined, LinkOutlined, ReloadOutlined, SearchOutlined, SecurityScanOutlined } from "@ant-design/icons";
 import { theme, ConfigProvider, Alert, Button, Card, Descriptions, Drawer, Dropdown, Empty, Input, List, message, Modal, Select, Space, Spin, Table, Tabs, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { staticRiskTag } from "../app/display";
@@ -9,6 +9,7 @@ import {
   getStaticResourceContent,
   getStaticResourceDetail,
   getStaticResourceFindings,
+  getStaticResourceRelations,
   getStaticResourceScans,
   getStaticResources,
   exportStaticResourceTextReport,
@@ -27,6 +28,7 @@ import type {
   StaticResourceListItem,
   StaticResourceScanHistoryItem,
   StaticResourceSummaryResponse,
+  StaticResourceRelationsResponse,
 } from "../types";
 
 const { Text, Title } = Typography;
@@ -277,6 +279,9 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
   const [detail, setDetail] = useState<StaticResourceDetailResponse>();
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailTab, setDetailTab] = useState("overview");
+  const [relations, setRelations] = useState<StaticResourceRelationsResponse>();
+  const [relationsLoading, setRelationsLoading] = useState(false);
+  const [relationsError, setRelationsError] = useState("");
   const [findings, setFindings] = useState<StaticResourceFindingItem[]>([]);
   const [findingsSummary, setFindingsSummary] = useState<Record<string, number>>({});
   const [findingsScannedAt, setFindingsScannedAt] = useState<string>();
@@ -476,6 +481,19 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
     }
   }, []);
 
+  const loadRelations = useCallback(async (resourceId: string) => {
+    setRelationsLoading(true);
+    setRelationsError("");
+    try {
+      setRelations(await getStaticResourceRelations(resourceId));
+    } catch (error) {
+      setRelations(undefined);
+      setRelationsError(String(error));
+    } finally {
+      setRelationsLoading(false);
+    }
+  }, []);
+
   // Tab switch drives lazy loading.
   const handleDetailTabChange = useCallback(
     (tab: string) => {
@@ -484,8 +502,9 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
       if (tab === "risk") void loadFindings(detailResourceId);
       if (tab === "content") void loadContent(detailResourceId);
       if (tab === "history") void loadScans(detailResourceId);
+      if (tab === "relations") void loadRelations(detailResourceId);
     },
-    [detailResourceId, loadContent, loadFindings, loadScans],
+    [detailResourceId, loadContent, loadFindings, loadRelations, loadScans],
   );
 
   const handleOpenResource = useCallback(
@@ -498,10 +517,25 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
       setContent(undefined);
       setScans([]);
       setScansTotal(0);
+      setRelations(undefined);
+      setRelationsError("");
       void loadDetail(resource.resource_id);
     },
     [loadDetail],
   );
+
+  const handleOpenRelatedResource = (resourceId: string) => {
+    setDetailResourceId(resourceId);
+    setDetailTab("overview");
+    setFindings([]);
+    setFindingsSummary({});
+    setContent(undefined);
+    setScans([]);
+    setScansTotal(0);
+    setRelations(undefined);
+    setRelationsError("");
+    void loadDetail(resourceId);
+  };
 
   const handleSelectAgent = (agentId: string) => {
     setSelectedAgentId(agentId);
@@ -1196,6 +1230,38 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
                   </div>
                 ) : (
                   <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无扫描历史" />
+                ),
+              },
+              {
+                key: "relations",
+                label: "关系",
+                children: relationsLoading ? (
+                  <div style={{ padding: 32, textAlign: "center" }}><Spin /></div>
+                ) : relationsError ? (
+                  <Alert type="error" showIcon message="读取资源关系失败" description={relationsError} />
+                ) : (
+                  <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+                    {relations?.graph ? <Alert
+                      type="info"
+                      showIcon
+                      message={`局部关系图 ${relations.graph.builder_version} · ${relations.graph.completeness === "partial" ? "部分覆盖" : relations.graph.completeness}`}
+                      description={`${relations.graph.note} 当前支持：${relations.graph.supported_edge_types.join("、") || "无"}；尚不支持：${relations.graph.unsupported_edge_types.join("、") || "无"}。`}
+                    /> : null}
+                    {relations?.items.length ? <List
+                      dataSource={relations.items}
+                      renderItem={(item) => <List.Item actions={[
+                        <Button key="open" size="small" icon={<LinkOutlined />} onClick={() => handleOpenRelatedResource(item.resource_id)}>查看资源</Button>,
+                      ]}>
+                        <List.Item.Meta
+                          title={<Space wrap><Text strong>{item.name}</Text><Tag>{item.resource_type}</Tag><Tag color={item.malicious ? "red" : "blue"}>{item.relation_type}</Tag></Space>}
+                          description={<Space direction="vertical" size={2}>
+                            <Text>{item.evidence?.explanation || "关系证据未提供"}</Text>
+                            <Text type="secondary">来源：{item.evidence?.source || "未知"} · 置信度：{item.evidence?.confidence || "未知"} · {item.evidence?.references?.join(", ") || "无证据引用"}</Text>
+                          </Space>}
+                        />
+                      </List.Item>}
+                    /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={relations?.supported ? "当前没有可由静态归属或目标路径推导的关系；不代表不存在运行时关系。" : "当前关系类型暂不支持判断。"} />}
+                  </Space>
                 ),
               },
             ]}

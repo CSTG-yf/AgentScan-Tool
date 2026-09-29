@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/defenseclaw/defenseclaw/internal/audit"
 	"github.com/defenseclaw/defenseclaw/internal/scanner"
@@ -401,7 +402,19 @@ func (a *APIServer) handleStaticResourceRelations(w http.ResponseWriter, r *http
 	if items == nil {
 		items = []audit.StaticResourceRelation{}
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"resource_id": resourceID, "supported": true, "items": items})
+	a.writeJSON(w, http.StatusOK, map[string]any{
+		"resource_id": resourceID,
+		"supported":   true,
+		"graph": map[string]any{
+			"builder_version":        "static-resource-relations-v1",
+			"generated_at":           time.Now().UTC().Format(time.RFC3339Nano),
+			"completeness":           "partial",
+			"supported_edge_types":   []string{"same_agent", "same_target"},
+			"unsupported_edge_types": []string{"loads", "configures", "invokes", "reads", "writes", "spawns", "connects_to", "detected_by", "blocked_by"},
+			"note":                   "当前仅依据持久化静态资源归属和目标路径生成关系；不表示运行时调用或因果关系。",
+		},
+		"items": items,
+	})
 }
 
 // handleStaticResourceScan serves POST /api/v1/static-resources/{id}/scan —
