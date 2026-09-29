@@ -449,6 +449,7 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
                     "side_effect_reached": False,
                     "business_success": row["label"] == "benign",
                     "e2e_latency_ms": 12,
+                    "inspect_latency_ms": 8,
                 }
                 for row in truth
             ]
@@ -465,6 +466,11 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
             self.assertEqual(report["overall"]["metrics"]["recall"], 1.0)
             self.assertEqual(report["overall"]["normal_business"]["success_rate"], 1.0)
             self.assertEqual(report["resources"]["cpu_increment_by_container"]["mcp"], 1.5)
+            self.assertTrue(report["acceptance"]["inspect_p95_lt_1000ms"])
+            self.assertTrue(report["acceptance"]["inspect_latency_coverage_1"])
+            observations[0].pop("inspect_latency_ms")
+            (run_dir / "observations.jsonl").write_text("\n".join(json.dumps(row) for row in observations) + "\n", encoding="utf-8")
+            self.assertFalse(score_run(run_dir)["acceptance"]["inspect_latency_coverage_1"])
 
     def test_score_action_uses_sibling_baseline_window(self):
         with tempfile.TemporaryDirectory() as directory:
