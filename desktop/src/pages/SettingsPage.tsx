@@ -25,15 +25,18 @@ interface SettingsPageProps {
   guardComponent?: EnvironmentComponent;
   defenseMode: RangeMode;
   gatewayStartup: "auto" | "manual" | "disabled";
+  /** True when closing the window keeps the gateway (and a tray icon) alive. */
+  keepGatewayRunning: boolean;
   refreshedAt?: string;
   busy?: boolean;
   onRefresh: () => void;
   onGatewayAction: (action: "start" | "stop" | "restart" | "health") => void;
   onGatewayStartupChange: (value: "auto" | "manual" | "disabled") => void;
+  onKeepGatewayRunningChange: (value: boolean) => void;
   onGuardAction: (action: GuardAction) => void;
 }
 
-export function SettingsPage({ gatewayComponent, guardComponent, defenseMode, gatewayStartup, refreshedAt, busy, onRefresh, onGatewayAction, onGatewayStartupChange, onGuardAction }: SettingsPageProps) {
+export function SettingsPage({ gatewayComponent, guardComponent, defenseMode, gatewayStartup, keepGatewayRunning, refreshedAt, busy, onRefresh, onGatewayAction, onGatewayStartupChange, onKeepGatewayRunningChange, onGuardAction }: SettingsPageProps) {
   const [section, setSection] = useState<SectionKey>("services");
   const [query, setQuery] = useState("");
   const visible = useMemo(() => sections.filter(item => `${item.label} ${item.description}`.toLowerCase().includes(query.trim().toLowerCase())), [query]);
@@ -78,14 +81,19 @@ export function SettingsPage({ gatewayComponent, guardComponent, defenseMode, ga
           </div>
           <ServiceCard
             icon={<CloudServerOutlined />} title="TraceBastion Gateway" state={gatewayComponent?.state} detail={gatewayComponent?.detail}
-            facts={[["监听地址", "127.0.0.1:18970"], ["运行模式", defenseMode === "baseline" ? "Baseline（Gateway 不启动）" : defenseMode === "action" ? "Action" : "Observe"], ["版本", gatewayComponent?.version || "随桌面应用"], ["健康检查", refreshedAt ? new Date(refreshedAt).toLocaleTimeString("zh-CN", { hour12: false }) : "未检查"]]}
+            facts={[["监听地址", gatewayComponent?.endpoint ?? "未监听"], ["运行模式", defenseMode === "baseline" ? "Baseline（Gateway 不启动）" : defenseMode === "action" ? "Action" : "Observe"], ["版本", gatewayComponent?.version || "随桌面应用"], ["健康检查", refreshedAt ? new Date(refreshedAt).toLocaleTimeString("zh-CN", { hour12: false }) : "未检查"]]}
             actions={gatewayReady
               ? <><Button type="primary" loading={busy} onClick={() => onGatewayAction("restart")}>重启</Button><Button loading={busy} onClick={() => onGatewayAction("stop")}>停止</Button><Button onClick={() => onGatewayAction("health")}>健康检查</Button></>
               : <><Button type="primary" disabled={defenseMode === "baseline"} loading={busy} onClick={() => onGatewayAction("start")}>启动</Button><Button onClick={() => onGatewayAction("health")}>健康检查</Button></>}
           />
           <Card className="service-preferences-card" title="Gateway 启动设置">
             <div><div><Text strong>随应用启动</Text><Text type="secondary">自动会在桌面应用启动时确保 Gateway 就绪；手动和禁用不会自动启动。</Text></div>
-              <Select aria-label="Gateway 启动方式" value={gatewayStartup} style={{ width: 170 }} options={[{ value: "auto", label: "随应用自动启动" }, { value: "manual", label: "手动启动" }, { value: "disabled", label: "禁用" }]} onChange={onGatewayStartupChange} />
+              <Select aria-label="Gateway 启动方式" value={gatewayStartup} style={{ width: 220 }} options={[{ value: "auto", label: "随应用自动启动" }, { value: "manual", label: "手动启动" }, { value: "disabled", label: "禁用" }]} onChange={onGatewayStartupChange} />
+            </div>
+            <div><div><Text strong>关闭窗口后保持网关后台运行</Text><Text type="secondary">{keepGatewayRunning
+              ? "关闭窗口只隐藏界面，Gateway 继续在后台服务；通过系统托盘可重新打开或彻底退出。"
+              : "关闭窗口将停止由桌面端启动的 Gateway 并退出（默认）。"}</Text></div>
+              <Select aria-label="关闭窗口后的网关行为" value={keepGatewayRunning ? "keep" : "stop"} style={{ width: 220 }} options={[{ value: "stop", label: "退出时停止（默认）" }, { value: "keep", label: "保持后台运行" }]} onChange={(value) => onKeepGatewayRunningChange(value === "keep")} />
             </div>
           </Card>
           {defenseMode === "baseline" && <Alert showIcon type="info" message="Baseline 模式不启动 Gateway" description="请在顶部全局防护模式中切换为 Observe 或 Action 后再启动。" />}

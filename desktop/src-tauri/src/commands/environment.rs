@@ -11,8 +11,12 @@ fn tcp_ready(port: u16) -> bool {
 }
 
 #[tauri::command]
-pub fn get_environment_snapshot() -> EnvironmentSnapshot {
-    let gateway_ready = tcp_ready(18_970);
+pub fn get_environment_snapshot(app: tauri::AppHandle) -> EnvironmentSnapshot {
+    // Never probe a hardcoded 18970: the desktop moves to an alternative port
+    // when another DefenseClaw home already holds the canonical one.
+    let gateway_port =
+        crate::commands::lifecycle::desktop_gateway_api_port_for_app(&app).unwrap_or(18_970);
+    let gateway_ready = tcp_ready(gateway_port);
     let range_ready = tcp_ready(8_000) || tcp_ready(8_100) || tcp_ready(7_860);
     let (guard_installed, guard_running) = crate::process_guard_service::service_status();
 
@@ -24,11 +28,11 @@ pub fn get_environment_snapshot() -> EnvironmentSnapshot {
                 label: "TraceBastion Gateway",
                 state: if gateway_ready { "ready" } else { "stopped" },
                 detail: if gateway_ready {
-                    "本机 127.0.0.1:18970 可连接"
+                    format!("本机 127.0.0.1:{gateway_port} 可连接")
                 } else {
-                    "网关端口未监听"
-                }
-                .to_owned(),
+                    "网关端口未监听".to_owned()
+                },
+                endpoint: Some(format!("127.0.0.1:{gateway_port}")),
                 version: None,
                 requires_elevation: false,
             },
@@ -42,6 +46,7 @@ pub fn get_environment_snapshot() -> EnvironmentSnapshot {
                     "仅用于安全能力测试与演示，未运行不影响日常防护"
                 }
                 .to_owned(),
+                endpoint: None,
                 version: None,
                 requires_elevation: false,
             },
@@ -71,6 +76,7 @@ pub fn get_environment_snapshot() -> EnvironmentSnapshot {
                     }
                 }
                 .to_owned(),
+                endpoint: None,
                 version: None,
                 requires_elevation: true,
             },

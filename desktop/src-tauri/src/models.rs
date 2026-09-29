@@ -22,6 +22,11 @@ pub struct EnvironmentComponent {
     pub label: &'static str,
     pub state: &'static str,
     pub detail: String,
+    /// Concrete address the desktop talks to, when the component has one.
+    /// The gateway port is dynamic (18970 unless another DefenseClaw home
+    /// already holds it), so the UI must not hardcode it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
