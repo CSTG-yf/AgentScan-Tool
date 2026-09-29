@@ -31,6 +31,30 @@ class Response:
 
 
 class AgentRangeRuntimeTests(unittest.TestCase):
+    def test_app_frames_are_bounded_and_not_forwarded(self):
+        frames = [{"module": "api.app", "function": "run_agent", "line": 42}]
+        encoded = base64.urlsafe_b64encode(json.dumps(frames).encode()).decode()
+        self.assertEqual(sidecar.extract_app_frames({sidecar.APP_FRAMES_HEADER: encoded}), frames)
+        for invalid in (
+            "not-base64!",
+            base64.urlsafe_b64encode(json.dumps([{"module": "os", "function": "system", "line": 1}]).encode()).decode(),
+            base64.urlsafe_b64encode(json.dumps(frames * 13).encode()).decode(),
+            "A" * 2049,
+        ):
+            self.assertEqual(sidecar.extract_app_frames({sidecar.APP_FRAMES_HEADER: invalid}), [])
+
+        handler = object.__new__(sidecar.AgentRangeProxyHandler)
+        handler.command = "POST"
+        handler.headers = {sidecar.APP_FRAMES_HEADER: encoded}
+        handler._trace_id = "trace-1"
+        response = Response({})
+        response.status = 200
+        response.headers = {}
+        captured = []
+        with patch.object(sidecar, "urlopen", side_effect=lambda req, **kw: captured.append(req) or response):
+            handler._forward("http://service/endpoint", b"{}")
+        self.assertIsNone(captured[0].get_header(sidecar.APP_FRAMES_HEADER))
+
     def test_gateway_requests_reuse_one_connection(self):
         class Server(ThreadingHTTPServer):
             connections = 0

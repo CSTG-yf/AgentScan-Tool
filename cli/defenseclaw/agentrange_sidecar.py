@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -51,6 +52,11 @@ HOP_BY_HOP_HEADERS = {
     "transfer-encoding",
     "upgrade",
 }
+APP_FRAMES_HEADER = "X-DefenseClaw-App-Frames"
+MAX_APP_FRAMES_HEADER_BYTES = 2048
+MAX_APP_FRAMES = 12
+APP_FRAME_MODULE = re.compile(r"^(?:api|skills)(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
+APP_FRAME_FUNCTION = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # Request-local operation metadata; no audit data is used to construct events.
 from contextvars import ContextVar
@@ -223,6 +229,30 @@ def extract_session(headers: Any) -> str:
         if value:
             return value
     return f"agentrange-{uuid4()}"
+
+
+def extract_app_frames(headers: Any) -> list[dict[str, Any]]:
+    encoded = str(headers.get(APP_FRAMES_HEADER) or "")
+    if not encoded or len(encoded) > MAX_APP_FRAMES_HEADER_BYTES:
+        return []
+    try:
+        decoded = base64.b64decode(encoded, altchars=b"-_", validate=True)
+        frames = json.loads(decoded)
+    except (ValueError, UnicodeError):
+        return []
+    if not isinstance(frames, list) or len(frames) > MAX_APP_FRAMES:
+        return []
+    normalized = []
+    for frame in frames:
+        if not isinstance(frame, dict):
+            return []
+        module, function, line = frame.get("module"), frame.get("function"), frame.get("line")
+        if (not isinstance(module, str) or not APP_FRAME_MODULE.fullmatch(module)
+                or not isinstance(function, str) or not APP_FRAME_FUNCTION.fullmatch(function)
+                or type(line) is not int or not 0 < line <= 1_000_000):
+            return []
+        normalized.append({"module": module, "function": function, "line": line})
+    return normalized
 
 
 def extract_trace(headers: Any) -> str:
@@ -468,6 +498,8 @@ def emit_audit_event(
         "actor": "defenseclaw-agentrange-sidecar",
         "tenant": meta.get("tenant", ""),
         "authorization_context": authorization_context,
+        "app_frames": (_runtime_request.get() or {}).get("app_frames", []),
+        "app_frames_source": "client_reported" if (_runtime_request.get() or {}).get("app_frames") else "",
         "principal_subject": str(principal.get("sub") or ""),
         "principal_scope": scope,
         "prompt": meta.get("prompt", ""),
@@ -824,6 +856,7 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
             authorization_context = extract_jwt_authorization_context(self.headers) or authorization_context
         authorization_context = relay_authorization_context(session_id, trace_id, authorization_context)
         set_context_tenant(meta, authorization_context)
+        app_frames = extract_app_frames(self.headers) if getenv("DC_PROXY_KIND") in {"llm", "mcp", "langflow"} else []
         _runtime_request.set({
             "context": {
                 "connector": connector_name(), "instance_id": session_id, "session_id": session_id, "trace_id": trace_id,
@@ -835,6 +868,7 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
             },
             "result_id": str(uuid4()), "inspection_ids": [], "pending_checks": [],
             "authorization_context": authorization_context,
+            "app_frames": app_frames,
         })
         started = time.monotonic()
         verdict, inspect_error = self._pre_inspect(session_id, body)
@@ -963,7 +997,7 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
         request_body = body if body or self.command not in {"GET", "HEAD"} else None
         request = Request(target_url, data=request_body, method=self.command)
         for key, value in self.headers.items():
-            if key.lower() in HOP_BY_HOP_HEADERS or key.lower() == "host":
+            if key.lower() in HOP_BY_HOP_HEADERS or key.lower() in {"host", APP_FRAMES_HEADER.lower()}:
                 continue
             request.add_header(key, value)
         if _runtime_request.get():

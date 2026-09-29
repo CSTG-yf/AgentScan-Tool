@@ -35,6 +35,8 @@ class AgentRangeAttackChainTest(unittest.TestCase):
                             "mcp", "defenseclaw-agentrange-sidecar", "", json.dumps({
                                 "instance_id": "instance-1", "session_id": "session-1", "trace_id": "trace-1",
                                 "stage": stage, "decision": decision, "tool_name": "shell_runner_run",
+                                "app_frames": [{"module": "api.app", "function": "run_agent", "line": 42}],
+                                "app_frames_source": "client_reported",
                             }),
                             "HIGH", "agentrange", "trace-1", "session-1", "opspilot-app", "shell_runner_run",
                         ),
@@ -49,6 +51,8 @@ class AgentRangeAttackChainTest(unittest.TestCase):
         self.assertEqual(chain["session_id"], "session-1")
         self.assertEqual([node["evidence_level"] for node in chain["nodes"]], ["direct", "direct"])
         self.assertEqual([node["raw_ref"] for node in chain["nodes"]], ["audit.db:1", "audit.db:2"])
+        self.assertEqual(chain["nodes"][0]["app_frames"][0]["function"], "run_agent")
+        self.assertEqual(chain["nodes"][0]["app_frames_source"], "client_reported")
         self.assertEqual(chain["edges"][0]["evidence_level"], "time_window_inference")
         self.assertTrue(chain["blocked"])
 

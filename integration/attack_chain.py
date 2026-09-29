@@ -97,6 +97,8 @@ def load_audit_events(audit_db: Path) -> list[dict[str, Any]]:
             "proxy_kind": structured.get("proxy_kind") or "",
             "http_method": structured.get("http_method") or "",
             "http_path": structured.get("http_path") or "",
+            "app_frames": structured.get("app_frames") if isinstance(structured.get("app_frames"), list) else [],
+            "app_frames_source": structured.get("app_frames_source") or "",
             "decision": decision_from(row, structured),
             "reason": structured.get("reason") or "",
             "latency_ms": structured.get("latency_ms"),
@@ -201,6 +203,8 @@ def build_chains(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "raw_ref": str(event.get("raw_ref") or ""),
                     "tool_name": event.get("tool_name"),
                     "reason": event.get("reason"),
+                    "app_frames": event.get("app_frames") or [],
+                    "app_frames_source": event.get("app_frames_source") or "",
                 }
             )
             if index > 1:

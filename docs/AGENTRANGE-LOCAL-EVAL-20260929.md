@@ -27,6 +27,25 @@ covered all 5,200 instances; the 33 unavailable events affected 24 benign
 instances. This pair used the pre-cache Gateway binary and is retained at
 `bench/runs/20260929-agent-tx-full-rate150-v1/{action,baseline}`.
 
+The new audit-cache Gateway alone completed a matched-input 1,000-event action
+replay at 1.5 events/second with 16/16 confirmed blocks, no false positives,
+984/984 normal successes, one unavailable LLM inspection, 477.825 ms
+end-to-end p95, 97 ms inspection p95, and 3.800% combined defense CPU p95.
+The unavailable inspection reached the sidecar's 400 ms deadline while the
+Gateway had a concurrent slow secondary audit write. That run is at
+`bench/runs/20260929-cache-rate150-1k/action`.
+
+With the OpsPilot call-site probe and a 600 ms sidecar inspection deadline,
+the same 1,000-event input had 16/16 confirmed blocks, no false positives,
+984/984 normal successes, zero unavailable inspections, 464.968 ms end-to-end
+p95, 95 ms inspection p95, and 3.657% combined defense CPU p95. The host and
+container sample windows were complete. A separate 10-event smoke replay
+confirmed bounded `api.app` call-site frames in sidecar audit records, marked
+`client_reported`; those frames do not enter the block decision. The candidate
+run is `bench/runs/20260929-probe600-rate150-1k/action`. These two short runs
+do not isolate the probe from the timeout change, and neither has a same-code
+CPU baseline or full-sample acceptance result.
+
 The earlier full pair uses the same 5,200-event public corpus and semantic
 ground truth (seed 1337, 80 attacks, arena hash above) in baseline and action,
 both capped at 1.5 events/second. Measured throughput ratio is 1.000 and all
