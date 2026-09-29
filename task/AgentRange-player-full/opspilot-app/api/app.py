@@ -283,8 +283,7 @@ def run_agent(
             "output_type": "chat",
             "input_type": "chat",
         }
-        headers = trace_headers(x_trace_id or str(uuid.uuid4()), identity)
-        headers["X-Instance-Id"] = x_instance_id or "manual"
+        headers = {"X-Instance-Id": x_instance_id or "manual", "X-Acting-User": identity.sub}
         response = requests.post(
             f"{LANGFLOW_BASE}/api/v1/run/{LANGFLOW_FLOW_ID}",
             headers=headers,
@@ -297,7 +296,7 @@ def run_agent(
     prompt = prompt_from_body(body)
     skill_name = skill_from_body(body)
     messages = agent_messages(prompt, skill_name)
-    headers = trace_headers(trace_id, identity)
+    headers = trace_headers(trace_id)
     headers["X-Instance-Id"] = x_instance_id or "manual"
 
     # 离线路径模拟最小 agent executor，返回体保持 ChatCompletion 形态。

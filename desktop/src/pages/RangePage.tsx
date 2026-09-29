@@ -68,7 +68,7 @@ export function RangePage({
           <div className="range-control-title">
             <div className="range-status-icon"><ExperimentOutlined /></div>
             <div className="range-status-copy">
-              <Title level={4}>AgentRange-player</Title>
+              <Title level={4}>AgentRange-player-full</Title>
               <Text type="secondary">{rangeStatus?.detail ?? "正在检测靶场环境"}</Text>
             </div>
           </div>
@@ -76,7 +76,7 @@ export function RangePage({
         </div>
         <label htmlFor="range-root" className="range-root-label">靶场文件夹</label>
         <div className="range-root-toolbar">
-          <Input id="range-root" size="large" value={root} disabled={rootBusy || rangeStatus?.state === "running"} onChange={(event) => setRoot(displayFolderPath(event.target.value))} placeholder={'输入靶场文件夹地址，例如 C:\\AgentRange-player'} />
+          <Input id="range-root" size="large" value={root} disabled={rootBusy || rangeStatus?.state === "running"} onChange={(event) => setRoot(displayFolderPath(event.target.value))} placeholder={'输入靶场文件夹地址，例如 C:\\AgentRange-player-full'} />
           <Button size="large" type="primary" icon={<CaretRightOutlined />} disabled={!canConfigure} loading={loading} onClick={() => root.trim() === displayFolderPath(rangeStatus?.root ?? "") && rangeStatus?.configured ? onChangeRangeState(true) : onConfigureRange(root, true)}>启动靶场</Button>
           <Button className="range-stop-button" size="large" danger icon={<StopOutlined />} disabled={loading || rangeStatus?.state !== "running"} onClick={() => onChangeRangeState(false)}>停止靶场</Button>
         </div>
@@ -109,7 +109,7 @@ export function RangePage({
       </Card>
       <Card bordered={false} className="range-replay-card" title="攻击回放命令">
         <div className="range-replay-toolbar">
-          <Input.TextArea value={replayCommand} rows={3} onChange={(event) => onReplayCommandChange(event.target.value)} placeholder={'uv run --with httpx python ".\\task\\AgentRange-player\\scenario-runner\\runner.py" C2-A'} />
+          <Input.TextArea value={replayCommand} rows={3} onChange={(event) => onReplayCommandChange(event.target.value)} placeholder={'uv run --with httpx python ".\\task\\AgentRange-player-full\\scenario-runner\\runner.py" C2-A'} />
           <Space direction="vertical" className="range-replay-actions">
             <Button type="primary" size="large" disabled={rangeStatus?.state !== "running" || replayStatus?.running} loading={replayBusy} onClick={() => onStartReplay()}>运行攻击命令</Button>
             <Button danger size="large" disabled={!replayStatus?.running} loading={replayBusy} onClick={onStopReplay}>停止回放</Button>

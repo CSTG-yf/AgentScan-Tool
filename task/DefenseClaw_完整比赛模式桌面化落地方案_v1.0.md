@@ -744,7 +744,7 @@ desktop/
 ├─ tests/
 └─ README.md
 
-task/AgentRange-player/desktop/
+task/AgentRange-player-full/desktop/
 ├─ manifest.yaml
 ├─ demo-flow.yaml
 └─ packaging/

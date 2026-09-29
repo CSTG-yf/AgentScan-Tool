@@ -226,7 +226,7 @@ def add_cover(doc):
     metadata = [
         ("版本", "v1.0"),
         ("日期", "2026-07-19"),
-        ("范围", "DefenseClaw 主工程 + task/AgentRange-player"),
+        ("范围", "DefenseClaw 主工程 + task/AgentRange-player-full"),
         ("状态", "实施基线"),
         ("验证约束", "不运行 Go 测试；不使用 CI/CD 或 GitHub 测试"),
     ]

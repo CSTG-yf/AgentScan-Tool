@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RANGE_ROOT = ROOT / "task" / "AgentRange-player"
+RANGE_ROOT = ROOT / "task" / "AgentRange-player-full"
 
 
 def _docker_available() -> tuple[bool, str]:
@@ -51,21 +51,27 @@ def run(args: argparse.Namespace) -> int:
         (output_dir / "replay-process.json").write_text(json.dumps(process_record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return 2
 
-    runner = args.range_root.resolve() / "scenario-runner" / "runner.py"
+    runner = ROOT / "bench" / "agentrange_replay.py"
     command = [
         sys.executable,
         str(runner),
+        "--mode",
+        str(args.mode),
         "--seed",
         str(args.seed),
         "--total",
         str(args.total),
         "--malicious-target",
         str(args.malicious_target),
-        "--output-dir",
+        "--run-dir",
         str(output_dir),
+        "--range-root",
+        str(args.range_root.resolve()),
     ]
     if args.only:
-        command.insert(2, args.only)
+        command.extend(["--only", args.only])
+    if getattr(args, "target_rate", None) is not None:
+        command.extend(["--target-rate", str(args.target_rate)])
     process_record["command"] = command
     env = os.environ.copy()
     env["AGENTRANGE_MODE"] = args.mode
@@ -88,6 +94,7 @@ def main() -> int:
     parser.add_argument("--total", type=int, default=5200)
     parser.add_argument("--malicious-target", type=int, default=80)
     parser.add_argument("--only")
+    parser.add_argument("--target-rate", type=float)
     return run(parser.parse_args())
 
 

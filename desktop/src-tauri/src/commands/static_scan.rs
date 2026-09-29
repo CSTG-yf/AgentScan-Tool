@@ -234,7 +234,7 @@ pub fn get_static_scan(app: tauri::AppHandle) -> Result<StaticScanSnapshot, Stri
             assets: Vec::new(),
             findings: Vec::new(),
             scanned_files: 0,
-            warning: Some("请先在验证靶场页面配置 AgentRange-player 目录".to_owned()),
+            warning: Some("请先在验证靶场页面配置 AgentRange-player-full 目录".to_owned()),
         });
     };
     if !root.is_dir() {

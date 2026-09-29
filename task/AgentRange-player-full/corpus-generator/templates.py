@@ -282,10 +282,7 @@ def render_attack(tmpl: str, rng: random.Random, index: int) -> Event:
             kind="cat1",
             scenario=tmpl,
             actor=None,
-            # Keep the public replay shape free of scenario labels.  The
-            # runner routes by operation; the detector only sees the HTTP
-            # request that operation produces.
-            input={"operation": "code_validation" if tmpl == "C1-A" else "file_upload", "cmd": cmd},
+            input={"exploit": tmpl, "cmd": cmd},
             trajectory=[],
             malicious=True,
             evidence={"outcome": "code-execution", "cve": cve, "endpoint": endpoint, "egress": "c2-sink"},
@@ -317,6 +314,7 @@ def render_attack(tmpl: str, rng: random.Random, index: int) -> Event:
             "source": scenario_input["source"],
             "prompt": scenario_input["prompt"],
             "skill": scenario_input.get("skill"),
+            "source_text": scenario_input["source_text"],
         },
         trajectory=steps,
         malicious=True,

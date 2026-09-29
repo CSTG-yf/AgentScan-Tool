@@ -274,7 +274,7 @@ flowchart TD
 | `policies/`、`schemas/` | YAML/Rego 策略、扫描配置、规则包与跨组件 Schema |
 | `bundles/` | 本地可观测性、Splunk、注册表及模型目录资源 |
 | `integration/`、`bench/`、`dashboard/` | AgentRange 合同、证据处理、评测汇总与展示 |
-| `task/AgentRange-player/`、`task/agentrange-adapter/` | 原始验证靶场、项目侧生成的 overlay 与适配计划 |
+| `task/AgentRange-player-full/`、`task/agentrange-adapter/` | 当前完整验证靶场、项目侧生成的 overlay 与适配计划 |
 | `test/`、`cli/tests/` | 测试、语料与夹具；Go 包内另有 `*_test.go` |
 | `scripts/`、`packaging/` | 安装、构建、校验与系统服务打包 |
 | `docs/`、`docs-site/` | 操作/设计参考文档、Next.js/Fumadocs 文档站与策略编辑器 |
@@ -321,7 +321,7 @@ Windows CLI 的安装文档检查可直接运行：
 
 | 入口或产物 | 用途 |
 | --- | --- |
-| `task/AgentRange-player/` | 原始靶场与场景手册 |
+| `task/AgentRange-player-full/` | 当前完整原始靶场与场景手册 |
 | `task/agentrange-adapter/` | 项目侧 overlay 与适配计划 |
 | `integration/reports/` | 静态扫描、规则合同、运行时事件、攻击链及综合报告 |
 | `bench/results/` | baseline / observe / action 结果与汇总 |

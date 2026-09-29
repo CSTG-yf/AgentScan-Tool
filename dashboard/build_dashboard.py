@@ -79,6 +79,10 @@ def status_label(status: str) -> str:
 def build_data(report: dict[str, Any]) -> dict[str, Any]:
     static = report.get("static") or {}
     static_metrics = static.get("metrics") or {}
+    static_evaluation = static.get("evaluation") or {}
+    evaluated_asset = static_evaluation.get("asset") or {}
+    evaluated_risk = static_evaluation.get("risk") or {}
+    static_scope_verified = static_evaluation.get("scope") == "local_frozen_fixture"
     runtime = report.get("runtime") or {}
     rules = report.get("rules") or {}
     benchmark = report.get("benchmark") or {}
@@ -86,24 +90,39 @@ def build_data(report: dict[str, Any]) -> dict[str, Any]:
     action = modes.get("action") or {}
     action_metrics = action.get("metrics") or {}
     action_latency = action.get("inspect_latency_ms") or action_metrics.get("latency_ms") or {}
+    action_latency_p95 = action_latency.get("p95")
     cpu_increment = action.get("cpu_increment_pct")
+    cpu_status = action.get("cpu_comparison_status")
     traceability = report.get("plan_traceability") or {}
     trace_counts = traceability.get("counts") or {}
-
     scorecard = [
         {
             "name": "资产盘点准确率",
             "target": "目标 ≥99%",
-            "actual": pct(static_metrics.get("asset_coverage")),
-            "detail": f"{static_metrics.get('asset_found', 0)}/{static_metrics.get('asset_expected', 0)}",
-            "status": "pass" if static_metrics.get("asset_coverage", 0) >= 0.99 else "wait",
+            "actual": pct(evaluated_asset.get("precision")),
+            "detail": "本地标注集 / Precision",
+            "status": "pass" if static_scope_verified and (evaluated_asset.get("precision") or 0) >= 0.99 else "wait",
+        },
+        {
+            "name": "资产漏报率",
+            "target": "目标 <5%",
+            "actual": pct(evaluated_asset.get("miss_rate")),
+            "detail": "本地标注集 / FN",
+            "status": "pass" if static_scope_verified and evaluated_asset.get("miss_rate") is not None and evaluated_asset["miss_rate"] < 0.05 else "wait",
         },
         {
             "name": "风险识别准确率",
             "target": "目标 ≥95%",
-            "actual": pct(static_metrics.get("risk_recall")),
-            "detail": f"{static_metrics.get('required_risks_detected', 0)}/{static_metrics.get('required_risks', 0)}",
-            "status": "pass" if static_metrics.get("risk_recall", 0) >= 0.95 else "wait",
+            "actual": pct(evaluated_risk.get("precision")),
+            "detail": "本地标注集 / Precision",
+            "status": "pass" if static_scope_verified and (evaluated_risk.get("precision") or 0) >= 0.95 else "wait",
+        },
+        {
+            "name": "风险漏报率",
+            "target": "目标 <5%",
+            "actual": pct(evaluated_risk.get("miss_rate")),
+            "detail": "本地标注集 / FN",
+            "status": "pass" if static_scope_verified and evaluated_risk.get("miss_rate") is not None and evaluated_risk["miss_rate"] < 0.05 else "wait",
         },
         {
             "name": "规则合同",
@@ -129,16 +148,16 @@ def build_data(report: dict[str, Any]) -> dict[str, Any]:
         {
             "name": "阻断响应 p95",
             "target": "目标 <1000ms",
-            "actual": ms(action_latency.get("p95")),
+            "actual": ms(action_latency_p95),
             "detail": "Inspect latency",
-            "status": "pass" if action_latency.get("p95", 1000) < 1000 else ("fail" if action_latency else "wait"),
+            "status": "pass" if action_latency_p95 is not None and action_latency_p95 < 1000 else ("fail" if action_latency_p95 is not None else "wait"),
         },
         {
             "name": "DefenseClaw 增量 CPU",
             "target": "目标 ≤5%",
             "actual": pct_points(cpu_increment),
             "detail": "Action vs baseline",
-            "status": "pass" if cpu_increment is not None and cpu_increment <= 5 else ("fail" if action else "wait"),
+            "status": "pass" if cpu_status == "complete" and cpu_increment is not None and cpu_increment <= 5 else ("fail" if cpu_status == "complete" and action else "wait"),
         },
         {
             "name": "正常业务成功率",

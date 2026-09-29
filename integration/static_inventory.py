@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 from datetime import UTC, datetime
@@ -12,7 +13,7 @@ import yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_RANGE_ROOT = PROJECT_ROOT / "task" / "AgentRange-player"
+DEFAULT_RANGE_ROOT = PROJECT_ROOT / "task" / "AgentRange-player-full"
 DEFAULT_CONTRACTS_DIR = PROJECT_ROOT / "integration" / "agentrange_contracts"
 DEFAULT_TAXONOMY = PROJECT_ROOT / "integration" / "risk_taxonomy.yaml"
 DEFAULT_OUTPUT = PROJECT_ROOT / "integration" / "reports" / "static-scan.json"
@@ -24,17 +25,46 @@ SCAN_ROOTS = (
     "opspilot-app",
     "llm-stub",
     "langflow",
-    "backends",
-    "attack",
-    "scenario-runner",
-    "corpus-generator",
     "docker-compose.yml",
     ".env.example",
 )
+PYTHON_AST_RULES = {
+    "AR-STATIC-HIDDEN-TOOL",
+    "AR-STATIC-SHELL-TRUE",
+    "AR-STATIC-ARBITRARY-FILE",
+}
 
 
 def load_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def python_ast_matches(path: Path) -> dict[str, set[int]]:
+    """Find executable Python constructs without matching comments or strings."""
+    matches: dict[str, set[int]] = {rule: set() for rule in PYTHON_AST_RULES}
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (SyntaxError, UnicodeError):
+        return matches
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            parameters = {arg.arg for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs}
+            for child in ast.walk(node):
+                if (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+                        and child.func.id == "open" and child.args
+                        and isinstance(child.args[0], ast.Name) and child.args[0].id in parameters):
+                    matches["AR-STATIC-ARBITRARY-FILE"].add(child.lineno)
+        if not isinstance(node, ast.Call):
+            continue
+        name = node.func.id if isinstance(node.func, ast.Name) else node.func.attr if isinstance(node.func, ast.Attribute) else ""
+        keywords = {keyword.arg: keyword.value for keyword in node.keywords if keyword.arg}
+        if name == "Tool" and isinstance(keywords.get("hidden"), ast.Constant) and keywords["hidden"].value is True:
+            matches["AR-STATIC-HIDDEN-TOOL"].add(node.lineno)
+        if (name in {"run", "Popen", "call", "check_call", "check_output"}
+                and isinstance(keywords.get("shell"), ast.Constant) and keywords["shell"].value is True):
+            matches["AR-STATIC-SHELL-TRUE"].add(node.lineno)
+    return matches
 
 
 def iter_sources(root: Path):
@@ -48,9 +78,115 @@ def iter_sources(root: Path):
                 yield path
 
 
-def asset_for_source(source: str, assets: list[dict]) -> str:
+def _environment(service: dict) -> dict[str, str]:
+    value = service.get("environment") or {}
+    if isinstance(value, dict):
+        return {str(key): str(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return {
+            str(item).split("=", 1)[0]: str(item).split("=", 1)[1]
+            for item in value if isinstance(item, str) and "=" in item
+        }
+    return {}
+
+
+def _default_model(root: Path, agent_name: str) -> str | None:
+    path = root / agent_name / "api" / "app.py"
+    if not path.is_file():
+        return None
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (SyntaxError, UnicodeError):
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "DEFAULT_MODEL" for target in node.targets
+        ):
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                return node.value.value
+    return None
+
+
+def discover_assets(root: Path) -> dict[str, dict[str, str]]:
+    """Discover typed assets from deployment and Skill metadata."""
+    compose_path = root / "docker-compose.yml"
+    compose = load_yaml(compose_path)
+    services = compose.get("services") or {}
+    discovered: dict[str, dict[str, str]] = {}
+
+    def add(asset_id: str, kind: str, name: str, source: str) -> None:
+        discovered[asset_id] = {"id": asset_id, "type": kind, "name": name, "source": source}
+
+    for service_name, service in services.items():
+        if not isinstance(service, dict):
+            continue
+        env = _environment(service)
+        image = str(service.get("image") or "").lower()
+        service_source = "docker-compose.yml"
+        if service_name.startswith("mcp-") and "SERVER" in env:
+            name = service_name.removeprefix("mcp-")
+            add(f"mcp.{name}", "mcp_server", name, service_source)
+        elif "LLM_BASE" in env and any(key.startswith("MCP_") for key in env):
+            name = service_name.removesuffix("-app")
+            add(f"agent.{name}", "agent", name, service_source)
+            model = _default_model(root, service_name)
+            if model:
+                add(f"model.{model}", "model", model, f"{service_name}/api/app.py")
+        elif "langflow" in service_name.lower() or "langflow" in image:
+            add(f"framework.{service_name}", "supply_chain_framework", service_name, service_source)
+        elif image.startswith(("postgres:", "mysql:", "mariadb:")):
+            name = service_name.split("-", 1)[-1]
+            add(f"database.{name}", "database", service_name, service_source)
+
+        port_name = service_name.removesuffix("-app")
+        if image.startswith("postgres:"):
+            port_name = "postgres"
+        for port in service.get("ports") or []:
+            host_port = str(port).split(":")[0] if isinstance(port, str) else str(port.get("published") or "")
+            if host_port:
+                add(f"port.{port_name}", "host_port", host_port, service_source)
+
+    for network_name in (compose.get("networks") or {}):
+        name = str(network_name).removesuffix("-net")
+        add(f"network.{name}", "network", str(network_name), "docker-compose.yml")
+    for skill_file in sorted((root / "skills").glob("*/SKILL.md")):
+        name = skill_file.parent.name
+        add(f"skill.{name}", "skill", name, skill_file.relative_to(root).as_posix())
+    return discovered
+
+
+def compose_service_lines(path: Path) -> dict[int, str]:
+    """Map Compose source lines to service names using YAML node locations."""
+    root = yaml.compose(path.read_text(encoding="utf-8"))
+    if not isinstance(root, yaml.MappingNode):
+        return {}
+    for key, value in root.value:
+        if isinstance(key, yaml.ScalarNode) and key.value == "services" and isinstance(value, yaml.MappingNode):
+            lines: dict[int, str] = {}
+            for service_key, service_value in value.value:
+                if isinstance(service_key, yaml.ScalarNode):
+                    for line in range(service_key.start_mark.line + 1, service_value.end_mark.line + 2):
+                        lines[line] = service_key.value
+            return lines
+    return {}
+
+
+def asset_for_source(source: str, assets: list[dict], *, service: str = "") -> str:
+    if service:
+        if service.startswith("mcp-"):
+            return "mcp." + service.removeprefix("mcp-")
+        if service == "langflow":
+            return "framework.langflow"
+        if service.endswith("-app"):
+            return "agent." + service.removesuffix("-app")
+        if service.startswith("postgres-"):
+            return "database." + service.split("-", 1)[-1]
+        return "service." + service
     normalized = source.replace("\\", "/")
-    exact = {asset["source"].replace("\\", "/"): asset["id"] for asset in assets}
+    exact = {
+        asset["source"].replace("\\", "/"): asset["id"]
+        for asset in assets if asset["source"] != "docker-compose.yml"
+    }
     if normalized in exact:
         return exact[normalized]
     for asset in assets:
@@ -70,44 +206,61 @@ def scan(
     contract = load_yaml(contracts_dir / "assets.yaml")
     taxonomy = load_yaml(taxonomy_path)
     assets = contract["assets"]
+    discovered = discover_assets(range_root)
+    compose_lines = compose_service_lines(range_root / "docker-compose.yml")
     findings = []
     seen = set()
     for path in iter_sources(range_root):
         relative = path.relative_to(range_root).as_posix()
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        semantic_matches = python_ast_matches(path) if path.suffix == ".py" else {}
         for rule in taxonomy["rules"]:
-            for pattern in rule["patterns"]:
-                for line_number, line in enumerate(lines, 1):
-                    if pattern.casefold() not in line.casefold():
-                        continue
-                    asset_id = asset_for_source(relative, assets)
-                    identity = (rule["id"], asset_id, relative, line_number)
-                    if identity in seen:
-                        continue
-                    seen.add(identity)
-                    findings.append(
-                        {
-                            "finding_id": hashlib.sha256("|".join(map(str, identity)).encode()).hexdigest()[:16],
-                            "rule_id": rule["id"],
-                            "title": rule["title"],
-                            "category": rule["category"],
-                            "severity": rule["severity"],
-                            "confidence": rule["confidence"],
-                            "asset_id": asset_id,
-                            "source": relative,
-                            "line": line_number,
-                            "evidence": line.strip()[:240],
-                        }
-                    )
+            if rule["id"] in semantic_matches:
+                candidates = ((line_number, lines[line_number - 1]) for line_number in sorted(semantic_matches[rule["id"]]))
+            else:
+                candidates = (
+                    (line_number, line)
+                    for pattern in rule["patterns"]
+                    for line_number, line in enumerate(lines, 1)
+                    if pattern.casefold() in line.casefold()
+                )
+            for line_number, line in candidates:
+                service = compose_lines.get(line_number, "") if relative == "docker-compose.yml" else ""
+                asset_id = asset_for_source(relative, assets, service=service)
+                identity = (rule["id"], asset_id, relative, line_number)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                findings.append(
+                    {
+                        "finding_id": hashlib.sha256("|".join(map(str, identity)).encode()).hexdigest()[:16],
+                        "rule_id": rule["id"],
+                        "title": rule["title"],
+                        "category": rule["category"],
+                        "severity": rule["severity"],
+                        "confidence": rule["confidence"],
+                        "asset_id": asset_id,
+                        "source": relative,
+                        "line": line_number,
+                        "evidence": line.strip()[:240],
+                    }
+                )
 
-    existing_assets = [asset for asset in assets if (range_root / asset["source"]).exists()]
+    expected_ids = {asset["id"] for asset in assets}
+    existing_assets = [
+        {**asset, "observed_source": discovered[asset["id"]]["source"]}
+        for asset in assets if asset["id"] in discovered
+    ]
+    unexpected_assets = [discovered[asset_id] for asset_id in sorted(set(discovered) - expected_ids)]
+    existing_assets.extend(unexpected_assets)
     asset_observations = [
         {
             "asset_id": asset["id"],
             "type": asset.get("type", ""),
             "source": asset["source"],
             "source_exists": (range_root / asset["source"]).exists(),
-            "observed_by_source_probe": any(item["asset_id"] == asset["id"] for item in findings),
+            "observed_by_source_probe": asset["id"] in discovered,
+            "observed_source": discovered.get(asset["id"], {}).get("source"),
         }
         for asset in assets
     ]
@@ -125,9 +278,9 @@ def scan(
         "findings": findings,
         "metrics": {
             "asset_expected": len(assets),
-            "asset_found": len(existing_assets),
-            "asset_coverage": round(len(existing_assets) / len(assets), 6) if assets else 1.0,
-            "contract_asset_coverage": round(len(existing_assets) / len(assets), 6) if assets else 1.0,
+            "asset_found": len(discovered),
+            "asset_coverage": round(len(expected_ids & set(discovered)) / len(assets), 6) if assets else 1.0,
+            "contract_asset_coverage": round(len(expected_ids & set(discovered)) / len(assets), 6) if assets else 1.0,
             "asset_precision": None,
             "asset_recall": None,
             "asset_metric_status": "requires_independent_asset_ground_truth",
@@ -139,6 +292,7 @@ def scan(
             "high_risk_benign_findings": len(high_risk_benign),
         },
         "asset_observations": asset_observations,
+        "unexpected_assets": unexpected_assets,
         "missing_required_risks": sorted([list(item) for item in required - detected]),
         "benign_control_violations": high_risk_benign,
     }

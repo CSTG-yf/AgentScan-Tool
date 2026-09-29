@@ -50,8 +50,10 @@ def build_report(root: Path = ROOT) -> dict[str, Any]:
     events = read_jsonl(reports / "runtime-events.jsonl")
     chains_doc = read_json(reports / "attack-chains.json", {"chains": []})
     static = read_json(reports / "static-scan.json", {})
+    static_evaluation = read_json(reports / "static-eval.json", {})
     rules = read_json(reports / "rule-contract.json", {})
     benchmark = read_json(results / "summary.json", {})
+    benchmark_provenance = read_json(results / "source-manifest.json", {})
     chains = chains_doc.get("chains", [])
     decisions = Counter(str(event.get("decision") or "unknown") for event in events)
     severities = Counter(str(event.get("severity") or "INFO") for event in events)
@@ -80,6 +82,7 @@ def build_report(root: Path = ROOT) -> dict[str, Any]:
         "scope": "AgentRange non-invasive DefenseClaw adapter",
         "static": {
             "metrics": static_metrics,
+            "evaluation": static_evaluation,
             "finding_count": len(static.get("findings", [])),
             "high_critical": sum(item.get("severity") in {"HIGH", "CRITICAL"} for item in static.get("findings", [])),
             "missing_required_risks": static.get("missing_required_risks", []),
@@ -92,6 +95,7 @@ def build_report(root: Path = ROOT) -> dict[str, Any]:
         },
         "runtime": runtime_summary,
         "benchmark": benchmark,
+        "benchmark_provenance": benchmark_provenance,
         "plan_traceability": traceability,
         "chains": chains[:100],
         "recent_events": events[-200:],
@@ -108,7 +112,9 @@ def build_report(root: Path = ROOT) -> dict[str, Any]:
 def to_markdown(report: dict[str, Any]) -> str:
     runtime = report["runtime"]
     static = report["static"]
+    static_evaluation = static.get("evaluation") or {}
     benchmark = report.get("benchmark") or {}
+    benchmark_provenance = report.get("benchmark_provenance") or {}
     traceability = report.get("plan_traceability") or {"counts": {}, "requirements": []}
     lines = [
         "# AgentRange DefenseClaw Report",
@@ -121,6 +127,17 @@ def to_markdown(report: dict[str, Any]) -> str:
         f"- Required risk recall: {(static.get('metrics') or {}).get('risk_recall', 'not-run')}",
         f"- Findings: {static['finding_count']} (HIGH/CRITICAL: {static['high_critical']})",
         "",
+    ]
+    if static_evaluation:
+        asset = static_evaluation.get("asset") or {}
+        risk = static_evaluation.get("risk") or {}
+        lines.extend([
+            f"- Local labeled asset precision/recall: {asset.get('precision')} / {asset.get('recall')}",
+            f"- Local labeled risk precision/recall: {risk.get('precision')} / {risk.get('recall')}",
+            f"- Static evaluation scope: {static_evaluation.get('scope', 'unknown')}",
+            "",
+        ])
+    lines.extend([
         "## Runtime Evidence",
         "",
         f"- Events: {runtime['event_count']}",
@@ -132,12 +149,17 @@ def to_markdown(report: dict[str, Any]) -> str:
         "",
         "## Benchmark",
         "",
-    ]
+    ])
     acceptance = benchmark.get("acceptance") or {}
     if acceptance:
         lines.extend(f"- {'PASS' if passed else 'WAIT/FAIL'}: {name}" for name, passed in acceptance.items())
     else:
         lines.append("- Benchmark summary not generated.")
+    if benchmark_provenance:
+        lines.extend(["", "### Benchmark Provenance", ""])
+        lines.append(f"- Comparable mode set: {benchmark_provenance.get('comparable_mode_set', 'unknown')}")
+        for note in benchmark_provenance.get("notes", []):
+            lines.append(f"- {note}")
     lines.extend(["", "## Plan Traceability", ""])
     counts = traceability.get("counts") or {}
     lines.append(

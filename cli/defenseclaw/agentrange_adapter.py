@@ -669,7 +669,14 @@ def _portable_path(path: Path, *, base_dir: Path) -> str:
     try:
         return Path(os.path.relpath(path.resolve(), start=base_dir.resolve())).as_posix()
     except ValueError:
-        return str(path.resolve())
+        # A generated bundle may live on another Windows drive than the
+        # checkout. Keep repository-owned sources portable in the public plan;
+        # the compose renderer still uses the original absolute path.
+        repo_root = Path(__file__).resolve().parents[2]
+        try:
+            return path.resolve().relative_to(repo_root).as_posix()
+        except ValueError:
+            return str(path.resolve())
 
 
 def _public_plan(plan: dict[str, Any]) -> dict[str, Any]:

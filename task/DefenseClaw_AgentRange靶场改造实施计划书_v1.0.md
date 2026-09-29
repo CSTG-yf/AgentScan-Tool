@@ -4,7 +4,7 @@
 
 版本：v1.0
 日期：2026-07-19
-适用范围：DefenseClaw 主工程与 `task/AgentRange-player` 测试靶场
+适用范围：DefenseClaw 主工程与 `task/AgentRange-player-full` 测试靶场
 实施约束：不运行 Go 测试；不建设 CI/CD；不依赖 GitHub 测试；不得使用靶场答案接口或固定实例特征参与检测。
 
 ## 1. 执行摘要
@@ -15,7 +15,7 @@
 
 ## 2. 背景与问题定义
 
-AgentRange-player 模拟一个由 OpsPilot Agent、Langflow、LLM Stub、PostgreSQL、8 个 MCP、7 个 Skill、内部网络和模拟外网组成的企业 Agent 环境。靶场包含提示注入、恶意 Skill/MCP、敏感数据外传、下载执行、跨租户访问、命令执行和正常业务等流量。
+AgentRange-player-full 模拟一个由 OpsPilot Agent、Langflow、LLM Stub、PostgreSQL、8 个 MCP、7 个 Skill、内部网络和模拟外网组成的企业 Agent 环境。靶场包含提示注入、恶意 Skill/MCP、敏感数据外传、下载执行、跨租户访问、命令执行和正常业务等流量。
 
 原 DefenseClaw 已具备 Skill/MCP 扫描、CodeGuard、`/api/v1/inspect/*`、规则引擎、observe/action、审计与可观测能力，但缺少与靶场一致的身份上下文、四阶段调用、Langflow 入站保护、统一 RangeEvent 证据、靶场资产分母、攻击链还原和可复现三模式 benchmark。因此需要同时改造 DefenseClaw 通用能力与 AgentRange 适配层，不能只在靶场脚本中伪造检测结果。
 
@@ -171,7 +171,7 @@ inspect API 仅绑定受限地址或通过受控转发供 Docker 访问，必须
 ### 6.12 NFR-02 可维护性与兼容性
 
 - 新字段全部可选，保持已有 connector 和旧调用者兼容。
-- 靶场配置集中在 `task/AgentRange-player`，核心仓不保存场景样本答案。
+- 靶场配置集中在 `task/AgentRange-player-full`，核心仓不保存场景样本答案。
 - Schema、规则与指标口径通过 Python 合同测试冻结。
 
 ## 7. 接口与数据合同
@@ -211,8 +211,8 @@ inspect API 仅绑定受限地址或通过受控转发供 Docker 访问，必须
 |---|---|---|
 | DefenseClaw 核心 | `internal/gateway/inspect.go`、`rules.go` | 增加通用 context 授权检查和规则映射，保持模式语义 |
 | 核心验证 | `internal/gateway/agentrange_adapter_test.go` | 保留为源码合同样例；本项目不执行 Go 测试 |
-| OpsPilot Adapter | `task/AgentRange-player/opspilot-app/security/defenseclaw.py` | 四阶段、Token、超时、fail mode、证据写入 |
-| Langflow Guard | `task/AgentRange-player/integration/langflow_guard.py` | 入站检查、403 阻断、转发、证据写入 |
+| OpsPilot Adapter | `task/AgentRange-player-full/opspilot-app/security/defenseclaw.py` | 四阶段、Token、超时、fail mode、证据写入 |
+| Langflow Guard | `task/AgentRange-player-full/integration/langflow_guard.py` | 入站检查、403 阻断、转发、证据写入 |
 | Compose/环境 | `docker-compose.yml`、`.env.example` | 受控 Gateway 地址、Token、证据卷、保护端口 |
 | 合同与资产 | `contracts/`、`integration/static_inventory.py` | 冻结 schema、资产、场景矩阵、风险 taxonomy |
 | 规则与策略 | `integration/runtime_rules.yaml`、`policy.yaml` | 攻击/良性合同、三模式与 scope/egress 策略 |

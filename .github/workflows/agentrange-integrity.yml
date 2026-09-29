@@ -1,17 +1,35 @@
-name: AgentRange integrity
+name: AgentRange full arena validation
 
 on:
   workflow_dispatch:
   pull_request:
     paths:
-      - "task/AgentRange-player/**"
+      - "task/AgentRange-player-full/**"
+      - "task/agentrange-adapter/**"
+      - "bench/**"
+      - "integration/**"
+      - "cli/defenseclaw/agentrange_*.py"
+      - "policies/guardrail/**"
+      - "test/agentrange_benchmark_test.py"
+      - "test/test_agentrange_runtime.py"
+      - "test/test_agentrange_static_inventory.py"
+      - "internal/gateway/**"
       - "internal/watcher/**"
       - "internal/audit/actions.go"
       - ".github/workflows/agentrange-integrity.yml"
   push:
-    branches: [main, qjq]
+    branches: [main, qjq, "揭榜赛作品"]
     paths:
-      - "task/AgentRange-player/**"
+      - "task/AgentRange-player-full/**"
+      - "task/agentrange-adapter/**"
+      - "bench/**"
+      - "integration/**"
+      - "cli/defenseclaw/agentrange_*.py"
+      - "policies/guardrail/**"
+      - "test/agentrange_benchmark_test.py"
+      - "test/test_agentrange_runtime.py"
+      - "test/test_agentrange_static_inventory.py"
+      - "internal/gateway/**"
       - "internal/watcher/**"
       - "internal/audit/actions.go"
       - ".github/workflows/agentrange-integrity.yml"
@@ -30,14 +48,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Check and exercise fixture recovery
+      - name: Test AgentRange scanner and benchmark contracts
         run: |
-          python -m unittest task/AgentRange-player/integrity/test_check.py
-          python task/AgentRange-player/integrity/check.py
+          python -m pip install -r task/AgentRange-player-full/requirements-dev.txt
+          python -m pytest -q test/test_agentrange_static_inventory.py test/agentrange_benchmark_test.py test/test_agentrange_runtime.py
+      - name: Test AgentRange guardrail rules
+        run: go test ./internal/gateway -run '^TestAgentRangeRulePacksContainFrameworkExploitRules$' -count=1
       - name: Test protected fixture enforcement
         run: go test ./internal/watcher ./internal/audit
-      - name: Build and verify OpsPilot image
+      - name: Build and verify full arena OpsPilot image
         run: |
-          docker build -t agentrange-integrity-check -f task/AgentRange-player/opspilot-app/Dockerfile task/AgentRange-player
-          docker run --rm --entrypoint python agentrange-integrity-check /app/integrity/check.py
+          docker build -t agentrange-integrity-check -f task/AgentRange-player-full/opspilot-app/Dockerfile task/AgentRange-player-full
           docker run --rm --entrypoint python agentrange-integrity-check -c "from api.app import loaded_skill_message; assert 'meeting-summary' in loaded_skill_message('meeting-summary')['content']"

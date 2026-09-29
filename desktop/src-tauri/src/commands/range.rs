@@ -307,7 +307,7 @@ fn default_development_root() -> Option<PathBuf> {
         .join("..")
         .join("..")
         .join("task")
-        .join("AgentRange-player");
+        .join("AgentRange-player-full");
     path.join("docker-compose.yml").is_file().then_some(path)
 }
 
@@ -932,7 +932,7 @@ pub fn get_range_status(app: tauri::AppHandle) -> RangeStatus {
             docker_available: false,
             running_services: Vec::new(),
             state: "unconfigured",
-            detail: "请选择 AgentRange-player 目录".to_owned(),
+            detail: "请选择 AgentRange-player-full 目录".to_owned(),
         };
     };
     let mode = configured_mode(&app);

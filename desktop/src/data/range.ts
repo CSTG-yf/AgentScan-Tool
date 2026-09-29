@@ -1,7 +1,7 @@
 export const replayCommandForScenario = (scenario: string) =>
   scenario === "all"
-    ? 'uv run --with httpx python ".\\task\\AgentRange-player\\scenario-runner\\runner.py"'
-    : `uv run --with httpx python ".\\task\\AgentRange-player\\scenario-runner\\runner.py" ${scenario}`;
+    ? 'uv run --with httpx python ".\\task\\AgentRange-player-full\\scenario-runner\\runner.py"'
+    : `uv run --with httpx python ".\\task\\AgentRange-player-full\\scenario-runner\\runner.py" ${scenario}`;
 
 export const defaultReplayCommand = replayCommandForScenario("C2-A");
 

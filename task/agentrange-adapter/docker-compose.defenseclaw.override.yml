@@ -28,8 +28,10 @@ services:
     - opspilot-net
     environment:
       PYTHONUNBUFFERED: '1'
+      DC_CONTEXT_RELAY_URL: http://defenseclaw-context-relay:9101
       DC_GATEWAY_BASE: http://host.docker.internal:18970
       DC_FAIL_MODE: open
+      DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
       DC_INSPECT_TIMEOUT_MS: '250'
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: opspilot
@@ -53,8 +55,10 @@ services:
     - opspilot-net
     environment:
       PYTHONUNBUFFERED: '1'
+      DC_CONTEXT_RELAY_URL: http://defenseclaw-context-relay:9101
       DC_GATEWAY_BASE: http://host.docker.internal:18970
       DC_FAIL_MODE: open
+      DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
       DC_INSPECT_TIMEOUT_MS: '250'
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: llm
@@ -76,8 +80,10 @@ services:
     - opspilot-net
     environment:
       PYTHONUNBUFFERED: '1'
+      DC_CONTEXT_RELAY_URL: http://defenseclaw-context-relay:9101
       DC_GATEWAY_BASE: http://host.docker.internal:18970
       DC_FAIL_MODE: open
+      DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
       DC_INSPECT_TIMEOUT_MS: '250'
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: mcp
@@ -96,6 +102,16 @@ services:
     - mcp-sandbox-exec
     - mcp-shell-runner
     - mcp-threat-intel
+  defenseclaw-context-relay:
+    image: python:3.12-slim
+    command: python /opt/defenseclaw/context_relay.py
+    volumes:
+    - ../agentrange-adapter/context_relay.py:/opt/defenseclaw/context_relay.py:ro
+    environment:
+      PYTHONUNBUFFERED: '1'
+      DC_CONTEXT_TTL_SECONDS: '120'
+    networks:
+    - opspilot-net
   langflow:
     environment:
       OPENAI_API_BASE: http://defenseclaw-llm-proxy:8000/v1
@@ -114,8 +130,10 @@ services:
     - opspilot-net
     environment:
       PYTHONUNBUFFERED: '1'
+      DC_CONTEXT_RELAY_URL: http://defenseclaw-context-relay:9101
       DC_GATEWAY_BASE: http://host.docker.internal:18970
       DC_FAIL_MODE: open
+      DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
       DC_INSPECT_TIMEOUT_MS: '250'
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: langflow
@@ -127,7 +145,7 @@ services:
     - 7860:7860
 x-defenseclaw-agentrange:
   non_invasive: true
-  source_compose: ../AgentRange-player/docker-compose.yml
+  source_compose: ../AgentRange-player-full/docker-compose.yml
   gateway_base: http://host.docker.internal:18970
   routes:
   - kind: app
@@ -191,6 +209,7 @@ x-defenseclaw-agentrange:
     via: defenseclaw-langflow-ingress
     to: langflow
   event_model:
+  - instance_id
   - session_id
   - trace_id
   - stage

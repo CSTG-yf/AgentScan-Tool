@@ -385,6 +385,20 @@ func (a *APIServer) inspectToolPolicyCtx(ctx context.Context, req *ToolInspectRe
 	// Scan against the request connector's rule set so each connector
 	// enforces its own pack (empty ⇒ process-global default set).
 	ruleFindings := ScanAllRulesForConnector(req.Connector, argsStr, toolName)
+	// A credential-bearing file read is a dangerous capability invocation,
+	// not merely a suspicious path mention. External rule packs intentionally
+	// keep some sensitive-path rules at HIGH for prompt/reporting surfaces;
+	// when the request is an actual read-file operation, promote the matching
+	// finding to CRITICAL before resolving the runtime action. This prevents
+	// secrets from reaching the tool and keeps the rule reusable across MCP
+	// namespaces and agent frameworks.
+	if isReadToolName(toolName) && hasCredentialFileFinding(ruleFindings) {
+		for i := range ruleFindings {
+			if hasTag(ruleFindings[i].Tags, "credential") && hasTag(ruleFindings[i].Tags, "file-sensitive") {
+				ruleFindings[i].Severity = "CRITICAL"
+			}
+		}
+	}
 
 	// CodeGuard: scan file content for any file-write tool.
 	//
@@ -474,6 +488,15 @@ func (a *APIServer) inspectToolPolicyCtx(ctx context.Context, req *ToolInspectRe
 	return verdict
 }
 
+func hasCredentialFileFinding(findings []RuleFinding) bool {
+	for _, finding := range findings {
+		if hasTag(finding.Tags, "credential") && hasTag(finding.Tags, "file-sensitive") {
+			return true
+		}
+	}
+	return false
+}
+
 // inspectToolAuthorizationContext performs deterministic confused-deputy
 // checks using optional context supplied by an application adapter. Unknown
 // context shapes are ignored for backward compatibility. The first supported
@@ -522,9 +545,13 @@ func inspectToolAuthorizationContext(req *ToolInspectRequest) []RuleFinding {
 	evidence := fmt.Sprintf("principal=%s allowed_tenant=%s requested_tenant=%s",
 		principal, allowedTenant, requestedTenant)
 	return []RuleFinding{{
-		RuleID:     "AUTH-TENANT-SCOPE",
-		Title:      "Cross-tenant tool request exceeds principal scope",
-		Severity:   "HIGH",
+		RuleID: "AUTH-TENANT-SCOPE",
+		Title:  "Cross-tenant tool request exceeds principal scope",
+		// A cross-tenant read is a direct authorization boundary violation,
+		// not merely a sensitive-data hint. Keep it in the deterministic
+		// blocking tier so balanced/action policies cannot downgrade it to
+		// an alert and forward the tool call.
+		Severity:   "CRITICAL",
 		Confidence: 0.99,
 		Evidence:   evidence,
 		Tags:       []string{"authorization", "tenant", "confused-deputy"},

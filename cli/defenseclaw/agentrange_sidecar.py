@@ -25,12 +25,15 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
+import base64
+from concurrent.futures import Future, ThreadPoolExecutor
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 from uuid import uuid4
  
@@ -48,6 +51,10 @@ HOP_BY_HOP_HEADERS = {
 # Request-local operation metadata; no audit data is used to construct events.
 from contextvars import ContextVar
 _runtime_request = ContextVar("agentrange_runtime_request", default=None)
+_runtime_result_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="runtime-result")
+_audit_executor = ThreadPoolExecutor(max_workers=16, thread_name_prefix="runtime-audit")
+_audit_pending = 0
+_audit_pending_lock = threading.Lock()
 
 MAX_FORWARD_BODY_BYTES = int(os.getenv("DC_MAX_FORWARD_BODY_BYTES", str(10 * 1024 * 1024)))
 MAX_INSPECT_TEXT_BYTES = int(os.getenv("DC_MAX_INSPECT_TEXT_BYTES", str(256 * 1024)))
@@ -75,6 +82,34 @@ def inspect_timeout() -> float:
         return 0.25
 
 
+def inspection_bypassed() -> bool:
+    """Disable gateway calls only for an explicit benchmark baseline.
+
+    The flag is opt-in and remains false for normal observe/action operation;
+    it lets a same-topology resource window measure proxy cost without
+    silently changing production enforcement behavior.
+    """
+    return getenv("DC_BYPASS_INSPECTION", "0").lower() in {"1", "true", "yes"}
+
+
+def baseline_allow_verdict() -> dict[str, Any]:
+    return {
+        "action": "allow",
+        "raw_action": "allow",
+        "severity": "NONE",
+        "reason": "benchmark baseline inspection bypass",
+        "would_block": False,
+    }
+
+
+def runtime_result_timeout() -> float:
+    raw = getenv("DC_RUNTIME_RESULT_TIMEOUT_MS", "250")
+    try:
+        return max(25, int(raw)) / 1000.0
+    except ValueError:
+        return 0.25
+
+
 def connector_name() -> str:
     return getenv("DC_CONNECTOR", "agentrange") or "agentrange"
 
@@ -93,6 +128,21 @@ def text_snippet(data: bytes) -> str:
         return ""
     data = data[:MAX_INSPECT_TEXT_BYTES]
     return data.decode("utf-8", errors="replace")
+
+
+def inspection_response_body(kind: str, path: str, status: int, body: bytes) -> bytes:
+    """Keep issued credentials out of response inspection and audit records."""
+    auth_paths = {"langflow": "/api/v1/auto_login", "opspilot": "/login"}
+    if status < 200 or status >= 300 or path != auth_paths.get(kind):
+        return body
+    payload = json_loads_maybe(body)
+    if not isinstance(payload, dict):
+        return body
+    sanitized = dict(payload)
+    for key in ("access_token", "refresh_token"):
+        if isinstance(sanitized.get(key), str):
+            sanitized[key] = "[issued credential]"
+    return dumps_compact(sanitized).encode("utf-8")
 
 
 def dumps_compact(value: Any) -> str:
@@ -134,6 +184,87 @@ def extract_authorization_context(headers: Any) -> dict[str, Any] | None:
     if not isinstance(scope, dict):
         return None
     return {"principal": {"sub": subject, "role": role, "scope": scope}}
+
+
+def _decode_jwt_claims(token: str) -> dict[str, Any] | None:
+    """Decode claims for transport after the target app authenticates them.
+
+    The adapter does not make an authorization decision from this payload and
+    never forwards it as a credential.  The range application remains the
+    authority that verifies the JWT signature and expiry; this unverified
+    projection only lets downstream sidecars correlate the already-authenticated
+    request.  Invalid or malformed tokens produce no context.
+    """
+    parts = token.strip().split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        padded = parts[1] + "=" * (-len(parts[1]) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
+    except (ValueError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(claims, dict):
+        return None
+    subject = str(claims.get("sub") or "").strip()
+    scope = claims.get("scope")
+    if not subject or not isinstance(scope, dict):
+        return None
+    role = str(claims.get("role") or "").strip()
+    return {"principal": {"sub": subject, "role": role, "scope": scope}}
+
+
+def extract_jwt_authorization_context(headers: Any) -> dict[str, Any] | None:
+    authorization = str(headers.get("Authorization") or "").strip()
+    if not authorization.lower().startswith("bearer "):
+        return None
+    return _decode_jwt_claims(authorization.split(" ", 1)[1])
+
+
+def context_relay_url() -> str:
+    return getenv("DC_CONTEXT_RELAY_URL").rstrip("/")
+
+
+def _relay_request(
+    method: str,
+    session_id: str,
+    trace_id: str,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    base = context_relay_url()
+    if not base or not session_id or (method != "GET" and not trace_id):
+        return None
+    query = urlencode({"session_id": session_id, "trace_id": trace_id})
+    url = f"{base}/v1/context"
+    data = None
+    if method == "PUT":
+        data = json.dumps({"session_id": session_id, "trace_id": trace_id, "context": context}, separators=(",", ":")).encode("utf-8")
+    elif method == "GET":
+        url += "?" + query
+    request = Request(url, data=data, method=method)
+    request.add_header("Content-Type", "application/json")
+    try:
+        with urlopen(request, timeout=min(0.25, inspect_timeout())) as response:
+            parsed = json_loads_maybe(response.read())
+            return parsed if isinstance(parsed, dict) else {}
+    except (HTTPError, URLError, TimeoutError, OSError):
+        return None
+
+
+def relay_authorization_context(session_id: str, trace_id: str, context: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Register an ingress context or retrieve it in a downstream sidecar."""
+    if context:
+        _relay_request("PUT", session_id, trace_id, context)
+        return context
+    # Internal clients commonly retain the stable session but mint a new
+    # trace id. Querying by session first avoids a failed exact lookup on every
+    # downstream request while still keeping the relay scoped to one run.
+    response = _relay_request("GET", session_id, "")
+    value = response.get("context") if response else None
+    if isinstance(value, dict):
+        return value
+    response = _relay_request("GET", session_id, trace_id)
+    value = response.get("context") if response else None
+    return value if isinstance(value, dict) else None
 
 
 def authed_request(url: str, payload: dict[str, Any], *, timeout: float) -> Request:
@@ -181,7 +312,9 @@ def inspect_call(endpoint: str, payload: dict[str, Any]) -> tuple[dict[str, Any]
                 sys.stderr.write("[runtime] inspection persistence/evaluation failed; see gateway log\n")
             elif state:
                 state["pending_checks"].remove(check)
-    except (HTTPError, URLError, TimeoutError, OSError) as exc:
+    except HTTPError as exc:
+        return None, f"HTTP {exc.code}"
+    except (URLError, TimeoutError, OSError) as exc:
         return None, str(exc)
     parsed = json_loads_maybe(raw)
     if isinstance(parsed, dict):
@@ -231,7 +364,11 @@ def emit_audit_event(
     error: str | None,
     latency_ms: int,
     response_body: bytes = b"",
-) -> None:
+) -> Future[Any] | None:
+    authorization_context = (_runtime_request.get() or {}).get("authorization_context") or {}
+    principal = authorization_context.get("principal") if isinstance(authorization_context, dict) else {}
+    principal = principal if isinstance(principal, dict) else {}
+    scope = principal.get("scope") if isinstance(principal.get("scope"), dict) else {}
     decision = verdict_action(verdict, error)
     severity = verdict_severity(verdict, error)
     structured = {
@@ -250,6 +387,9 @@ def emit_audit_event(
         "destination": meta.get("destination", ""),
         "actor": "defenseclaw-agentrange-sidecar",
         "tenant": meta.get("tenant", ""),
+        "authorization_context": authorization_context,
+        "principal_subject": str(principal.get("sub") or ""),
+        "principal_scope": scope,
         "prompt": meta.get("prompt", ""),
         "model": meta.get("model", ""),
         "tool_name": meta.get("tool_name", ""),
@@ -280,19 +420,32 @@ def emit_audit_event(
         "tool_name": structured["tool_name"],
         "structured": structured,
     }
+    global _audit_pending
+    with _audit_pending_lock:
+        _audit_pending += 1
+    return _audit_executor.submit(_deliver_audit_event, payload)
+
+
+def _deliver_audit_event(payload: dict[str, Any]) -> None:
+    """Persist audit evidence off the user-request critical path."""
+    global _audit_pending
     try:
         request = authed_request(f"{gateway_base()}/audit/event", payload, timeout=inspect_timeout())
         with urlopen(request, timeout=inspect_timeout()):
             pass
     except (HTTPError, URLError, TimeoutError, OSError) as exc:
         sys.stderr.write(f"[audit] delivery failed: {type(exc).__name__}\n")
-        return
+    finally:
+        with _audit_pending_lock:
+            _audit_pending = max(0, _audit_pending - 1)
 
 
-def emit_runtime_result(outcome: str, status: int = 0) -> None:
-    state = _runtime_request.get()
-    if not state:
-        return
+def audit_pending() -> int:
+    with _audit_pending_lock:
+        return _audit_pending
+
+
+def _deliver_runtime_result(state: dict[str, Any], outcome: str, status: int) -> None:
     context = dict(state["context"], instance_id=state["context"].get("instance_id", state["context"]["session_id"]), phase="result", event_id=state["result_id"])
     payload = {"runtime_context": context, "outcome": outcome,
                "http_status": status, "inspection_event_ids": state["inspection_ids"]}
@@ -304,18 +457,37 @@ def emit_runtime_result(outcome: str, status: int = 0) -> None:
             # same original payload/id. Payloads stay request-local in memory;
             # no raw input is written to an outbox or audit-derived event.
             for check in list(state["pending_checks"]):
-                request = authed_request(f"{gateway_base()}{check['endpoint']}", check["payload"], timeout=1)
-                with urlopen(request, timeout=1) as response:
+                request = authed_request(f"{gateway_base()}{check['endpoint']}", check["payload"], timeout=runtime_result_timeout())
+                with urlopen(request, timeout=runtime_result_timeout()) as response:
                     response.read()
                     if response.headers.get("X-DefenseClaw-Runtime-Status") in {"failed", "unavailable"}:
                         raise OSError("runtime persistence unavailable")
                 state["pending_checks"].remove(check)
-            request = authed_request(f"{gateway_base()}/api/v1/runtime-results", payload, timeout=1)
-            with urlopen(request, timeout=1) as response:
+            request = authed_request(f"{gateway_base()}/api/v1/runtime-results", payload, timeout=runtime_result_timeout())
+            with urlopen(request, timeout=runtime_result_timeout()) as response:
                 response.read()
             return
-        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+        except HTTPError as exc:
+            sys.stderr.write(f"[runtime] result delivery attempt={attempt + 1} failed: HTTP {exc.code}\n")
+        except (URLError, TimeoutError, OSError) as exc:
             sys.stderr.write(f"[runtime] result delivery attempt={attempt + 1} failed: {type(exc).__name__}\n")
+
+
+def emit_runtime_result(outcome: str, status: int = 0) -> Future[Any] | None:
+    state = _runtime_request.get()
+    if not state:
+        return
+    # Result persistence is independent of the upstream response. Snapshot
+    # request-local state before handing it to the bounded worker pool so a
+    # slow audit endpoint cannot add its latency to the user request.
+    snapshot = {
+        "context": dict(state["context"]),
+        "result_id": state["result_id"],
+        "inspection_ids": list(state["inspection_ids"]),
+        "pending_checks": list(state["pending_checks"]),
+    }
+    state["pending_checks"].clear()
+    return _runtime_result_executor.submit(_deliver_runtime_result, snapshot, outcome, status)
 
 
 def inspect_request(content: str, session_id: str, model: str = "") -> tuple[dict[str, Any] | None, str | None]:
@@ -477,6 +649,17 @@ def request_event_meta(handler: BaseHTTPRequestHandler, body: bytes, target_url:
     return meta
 
 
+def set_context_tenant(meta: dict[str, Any], authorization_context: dict[str, Any] | None) -> None:
+    if not authorization_context:
+        return
+    principal = authorization_context.get("principal")
+    if not isinstance(principal, dict):
+        return
+    scope = principal.get("scope")
+    if isinstance(scope, dict) and scope.get("tenant"):
+        meta["tenant"] = str(scope["tenant"])
+
+
 def build_target_url(handler: BaseHTTPRequestHandler) -> tuple[str | None, str]:
     kind = getenv("DC_PROXY_KIND")
     if kind == "mcp":
@@ -506,6 +689,9 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:
+        if self.path.split("?", 1)[0] == "/health":
+            self._send(*response_json(HTTPStatus.OK, {"status": "ok", "pending_audit_events": audit_pending()}))
+            return
         self.handle_proxy()
 
     def do_POST(self) -> None:
@@ -550,6 +736,14 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
 
         meta = request_event_meta(self, body, target_url)
         authorization_context = extract_authorization_context(self.headers)
+        # The public ingress receives the bearer token; downstream requests
+        # from the range app retain only session/trace headers.  Decode the
+        # claims for correlation after the app validates the same token, then
+        # use the relay to make the context available to LLM/MCP sidecars.
+        if getenv("DC_PROXY_KIND") in {"opspilot", "langflow"}:
+            authorization_context = extract_jwt_authorization_context(self.headers) or authorization_context
+        authorization_context = relay_authorization_context(session_id, trace_id, authorization_context)
+        set_context_tenant(meta, authorization_context)
         _runtime_request.set({
             "context": {
                 "connector": connector_name(), "instance_id": session_id, "session_id": session_id, "trace_id": trace_id,
@@ -588,9 +782,12 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
             return
 
         status, headers, response_body = self._forward(target_url, body)
+        inspected_response_body = inspection_response_body(
+            getenv("DC_PROXY_KIND"), self.path.split("?", 1)[0], status, response_body
+        )
         _runtime_request.get()["context"]["phase"] = "post"
         post_started = time.monotonic()
-        post_verdict, post_error = self._post_inspect(session_id, response_body, status)
+        post_verdict, post_error = self._post_inspect(session_id, inspected_response_body, status)
         emit_audit_event(
             stage="post",
             session_id=session_id,
@@ -599,7 +796,7 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
             verdict=post_verdict,
             error=post_error,
             latency_ms=int((time.monotonic() - post_started) * 1000),
-            response_body=response_body,
+            response_body=inspected_response_body,
         )
         if should_block(post_verdict, post_error):
             emit_audit_event(
@@ -610,7 +807,7 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
                 verdict=post_verdict,
                 error=post_error,
                 latency_ms=int((time.monotonic() - started) * 1000),
-                response_body=response_body,
+                response_body=inspected_response_body,
             )
             self._send_block(post_verdict, post_error, phase="post")
             emit_runtime_result("response_blocked", status)
@@ -630,6 +827,8 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
         return self.rfile.read(length) if length > 0 else b""
 
     def _pre_inspect(self, session_id: str, body: bytes) -> tuple[dict[str, Any] | None, str | None]:
+        if inspection_bypassed():
+            return baseline_allow_verdict(), None
         kind = getenv("DC_PROXY_KIND")
         if kind == "opspilot" and self.path.split("?", 1)[0] == "/run":
             return inspect_request(extract_opspilot_prompt(body), session_id)
@@ -654,6 +853,8 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
         response_body: bytes,
         status: int,
     ) -> tuple[dict[str, Any] | None, str | None]:
+        if inspection_bypassed():
+            return baseline_allow_verdict(), None
         kind = getenv("DC_PROXY_KIND")
         if kind == "opspilot" and self.path.split("?", 1)[0] == "/run":
             return inspect_response(text_snippet(response_body), session_id)
