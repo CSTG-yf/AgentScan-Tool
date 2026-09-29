@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Callable
+from uuid import uuid4
 
 from fastapi import FastAPI, Request
 
@@ -11,6 +12,7 @@ class Tool:
     schema: dict
     handler: Callable
     hidden: bool = False
+    evidence: Callable[[dict, object], dict] | None = None
 
 
 def create_server(name: str, tools: list[Tool], on_start: Callable | None = None) -> FastAPI:
@@ -18,6 +20,29 @@ def create_server(name: str, tools: list[Tool], on_start: Callable | None = None
     registry = {tool.name: tool for tool in tools}
     app = FastAPI(title=f"mcp-{name}")
     app.state.last_trace_id = None
+    app.state.evaluation_calls = []
+    app.state.evaluation_sequence = 0
+    app.state.evaluation_dropped = 0
+    app.state.evaluation_boot_id = str(uuid4())
+
+    @app.get("/evaluation/calls")
+    def evaluation_calls(instance_id: str | None = None, since: int = 0, summary: bool = False):
+        # 内部靶场诊断接口只返回脱敏事实，不暴露工具原始参数/结果。
+        # 若环形窗口已丢弃记录，调用方不得据“无命中”推断阻断成功。
+        if instance_id is not None and (not instance_id or len(instance_id) > 128):
+            return {"error": "invalid instance_id"}
+        items = [] if summary else [
+            item for item in app.state.evaluation_calls
+            if item["seq"] > since and (instance_id is None or item["instance_id"] == instance_id)
+        ]
+        return {
+            "server": name,
+            "boot_id": app.state.evaluation_boot_id,
+            "instance_id": instance_id,
+            "high_water_seq": app.state.evaluation_sequence,
+            "dropped": app.state.evaluation_dropped,
+            "items": items,
+        }
 
     @app.on_event("startup")
     def startup_handler():
@@ -57,7 +82,25 @@ def create_server(name: str, tools: list[Tool], on_start: Callable | None = None
                 tool = registry.get(params.get("name"))
                 if tool is None:
                     return jsonrpc_error(rid, -32602, "unknown tool")
-                result = tool.handler(**params.get("arguments", {}))
+                arguments = params.get("arguments", {})
+                result = tool.handler(**arguments)
+                instance_id = request.headers.get("x-instance-id", "")
+                if instance_id and len(instance_id) <= 128:
+                    try:
+                        facts = tool.evidence(arguments, result) if tool.evidence else {}
+                    except Exception:
+                        # 诊断证据不能改变工具本来的调用结果。
+                        facts = {"evidence_error": True}
+                    app.state.evaluation_sequence += 1
+                    app.state.evaluation_calls.append({
+                        "seq": app.state.evaluation_sequence,
+                        "instance_id": instance_id,
+                        "tool": tool.name,
+                        "facts": facts,
+                    })
+                    if len(app.state.evaluation_calls) > 20000:
+                        app.state.evaluation_calls.pop(0)
+                        app.state.evaluation_dropped += 1
             else:
                 return jsonrpc_error(rid, -32601, "method not found")
         except Exception as exc:

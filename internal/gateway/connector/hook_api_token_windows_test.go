@@ -16,7 +16,7 @@ import (
 
 func TestHookAPITokenWindowsRejectsUntrustedDirectoryACL(t *testing.T) {
 	assertHookAPITokenRejectedByEnsureAndLoad(t, "untrusted Windows principal", func(t *testing.T) string {
-		dataDir := t.TempDir()
+		dataDir := hookAPITestDir(t)
 		if _, err := EnsureHookAPIToken(dataDir, "codex"); err != nil {
 			t.Fatalf("seed token: %v", err)
 		}
@@ -264,8 +264,8 @@ func TestHookAPITokenWindowsRejectsDeleteChildOnSharedAncestor(t *testing.T) {
 
 func TestHookAPITokenWindowsRejectsReparsePointDirectory(t *testing.T) {
 	assertHookAPITokenRejectedByEnsureAndLoadAny(t, []string{"reparse points are not allowed", "escapes hooks dir"}, func(t *testing.T) string {
-		dataDir := t.TempDir()
-		targetDataDir := t.TempDir()
+		dataDir := hookAPITestDir(t)
+		targetDataDir := hookAPITestDir(t)
 		if _, err := EnsureHookAPIToken(targetDataDir, "codex"); err != nil {
 			t.Fatalf("seed target token: %v", err)
 		}

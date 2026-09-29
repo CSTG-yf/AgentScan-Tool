@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -265,6 +266,7 @@ func TestAntigravityConnector_CapabilityContract(t *testing.T) {
 	home := filepath.Join(dir, "home")
 	workspace := filepath.Join(dir, "repo")
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	conn := NewAntigravityConnector()
 	opts := SetupOpts{
@@ -385,8 +387,15 @@ func TestHookOnlyConnector_SetupTeardown_BackupRestore(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read config after setup: %v", err)
 			}
-			if !strings.Contains(string(data), conn.scriptName) {
-				t.Fatalf("config after setup does not reference %s:\n%s", conn.scriptName, string(data))
+			marker := conn.scriptName
+			if runtime.GOOS == "windows" {
+				marker = nativeHookFlag + conn.Name()
+				if conn.Name() == "antigravity" {
+					marker = "defenseclaw-antigravity-hook.exe"
+				}
+			}
+			if !strings.Contains(string(data), marker) {
+				t.Fatalf("config after setup does not reference %s:\n%s", marker, string(data))
 			}
 			if err := conn.Teardown(context.Background(), opts); err != nil {
 				t.Fatalf("Teardown: %v", err)
@@ -620,8 +629,12 @@ func TestAntigravitySetup_WritesClaudeCodeNestedSchema(t *testing.T) {
 	// Secondary: the path resolves cleanly to a file ending in
 	// antigravity-hook.sh. Defends against accidentally writing a
 	// relative path or a different script name.
-	if !strings.HasSuffix(command, "antigravity-hook.sh") {
-		t.Fatalf("command=%q does not end with antigravity-hook.sh", command)
+	wantCommand := filepath.Join(opts.DataDir, "hooks", "antigravity-hook.sh")
+	if runtime.GOOS == "windows" {
+		wantCommand = filepath.Join(opts.DataDir, "hooks", "defenseclaw-antigravity-hook.exe")
+	}
+	if command != wantCommand {
+		t.Fatalf("command=%q, want %q", command, wantCommand)
 	}
 	if !filepath.IsAbs(command) {
 		t.Fatalf("command=%q is not an absolute path", command)
@@ -678,8 +691,19 @@ func TestAntigravitySetup_WritesClaudeCodeNestedSchema(t *testing.T) {
 			t.Errorf("%s[%q][0].hooks[0].type=%#v want command", outerKey, event, hookEntry["type"])
 		}
 		eventCommand, ok := hookEntry["command"].(string)
-		if !ok || !strings.HasSuffix(eventCommand, "antigravity-hook.sh") {
-			t.Errorf("%s[%q][0].hooks[0].command=%#v want absolute path ending antigravity-hook.sh", outerKey, event, hookEntry["command"])
+		if !ok || eventCommand != wantCommand {
+			t.Errorf("%s[%q][0].hooks[0].command=%#v want %q", outerKey, event, hookEntry["command"], wantCommand)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		if _, err := os.Stat(command); err != nil {
+			t.Fatalf("native launcher is absent: %v", err)
+		}
+		if err := conn.Teardown(context.Background(), opts); err != nil {
+			t.Fatalf("Teardown: %v", err)
+		}
+		if _, err := os.Stat(command + ".disabled"); err != nil {
+			t.Fatalf("cached native launcher was not disabled: %v", err)
 		}
 	}
 }
@@ -732,8 +756,12 @@ func TestOpenHandsSetup_PatchesDocumentedHookSchema(t *testing.T) {
 		t.Fatalf("hook type=%#v want command", hook["type"])
 	}
 	command, _ := hook["command"].(string)
-	if !strings.Contains(command, "openhands-hook.sh") {
-		t.Fatalf("command=%q does not reference openhands-hook.sh", command)
+	marker := "openhands-hook.sh"
+	if runtime.GOOS == "windows" {
+		marker = nativeHookFlag + "openhands"
+	}
+	if !strings.Contains(command, marker) {
+		t.Fatalf("command=%q does not reference %s", command, marker)
 	}
 	if _, wrapped := cfg["hooks"]; wrapped {
 		t.Fatalf("OpenHands native schema should not add Claude-compatible top-level hooks wrapper: %#v", cfg["hooks"])
@@ -967,6 +995,7 @@ func TestOpenHandsWorkspaceRootFallsBackToHomeWhenDaemonCwdIsDataDir(t *testing.
 		t.Fatalf("mkdir data dir: %v", err)
 	}
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	prevHooks := OpenHandsHooksPathOverride
 	prevWorkspace := OpenHandsWorkspaceDirOverride
@@ -1001,6 +1030,7 @@ func TestCopilotSetupDefaultsToGlobalWhenDaemonCwdIsDataDir(t *testing.T) {
 		t.Fatalf("mkdir data dir: %v", err)
 	}
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	prevHooks := CopilotHooksPathOverride
 	prevWorkspace := CopilotWorkspaceDirOverride

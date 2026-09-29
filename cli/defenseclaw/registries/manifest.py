@@ -503,8 +503,8 @@ def _maybe_jsonschema_validate(payload: dict[str, Any]) -> None:
     if not schema_path.exists():
         return
     try:
-        schema = json.loads(schema_path.read_text())
-    except (OSError, json.JSONDecodeError):
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return
     try:
         jsonschema.validate(payload, schema)

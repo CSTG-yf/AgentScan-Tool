@@ -1,0 +1,4 @@
+# Shell and Python entrypoints are executed in Linux and must remain LF even
+# when the repository is checked out with core.autocrlf=true on Windows.
+*.sh text eol=lf
+*.py text eol=lf

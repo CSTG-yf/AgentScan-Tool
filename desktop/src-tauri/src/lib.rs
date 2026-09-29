@@ -31,9 +31,11 @@ pub fn run_controlled_agent(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(commands::jobs::ChangeStreamController::default())
         .invoke_handler(tauri::generate_handler![
             commands::environment::get_environment_snapshot,
             commands::agents::get_agents,
+            commands::agents::get_connector_profiles,
             commands::agents::trigger_agent_scan,
             commands::agents::get_agent_detail,
             commands::agents::export_agents_report_pdf,
@@ -86,6 +88,14 @@ pub fn run() {
             commands::settings::save_scan_schedule_settings,
             commands::settings::get_static_resource_scan_settings,
             commands::settings::save_static_resource_scan_settings,
+            commands::settings::get_privacy_settings,
+            commands::settings::save_privacy_settings,
+            commands::settings::get_notification_settings,
+            commands::settings::save_notification_settings,
+            commands::settings::get_storage_settings,
+            commands::settings::get_version_settings,
+            commands::settings::run_diagnostics,
+            commands::settings::export_diagnostics,
             commands::static_assets::get_static_resource_agents,
             commands::static_assets::get_static_resource_summary,
             commands::static_assets::get_static_resources,
@@ -126,6 +136,8 @@ pub fn run() {
             commands::jobs::get_scan_job,
             commands::jobs::cancel_scan_job,
             commands::jobs::get_changes,
+            commands::jobs::start_change_stream,
+            commands::jobs::stop_change_stream,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run TraceBastion Desktop");

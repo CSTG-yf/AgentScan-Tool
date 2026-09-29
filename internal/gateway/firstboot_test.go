@@ -46,13 +46,7 @@ func TestEnsureGatewayToken_GeneratesAndPersists(t *testing.T) {
 		}
 	}
 
-	info, err := os.Stat(dotenv)
-	if err != nil {
-		t.Fatalf("stat dotenv: %v", err)
-	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Errorf("dotenv mode = %v, want 0o600", mode)
-	}
+	assertPrivateDeviceFile(t, dotenv)
 
 	data, err := os.ReadFile(dotenv)
 	if err != nil {

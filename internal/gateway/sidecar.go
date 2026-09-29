@@ -3602,8 +3602,16 @@ func (s *Sidecar) runAIDiscovery(ctx context.Context) error {
 		"include_package_manifests": s.currentConfig().AIDiscovery.IncludePackageManifests,
 	})
 	errCh := make(chan error, 1)
+	runDone := make(chan struct{})
 	go func() {
+		defer close(runDone)
 		errCh <- aiDiscovery.Run(ctx)
+	}()
+	defer func() {
+		<-runDone
+		if err := aiDiscovery.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "[ai-discovery] history database close: %v\n", err)
+		}
 	}()
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()

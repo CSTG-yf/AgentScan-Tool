@@ -181,13 +181,11 @@ func TestRepairPairing_FailsClosedOnCorruptPairedJSON(t *testing.T) {
 			if string(b) != string(original) {
 				t.Fatalf("backup contents differ from original\nwant: %s\ngot:  %s", original, b)
 			}
-			info, err := os.Stat(filepath.Join(devicesDir, e.Name()))
-			if err != nil {
+			backupPath := filepath.Join(devicesDir, e.Name())
+			if _, err := os.Stat(backupPath); err != nil {
 				t.Fatalf("stat backup: %v", err)
 			}
-			if info.Mode().Perm() != 0o600 {
-				t.Errorf("backup perm = %v, want 0600", info.Mode().Perm())
-			}
+			assertPrivateDeviceFile(t, backupPath)
 		}
 	}
 	if !foundBackup {
@@ -210,13 +208,10 @@ func TestRepairPairing_AtomicWriteAndPerms(t *testing.T) {
 		t.Fatalf("repair pairing: %v", err)
 	}
 	pairedPath := filepath.Join(home, ".openclaw", "devices", "paired.json")
-	info, err := os.Stat(pairedPath)
-	if err != nil {
+	if _, err := os.Stat(pairedPath); err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("paired.json perm = %v, want 0600 (no longer world-readable)", info.Mode().Perm())
-	}
+	assertPrivateDeviceFile(t, pairedPath)
 
 	// No temp-file remnants beside the destination.
 	entries, _ := os.ReadDir(filepath.Dir(pairedPath))
@@ -355,7 +350,12 @@ func TestReadZeptoClawProviderKeys_FromConfigJSON(t *testing.T) {
 		APIAddr:   "127.0.0.1:18970",
 		APIToken:  "tok",
 	}
-	if err := c.Setup(context.Background(), opts); err != nil {
+	if err := c.Setup(context.Background(), opts); runtime.GOOS == "windows" {
+		if err == nil || !strings.Contains(err.Error(), "not supported on windows") {
+			t.Fatalf("Windows must report the ZeptoClaw capability boundary, got %v", err)
+		}
+		return
+	} else if err != nil {
 		t.Fatalf("zeptoclaw Setup: %v", err)
 	}
 
@@ -479,13 +479,15 @@ func TestPersistRefreshedToken(t *testing.T) {
 		if err := persistRefreshedToken(dir, "brand-new-token"); err != nil {
 			t.Fatalf("persistRefreshedToken: %v", err)
 		}
-		content, err := os.ReadFile(filepath.Join(dir, ".env"))
+		envPath := filepath.Join(dir, ".env")
+		content, err := os.ReadFile(envPath)
 		if err != nil {
 			t.Fatalf(".env not created: %v", err)
 		}
 		if !containsLine(string(content), "OPENCLAW_GATEWAY_TOKEN=brand-new-token\n") {
 			t.Errorf(".env content: %s", content)
 		}
+		assertPrivateDeviceFile(t, envPath)
 	})
 
 	t.Run("rewrites hooks/.token with new value", func(t *testing.T) {
@@ -505,13 +507,10 @@ func TestPersistRefreshedToken(t *testing.T) {
 			t.Errorf("hooks/.token content:\n%s", s)
 		}
 
-		info, err := os.Stat(tokenPath)
-		if err != nil {
+		if _, err := os.Stat(tokenPath); err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm() != 0o600 {
-			t.Errorf("hooks/.token perm = %v, want 0600", info.Mode().Perm())
-		}
+		assertPrivateDeviceFile(t, tokenPath)
 	})
 
 	t.Run("silently skips hooks/.token when hooks dir missing", func(t *testing.T) {

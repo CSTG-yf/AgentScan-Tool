@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/defenseclaw/defenseclaw/internal/safefile"
 )
 
 const managedBackupVersion = 1
@@ -186,7 +188,13 @@ func writeManagedFileBackup(path string, b managedFileBackup) error {
 	// would otherwise be world-readable. Listing the connector_backups
 	// dir leaks which connectors the operator has installed; the
 	// payload itself already has 0o600 from atomicWriteFile.
-	if err := ensureManagedBackupDirRestricted(filepath.Dir(path)); err != nil {
+	backupDir := filepath.Dir(path)
+	if root := filepath.Dir(backupDir); filepath.Base(root) == "connector_backups" {
+		if err := ensureManagedBackupDirRestricted(root); err != nil {
+			return err
+		}
+	}
+	if err := ensureManagedBackupDirRestricted(backupDir); err != nil {
 		return err
 	}
 	return atomicWriteFile(path, append(data, '\n'), 0o600)
@@ -208,8 +216,8 @@ func ensureManagedBackupDirRestricted(dir string) error {
 	}
 	// Tighten perms even when MkdirAll was a no-op (existing dir
 	// from an older defenseclaw build that used 0o755).
-	if err := os.Chmod(dir, 0o700); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("chmod managed backup dir %s: %w", dir, err)
+	if err := safefile.ProtectPath(dir, 0o700); err != nil {
+		return fmt.Errorf("secure managed backup dir %s: %w", dir, err)
 	}
 	return nil
 }

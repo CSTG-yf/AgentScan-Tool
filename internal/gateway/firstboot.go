@@ -136,13 +136,5 @@ func appendEnvLine(path, key, value string) error {
 	}
 	lines = append(lines, fmt.Sprintf("%s=%s", key, value), "")
 
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp, 0o600); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicWritePrivateFile(path, []byte(strings.Join(lines, "\n")))
 }

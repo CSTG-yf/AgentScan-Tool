@@ -8,23 +8,19 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/defenseclaw/defenseclaw/internal/audit"
-	"github.com/defenseclaw/defenseclaw/internal/procattr"
 )
 
 // RuntimeExecutionRequest is the narrow contract between the policy engine
 // and a concrete enforcement point. Evidence is already redacted and loaded
 // from the audit store, so executors never need to parse page DTOs.
 type RuntimeExecutionRequest struct {
-	Decision  audit.RuntimeDecision
+	Decision   audit.RuntimeDecision
 	ActionType string
-	Evidence  []audit.DetectionEvidence
+	Evidence   []audit.DetectionEvidence
 }
 
 // RuntimeExecutor executes one enforcement point. Implementations must return
@@ -35,18 +31,14 @@ type RuntimeExecutor interface {
 	Execute(context.Context, RuntimeExecutionRequest) (target, result string, err error)
 }
 
-// ProcessExecutor is the built-in Windows process containment executor. The
-// installed Process Guard service remains the preferred preventative control;
-// this executor is the response path for detections discovered after process
-// creation (for example, a shell/download/write/exec chain).
+// ProcessExecutor is the post-detection process containment executor. A
+// preventative Process Guard remains preferred: this path cannot undo a
+// dangerous operation that has already completed.
 type ProcessExecutor struct{}
 
 func (ProcessExecutor) Point() string { return audit.EnforcementPointProcess }
 
 func (ProcessExecutor) Execute(ctx context.Context, req RuntimeExecutionRequest) (string, string, error) {
-	if runtime.GOOS != "windows" {
-		return "", "", fmt.Errorf("process executor is available only on Windows")
-	}
 	if err := ctx.Err(); err != nil {
 		return "", "", err
 	}
@@ -64,22 +56,10 @@ func (ProcessExecutor) Execute(ctx context.Context, req RuntimeExecutionRequest)
 	if len(pids) == 0 {
 		return "", "", fmt.Errorf("process containment has no observed PID")
 	}
-	deadlineCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	for _, pid := range pids {
-		cmd := exec.CommandContext(deadlineCtx, "taskkill.exe", "/PID", strconv.FormatUint(uint64(pid), 10), "/T", "/F")
-		procattr.Apply(cmd)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			message := strings.TrimSpace(string(output))
-			if message == "" {
-				message = err.Error()
-			}
-			return strconv.FormatUint(uint64(pid), 10), "", fmt.Errorf("taskkill PID %d failed: %s", pid, message)
-		}
-	}
+	result, err := terminateProcessTrees(ctx, pids)
 	var targets []string
 	for _, pid := range pids {
 		targets = append(targets, strconv.FormatUint(uint64(pid), 10))
 	}
-	return strings.Join(targets, ","), "terminated process tree(s) via taskkill", nil
+	return strings.Join(targets, ","), result, err
 }

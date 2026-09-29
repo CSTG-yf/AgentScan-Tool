@@ -34,6 +34,7 @@ from defenseclaw.bootstrap import (  # noqa: E402
 )
 
 
+@unittest.skipIf(os.name == "nt", "PID command identity probing uses POSIX proc/ps semantics")
 class PidLooksLikeGatewayTests(unittest.TestCase):
 
     def test_known_binary_name_accepted(self):

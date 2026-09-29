@@ -337,6 +337,9 @@ func diffConfigs(oldCfg, newCfg *config.Config) ConfigDiff {
 	if oldCfg.Guardrail.ScannerMode != newCfg.Guardrail.ScannerMode {
 		restart = append(restart, "guardrail.scanner_mode")
 	}
+	if oldCfg.Guardrail.RetainJudgeBodies != newCfg.Guardrail.RetainJudgeBodies {
+		restart = append(restart, "guardrail.retain_judge_bodies")
+	}
 	if oldCfg.Guardrail.Connector != newCfg.Guardrail.Connector ||
 		!reflect.DeepEqual(oldCfg.Guardrail.Connectors, newCfg.Guardrail.Connectors) {
 		restart = append(restart, "guardrail.connectors")

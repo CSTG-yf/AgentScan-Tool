@@ -304,6 +304,8 @@ type pageAttackChainStep struct {
 	Evidence      string   `json:"evidence"`
 	Decision      string   `json:"decision"`
 	Stack         []string `json:"stack"`
+	StackStatus   string   `json:"stackStatus"`
+	StackSource   string   `json:"stackSource,omitempty"`
 	SourceEventID string   `json:"sourceEventId"`
 	Source        string   `json:"source"`
 	TraceID       string   `json:"traceId"`
@@ -737,6 +739,7 @@ func pageChainStepsFromRuntime(events []audit.AttackChainEvent) ([]pageAttackCha
 	sources := map[string]bool{}
 	for i, ev := range events {
 		e := ev.Event
+		stack, stackStatus, stackSource := pageRuntimeStack(e.Attributes)
 		source := e.EventSource
 		if source == "" {
 			source = e.Source
@@ -759,7 +762,9 @@ func pageChainStepsFromRuntime(events []audit.AttackChainEvent) ([]pageAttackCha
 			Resource:      firstNonEmpty(e.MCPServer, e.Target),
 			Evidence:      truncate(firstNonEmpty(e.Target, e.Detail), 160),
 			Decision:      e.Outcome,
-			Stack:         []string{},
+			Stack:         stack,
+			StackStatus:   stackStatus,
+			StackSource:   stackSource,
 			SourceEventID: strconv.FormatInt(e.ID, 10),
 			Source:        source,
 			TraceID:       e.TraceID,
@@ -3131,12 +3136,46 @@ func pageStepFromEvent(event pageEvent, order int) pageAttackChainStep {
 		Resource:      resource,
 		Evidence:      pageFirstNonEmpty(event.Evidence, "-"),
 		Decision:      pageFirstNonEmpty(event.Action, pageStatusAction(event.Status)),
-		Stack:         pageUniqueStrings(event.Source, event.Category, event.Subtype, event.Runtime),
+		Stack:         []string{},
+		StackStatus:   "not_collected",
 		SourceEventID: event.ID,
 		Source:        event.Source,
 		TraceID:       event.TraceID,
 		SessionID:     event.SessionID,
 	}
+}
+
+func pageRuntimeStack(attributes map[string]any) ([]string, string, string) {
+	if attributes == nil || attributes["stack_source"] != "python.traceback" {
+		return []string{}, "not_collected", ""
+	}
+	raw, ok := attributes["stack_frames"].([]any)
+	if !ok || len(raw) == 0 {
+		return []string{}, "not_collected", ""
+	}
+	frames := make([]string, 0, len(raw))
+	for _, item := range raw {
+		frame, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		file, fileOK := frame["file"].(string)
+		function, functionOK := frame["function"].(string)
+		line, lineOK := frame["line"].(float64)
+		if !lineOK {
+			if integer, intOK := frame["line"].(int); intOK {
+				line, lineOK = float64(integer), true
+			}
+		}
+		if !fileOK || !functionOK || !lineOK || file == "" || function == "" || line < 1 {
+			continue
+		}
+		frames = append(frames, fmt.Sprintf("%s (%s:%d)", function, file, int(line)))
+	}
+	if len(frames) == 0 {
+		return []string{}, "not_collected", ""
+	}
+	return frames, "captured", "python.traceback"
 }
 
 func pageChainKey(event pageEvent) string {

@@ -2,6 +2,8 @@ import json
 import os
 import pathlib
 import sys
+import time
+from collections.abc import Callable
 
 import httpx
 
@@ -79,20 +81,47 @@ def clear_trajectories() -> None:
     response.raise_for_status()
 
 
-def replay_events(events: list[dict], only: str | None = None):
+def replay_events(
+    events: list[dict], only: str | None = None,
+    receipt_sink: Callable[[dict], None] | None = None,
+    continue_on_http_error: bool = False,
+) -> list[dict]:
     if only and only != "all":
         events = [event for event in events if event["scenario"] == only]
     # 网络执行只在人工 make replay 时发生，离线测试验证 plan_actions。
+    receipts = []
     with httpx.Client(timeout=15) as client:
         tokens = {}
         langflow_token = None
         for action in plan_actions(events):
-            if action["target"] == "langflow":
-                # Cat-1 模拟浏览器自动登录后的真实访问形态，token 在同一次回放中复用。
-                langflow_token = langflow_token or fetch_langflow_token(client)
-                fire_cat1(client, action, langflow_token)
-            else:
-                fire_opspilot(client, action, tokens)
+            started = time.perf_counter()
+            receipt = {"instance_id": action["instance_id"], "target": action["target"]}
+            try:
+                if action["target"] == "langflow":
+                    # Cat-1 模拟浏览器自动登录后的真实访问形态，token 在同一次回放中复用。
+                    langflow_token = langflow_token or fetch_langflow_token(client)
+                    response = fire_cat1(client, action, langflow_token)
+                else:
+                    response = fire_opspilot(client, action, tokens)
+                receipt["http_status"] = response.status_code
+                receipt["status"] = "completed"
+            except Exception as exc:
+                receipt["status"] = "http_error" if isinstance(exc, httpx.HTTPStatusError) else "failed"
+                receipt["error_type"] = type(exc).__name__
+                if isinstance(exc, httpx.HTTPStatusError):
+                    receipt["http_status"] = exc.response.status_code
+                receipt["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 3)
+                receipts.append(receipt)
+                if receipt_sink:
+                    receipt_sink(receipt)
+                if continue_on_http_error and isinstance(exc, httpx.HTTPStatusError):
+                    continue
+                raise
+            receipt["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 3)
+            receipts.append(receipt)
+            if receipt_sink:
+                receipt_sink(receipt)
+    return receipts
 
 
 def select_events(events: list, only: str | None = None) -> list:
@@ -134,17 +163,20 @@ def fire_cat1(client: httpx.Client, action: dict, langflow_token: str):
         # Langflow 会按上传文件名做去重；路径穿越文件名需要 append 模式才能稳定回放多条样本。
         response = client.post(f"{LANGFLOW}{upload['path']}", headers=headers, params={"append": "true"}, files={"file": (upload["filename"], upload["content"])})
     response.raise_for_status()
+    return response
 
 
 def fire_opspilot(client: httpx.Client, action: dict, tokens: dict):
     username = action["username"]
     # 同一用户 token 缓存复用，避免回放里产生不必要登录噪声。
-    tokens.setdefault(username, login_token(client, username))
+    if username not in tokens:
+        tokens[username] = login_token(client, username)
     headers = dict(action.get("headers", {}))
     headers["Authorization"] = f"Bearer {tokens[username]}"
     body = action["body"]
     response = client.post(f"{OPSPILOT}/run", headers=headers, json=body)
     response.raise_for_status()
+    return response
 
 
 if __name__ == "__main__":

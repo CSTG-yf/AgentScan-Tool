@@ -78,6 +78,8 @@ def test_write_bundle_is_external_and_rewrites_runtime_routes(tmp_path: Path) ->
     write_adapter_bundle(bundle)
 
     assert compose.read_text(encoding="utf-8") == original
+    assert Path(bundle.sidecar_path).is_file()
+    assert Path(bundle.sidecar_path).read_text(encoding="utf-8") == bundle.sidecar_text
 
     override = Path(bundle.override_path).read_text(encoding="utf-8")
     assert "defenseclaw-opspilot-ingress" in override

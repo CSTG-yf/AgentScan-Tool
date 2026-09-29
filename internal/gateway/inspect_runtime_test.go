@@ -26,6 +26,63 @@ func runtimeTestAPI(t *testing.T) *APIServer {
 	return a
 }
 
+func TestInspectRuntimeMCPPreCallDeclaresBlockingSurface(t *testing.T) {
+	a := runtimeTestAPI(t)
+	c := runtimeInspectContext()
+	c.ProxyKind = "mcp"
+	c.Operation = "mcp.invoke"
+	c.ToolName = "mcp__jira__createIssue"
+	c.MCPServer = "jira"
+	c.HTTPPath = "/api/v1/inspect/tool"
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/inspect/tool", nil)
+	r.Header.Set("X-DefenseClaw-Connector", "agentrange")
+	id, ok := a.beginInspectRuntime(httptest.NewRecorder(), r, c, c.SessionID)
+	if !ok || id <= 0 {
+		t.Fatal("authenticated MCP pre-call was not recorded")
+	}
+	event, exists, err := a.store.GetRuntimeEvent(id)
+	if err != nil || !exists || event.MCPServer != "jira" || event.Attributes["pre_call_block_capable"] != true {
+		t.Fatalf("MCP pre-call capability = %+v, exists=%v err=%v", event, exists, err)
+	}
+}
+
+func TestInspectRuntimePersistsValidatedPythonStackFrames(t *testing.T) {
+	a := runtimeTestAPI(t)
+	c := runtimeInspectContext()
+	c.ProxyKind = "mcp"
+	c.Operation = "mcp.invoke"
+	c.ToolName = "notes_sync.sync_note"
+	c.MCPServer = "notes-sync"
+	c.HTTPPath = "/mcp/notes-sync/mcp"
+	c.StackSource = "python.traceback"
+	c.StackFrames = []InspectRuntimeStackFrame{{File: "api/app.py", Function: "call_mcp", Line: 389}}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/inspect/tool", nil)
+	r.Header.Set("X-DefenseClaw-Connector", "agentrange")
+	id, ok := a.beginInspectRuntime(httptest.NewRecorder(), r, c, c.SessionID)
+	if !ok || id <= 0 {
+		t.Fatal("authenticated runtime stack was not recorded")
+	}
+	event, exists, err := a.store.GetRuntimeEvent(id)
+	if err != nil || !exists || event.Attributes["stack_source"] != "python.traceback" {
+		t.Fatalf("runtime stack attributes = %+v exists=%v err=%v", event.Attributes, exists, err)
+	}
+	frames, ok := event.Attributes["stack_frames"].([]any)
+	if !ok || len(frames) != 1 {
+		t.Fatalf("stack frames = %#v", event.Attributes["stack_frames"])
+	}
+}
+
+func TestInspectRuntimeRejectsAbsoluteOrUntrustedStackPaths(t *testing.T) {
+	c := runtimeInspectContext()
+	c.StackSource = "python.traceback"
+	c.StackFrames = []InspectRuntimeStackFrame{{File: "/app/api/app.py", Function: "call_mcp", Line: 389}}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/inspect/tool", nil)
+	r.Header.Set("X-DefenseClaw-Connector", "agentrange")
+	if err := c.validate(r); err == nil {
+		t.Fatal("absolute stack path was accepted")
+	}
+}
+
 func callRuntimeInspect(a *APIServer, c *InspectRuntimeContext, content string) *httptest.ResponseRecorder {
 	b, _ := json.Marshal(RequestInspectRequest{Content: content, SessionID: c.SessionID, RuntimeContext: c})
 	r := httptest.NewRequest("POST", "/api/v1/inspect/request", bytes.NewReader(b))

@@ -161,7 +161,7 @@ Desktop POST job/action    ──>  Job Orchestrator / Executor Router
 | `GET /{id}/findings` | 最新 Finding | 已实现 | 可保留 |
 | `GET /{id}/scans` | 扫描历史 | 已实现 | 可保留 |
 | `GET /{id}/content` | 脱敏内容/目录 | 已实现 | 可保留，需继续限制权限和大小 |
-| `GET /{id}/relations` | 关联资源 | 仅占位 | 永远返回空数组 |
+| `GET /{id}/relations` | 关联资源 | 部分实现 | 返回静态资源同 Agent/同目标路径关系及原始资源 ID 证据；运行时因果边尚未覆盖 |
 | `PUT /{id}/status` | 人工复核状态 | 已实现 | 可保留 |
 | `POST /{id}/scan` | 单资源扫描 | 已实现 | 当前创建持久化任务并轮询真实状态 |
 | `POST /api/v1/agents/{id}/static-resources/scan` | 单 Agent 重扫 | 已实现 | 当前创建持久化任务并轮询真实状态 |
@@ -261,7 +261,7 @@ Desktop POST job/action    ──>  Job Orchestrator / Executor Router
 
 ### 5.6 自动/手动数据库读取
 
-当前桌面端通过 Tauri command 代理 Gateway API，页面刷新与后台任务已拆分；主 App 仍保留短周期 GET 作为兼容兜底，增量游标接口已经可用但尚未替换全部页面轮询。
+当前桌面端通过 Tauri command 代理 Gateway API，活跃页面已接入 SQLite 变更 SSE；低频 `/api/v1/changes` 轮询作为连接失败/不支持 SSE 时的兼容兜底。靶场回放进度等 Sidecar 派生状态仍独立轮询。
 
 主要问题：
 
@@ -269,7 +269,7 @@ Desktop POST job/action    ──>  Job Orchestrator / Executor Router
 - `agentDiscovery` 不再依赖 `GET /agents` 的扫描副作用。
 - 页面定时刷新现在会递增页面 refresh nonce，Events/Static Assets 能重新读取自己的数据。
 - Summary、列表和 Timeline 分多次请求，缺少共同 `db_revision`，同一屏可能来自不同数据库时刻。
-- `GET /api/v1/changes` 已提供 cursor/delta invalidation；App 尚未将所有页面切换为该游标。
+- `GET /api/v1/changes` 提供 cursor/delta invalidation，`GET /api/v1/stream` 提供可用 `Last-Event-ID` 恢复的 SSE；活跃桌面页面按 domain 订阅。Sidecar 回放状态不在 SQLite 变更流内。
 
 代码依据：`desktop/src/App.tsx:140`、`:159`、`:163`、`:226`。
 
@@ -434,7 +434,7 @@ Job 必须持久化、有限保留、支持重启恢复或明确标记 `interrup
 | `GET` | `/api/v1/static-resources` | 数据库分页查询 |
 | `POST` | `/api/v1/jobs`，`kind=resource_scan` | 支持 resource/agent/all scope |
 | `GET` | `/api/v1/static-resources/{id}/scans` | 扫描历史 |
-| `GET` | `/api/v1/static-resources/{id}/relations` | 返回由资源、Agent 和目标路径推导的关系；当前 `supported:true` |
+| `GET` | `/api/v1/static-resources/{id}/relations` | 返回带来源/资源 ID 引用的同 Agent、同目标路径关系，并标记图谱版本和 `completeness: partial` |
 
 应修复并保留 `/api/v1/static-resources/rescan` 兼容入口，但新 UI 统一使用 Job 接口。
 
@@ -487,7 +487,7 @@ GET /api/v1/changes?cursor=18420&domains=agents,resources,detections,decisions,c
 }
 ```
 
-桌面端只在活跃页面查询变更；发现相关 domain 变化后，再 GET 对应列表。第二阶段可增加 SSE：
+桌面端只为活跃页面订阅相关 domain。Gateway 提供 SSE invalidation stream，事件不承载业务行；收到事件后仍 GET 对应权威列表。`Last-Event-ID` 用于断线续传，客户端保留低频 `/api/v1/changes` 游标轮询作为 SSE 不可用时的兜底。Gateway 每秒检查 SQLite 游标并在有变化时推送；15 秒无变化发送 keep-alive。靶场回放进度等 Sidecar 派生状态仍有独立轮询，不应误认为已纳入 SQLite 变更流。
 
 ```http
 GET /api/v1/stream?domains=detections,decisions,enforcements,jobs
@@ -702,8 +702,8 @@ Guardrail / Agent Hook / Proxy / Windows 兼容事件 / OS Sensor
 
 1. 在真实 Windows 管理员环境安装并启动 Process Guard，验证服务离线、UAC 拒绝、进程树终止和重复点击幂等；这是 P0 发布门槛。
 2. 为 Guardrail、Agent Hook、MCP、File 增加真实 Executor 和统一 `/api/v1/enforcements` 持久化读模型；在此之前这些点必须保持 `failed`/`would_block` 的诚实状态。
-3. 静态资源 `relations` 已能从权威资源、Agent 和目标路径推导基础关系并返回 `supported:true`；目前仍是有限图语义，不能把空数组解释成“没有关系”，后续需补充跨资源引用和图构建版本。
-4. App 层仍保留定时刷新作为兼容回退；`/api/v1/changes` 已提供但尚未让所有页面完全切换到 cursor/SSE。下一阶段应先按 domain 增量刷新，再移除全局轮询。
+3. 静态资源 `relations` 已能从权威资源、Agent 和目标路径推导基础关系，返回可追溯资源 ID 证据、图构建版本和 `completeness: partial`；界面明确列出尚不支持的运行时关系，不能把空数组解释成“没有关系”。
+4. 活跃桌面页已按 domain 接入 `/api/v1/stream`，通过 SSE 推送 SQLite invalidation，并用 `Last-Event-ID` 续传；低频 `/api/v1/changes` 轮询仍作为兜底。靶场 Sidecar 回放进度仍是独立轮询，后续可纳入 Job/SSE 状态流。
 5. 需要把检测 source 过滤、攻击链列表详情的 N+1 查询、builder/policy 版本和任务取消的协作式中止进一步工程化；当前实现已经避免错误数据，但性能和可追溯性仍不是最终态。
 
 最终发布目标可以用下面四条验收标准判定：

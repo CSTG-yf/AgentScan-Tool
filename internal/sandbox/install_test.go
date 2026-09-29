@@ -1,8 +1,7 @@
 package sandbox
 
 import (
-	"os"
-	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -39,14 +38,7 @@ func TestVerifyOpenShellBinary_NotFound(t *testing.T) {
 }
 
 func TestVerifyOpenShellBinary_HappyPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	bin := filepath.Join(tmpDir, "openshell-sandbox")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho \"openshell-sandbox v0.6.2\""), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	bin := writeOpenShellTestBinary(t, "#!/bin/sh\necho \"openshell-sandbox v0.6.2\"\n", "@echo off\r\necho openshell-sandbox v0.6.2\r\n")
 
 	version, err := VerifyOpenShellBinary(bin)
 	if err != nil {
@@ -63,7 +55,7 @@ func TestVerifyOpenShellBinary_Directory(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for directory path")
 	}
-	if !strings.Contains(err.Error(), "is a directory") {
+	if runtime.GOOS != "windows" && !strings.Contains(err.Error(), "is a directory") {
 		t.Errorf("error %q should contain %q", err.Error(), "is a directory")
 	}
 }
@@ -79,12 +71,9 @@ func TestVerifyOpenShellBinary_VersionVariants(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			bin := filepath.Join(tmpDir, "openshell-sandbox")
-			script := "#!/bin/sh\necho \"" + tt.output + "\""
-			if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			bin := writeOpenShellTestBinary(t,
+				"#!/bin/sh\necho \""+tt.output+"\"\n",
+				"@echo off\r\necho "+tt.output+"\r\n")
 
 			version, err := VerifyOpenShellBinary(bin)
 			if err != nil {

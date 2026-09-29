@@ -117,12 +117,23 @@ type StaticResourceDetail struct {
 // between two resources. It deliberately exposes the relation type so an
 // empty result is not confused with an unsupported graph.
 type StaticResourceRelation struct {
-	ResourceID   string `json:"resource_id"`
-	Name         string `json:"name"`
-	ResourceType string `json:"resource_type"`
-	RelationType string `json:"relation_type"`
-	RiskLevel    string `json:"risk_level"`
-	Malicious    bool   `json:"malicious"`
+	ResourceID   string                         `json:"resource_id"`
+	Name         string                         `json:"name"`
+	ResourceType string                         `json:"resource_type"`
+	RelationType string                         `json:"relation_type"`
+	RiskLevel    string                         `json:"risk_level"`
+	Malicious    bool                           `json:"malicious"`
+	Evidence     StaticResourceRelationEvidence `json:"evidence"`
+}
+
+// StaticResourceRelationEvidence explains the persisted identity keys that
+// produced a deterministic inventory edge. It deliberately does not claim
+// runtime causality or a scan result that wasn't part of the join.
+type StaticResourceRelationEvidence struct {
+	Source      string   `json:"source"`
+	References  []string `json:"references"`
+	Confidence  string   `json:"confidence"`
+	Explanation string   `json:"explanation"`
 }
 
 // StaticResourceAgentRef identifies the owning agent on detail payloads.
@@ -534,6 +545,17 @@ LIMIT ?`, resourceID, limit)
 			return nil, err
 		}
 		row.Malicious = malicious != 0
+		row.Evidence = StaticResourceRelationEvidence{
+			Source:     "static_resource_inventory",
+			References: []string{"resource:" + resourceID, "resource:" + row.ResourceID},
+		}
+		if row.RelationType == "same_agent" {
+			row.Evidence.Confidence = "deterministic"
+			row.Evidence.Explanation = "两条静态资源记录具有相同的 canonical_agent_id。"
+		} else {
+			row.Evidence.Confidence = "deterministic"
+			row.Evidence.Explanation = "两条静态资源记录具有相同的非空 target 路径。"
+		}
 		out = append(out, row)
 	}
 	return out, rows.Err()

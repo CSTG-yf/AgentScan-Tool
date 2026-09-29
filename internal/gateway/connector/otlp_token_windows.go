@@ -37,8 +37,8 @@ func otlpValidatePerm(_ string, _ os.FileInfo) error {
 	return nil
 }
 
-// otlpValidateOwner is a no-op on Windows. File ownership uses ACLs and
-// the Unix UID check is not applicable.
-func otlpValidateOwner(_ string, _ os.FileInfo) error {
-	return nil
+// OTLP tokens are only trusted when the owner and DACL exclude untrusted
+// writers. Unix mode bits cannot provide that guarantee on Windows.
+func otlpValidateOwner(path string, info os.FileInfo) error {
+	return hookAPIValidateOwner(path, info)
 }

@@ -38,6 +38,7 @@ from defenseclaw.commands.cmd_upgrade import (
 )
 from defenseclaw.config import Config, GatewayConfig, GuardrailConfig, OpenShellConfig
 from defenseclaw.context import AppContext
+from tests.helpers import home_env
 
 
 class TestUpgradeVersionValidation(unittest.TestCase):
@@ -97,10 +98,14 @@ class TestUpgradeBackup(unittest.TestCase):
 
 class TestUpgradeWheelInstall(unittest.TestCase):
     def test_install_wheel_uses_managed_venv_python_after_creating_venv(self):
-        with TemporaryDirectory() as home, patch.dict(os.environ, {"HOME": home}), \
+        with TemporaryDirectory() as home, patch.dict(os.environ, home_env(home)), \
              patch("shutil.which", return_value="/usr/bin/uv"), \
              patch("subprocess.run") as run_mock:
-            venv_python = os.path.join(home, ".defenseclaw", ".venv", "bin", "python")
+            scripts_dir = "Scripts" if os.name == "nt" else "bin"
+            python_exe = "python.exe" if os.name == "nt" else "python"
+            venv_python = os.path.join(
+                home, ".defenseclaw", ".venv", scripts_dir, python_exe,
+            )
 
             def side_effect(args, **_kwargs):
                 if args[:3] == ["/usr/bin/uv", "--no-config", "venv"]:
@@ -115,10 +120,13 @@ class TestUpgradeWheelInstall(unittest.TestCase):
 
         pip_call = run_mock.call_args_list[-1].args[0]
         self.assertEqual(pip_call[:5], ["/usr/bin/uv", "--no-config", "pip", "install", "--python"])
-        self.assertEqual(pip_call[5], venv_python)
+        self.assertEqual(
+            os.path.normcase(os.path.normpath(pip_call[5])),
+            os.path.normcase(os.path.normpath(venv_python)),
+        )
 
     def test_preflight_wheel_install_uses_dry_run_without_managed_venv(self):
-        with TemporaryDirectory() as home, patch.dict(os.environ, {"HOME": home}), \
+        with TemporaryDirectory() as home, patch.dict(os.environ, home_env(home)), \
              patch("shutil.which", return_value="/usr/bin/uv"), \
              patch("subprocess.run") as run_mock:
 
@@ -141,7 +149,7 @@ class TestUpgradeWheelInstall(unittest.TestCase):
         self.assertEqual(calls[1][-1], "/tmp/defenseclaw.whl")
 
     def test_run_installed_migrations_uses_managed_venv_python(self):
-        with TemporaryDirectory() as home, patch.dict(os.environ, {"HOME": home}), \
+        with TemporaryDirectory() as home, patch.dict(os.environ, home_env(home)), \
              patch("subprocess.run") as run_mock:
             venv_python = os.path.join(home, ".defenseclaw", ".venv", "bin", "python")
             os.makedirs(os.path.dirname(venv_python), exist_ok=True)
@@ -166,7 +174,10 @@ class TestUpgradeWheelInstall(unittest.TestCase):
 
         self.assertEqual(count, 1)
         call = run_mock.call_args.args[0]
-        self.assertEqual(call[0], venv_python)
+        self.assertEqual(
+            os.path.normcase(os.path.normpath(call[0])),
+            os.path.normcase(os.path.normpath(venv_python)),
+        )
         self.assertEqual(call[1], "-c")
         self.assertEqual(call[3:7], ["0.7.0", "0.8.0", "/tmp/openclaw", "/tmp/defenseclaw"])
 
@@ -915,7 +926,7 @@ class TestInstallGatewaySnapshotsPrevious(unittest.TestCase):
 
     def test_snapshot_created_when_previous_binary_exists(self):
         with TemporaryDirectory() as fake_home, TemporaryDirectory() as backup_dir, \
-             patch.dict(os.environ, {"HOME": fake_home}):
+             patch.dict(os.environ, home_env(fake_home)):
             install_dir = os.path.join(fake_home, ".local", "bin")
             os.makedirs(install_dir)
             previous = os.path.join(install_dir, "defenseclaw-gateway")
@@ -944,7 +955,7 @@ class TestInstallGatewaySnapshotsPrevious(unittest.TestCase):
         """A fresh install (no prior gateway) must not fail just because
         there's nothing to snapshot."""
         with TemporaryDirectory() as fake_home, TemporaryDirectory() as backup_dir, \
-             patch.dict(os.environ, {"HOME": fake_home}):
+             patch.dict(os.environ, home_env(fake_home)):
             new_binary = os.path.join(fake_home, "defenseclaw")
             with open(new_binary, "wb") as f:
                 f.write(b"#!/bin/sh\n")

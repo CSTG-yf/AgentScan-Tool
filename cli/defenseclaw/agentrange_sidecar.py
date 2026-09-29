@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from http import HTTPStatus
@@ -51,7 +52,41 @@ _runtime_request = ContextVar("agentrange_runtime_request", default=None)
 
 MAX_FORWARD_BODY_BYTES = int(os.getenv("DC_MAX_FORWARD_BODY_BYTES", str(10 * 1024 * 1024)))
 MAX_INSPECT_TEXT_BYTES = int(os.getenv("DC_MAX_INSPECT_TEXT_BYTES", str(256 * 1024)))
+MAX_AGENT_STACK_HEADER_BYTES = 4096
+MAX_AGENT_STACK_FRAMES = 16
+_STACK_FUNCTION_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 UPSTREAM_TIMEOUT_SECONDS = float(os.getenv("DC_UPSTREAM_TIMEOUT_SECONDS", "30"))
+
+
+def parse_agent_stack_header(value: str | None) -> list[dict[str, str | int]]:
+    """Validate OpsPilot's bounded, project-relative runtime stack evidence."""
+    if not value or len(value.encode("utf-8", errors="ignore")) > MAX_AGENT_STACK_HEADER_BYTES:
+        return []
+    try:
+        rows = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(rows, list):
+        return []
+    frames: list[dict[str, str | int]] = []
+    for row in rows[:MAX_AGENT_STACK_FRAMES]:
+        if not isinstance(row, dict):
+            continue
+        file = row.get("file")
+        function = row.get("function")
+        line = row.get("line")
+        if not isinstance(file, str) or not isinstance(function, str):
+            continue
+        if not isinstance(line, int) or isinstance(line, bool) or not 1 <= line <= 10_000_000:
+            continue
+        if file.startswith("/") or "\\" in file or ":" in file or ".." in file.split("/"):
+            continue
+        if not file.startswith(("api/", "policy/", "skills/")):
+            continue
+        if not _STACK_FUNCTION_RE.fullmatch(function):
+            continue
+        frames.append({"file": file[:256], "function": function, "line": line})
+    return frames
 
 
 def getenv(name: str, default: str = "") -> str:
@@ -521,15 +556,24 @@ class AgentRangeProxyHandler(BaseHTTPRequestHandler):
             return
 
         meta = request_event_meta(self, body, target_url)
+        stack_frames = (
+            parse_agent_stack_header(self.headers.get("X-DefenseClaw-Agent-Stack"))
+            if getenv("DC_PROXY_KIND") == "mcp"
+            else []
+        )
+        context = {
+            "connector": connector_name(), "session_id": session_id, "trace_id": trace_id,
+            "call_id": str(uuid4()), "event_id": str(uuid4()), "phase": "pre",
+            "proxy_kind": getenv("DC_PROXY_KIND"), "operation": "http.request",
+            "tool_name": meta.get("tool_name", ""), "mcp_server": meta.get("mcp_server", ""),
+            "http_method": self.command, "http_path": self.path.split("?", 1)[0],
+            "target": str(meta.get("target") or getenv("DC_PROXY_KIND")),
+        }
+        if stack_frames:
+            context["stack_source"] = "python.traceback"
+            context["stack_frames"] = stack_frames
         _runtime_request.set({
-            "context": {
-                "connector": connector_name(), "session_id": session_id, "trace_id": trace_id,
-                "call_id": str(uuid4()), "event_id": str(uuid4()), "phase": "pre",
-                "proxy_kind": getenv("DC_PROXY_KIND"), "operation": "http.request",
-                "tool_name": meta.get("tool_name", ""), "mcp_server": meta.get("mcp_server", ""),
-                "http_method": self.command, "http_path": self.path.split("?", 1)[0],
-                "target": str(meta.get("target") or getenv("DC_PROXY_KIND")),
-            },
+            "context": context,
             "result_id": str(uuid4()), "inspection_ids": [], "pending_checks": [],
         })
         started = time.monotonic()

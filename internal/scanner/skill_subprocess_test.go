@@ -6,8 +6,6 @@ package scanner
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/defenseclaw/defenseclaw/internal/config"
@@ -15,11 +13,7 @@ import (
 )
 
 func TestSkillScanner_SubprocessExitEmptyStdoutFails(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "fake-scanner.sh")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 7\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	bin := writeFakeScanner(t, "", 7)
 	var emitted []gatewaylog.Event
 	w, err := gatewaylog.New(gatewaylog.Config{})
 	if err != nil {

@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -689,6 +690,11 @@ func (c *hookOnlyConnector) Setup(ctx context.Context, opts SetupOpts) error {
 	if err := WriteHookScriptsForConnectorObjectWithOpts(hookDir, opts, c); err != nil {
 		return fmt.Errorf("%s hook script: %w", c.name, err)
 	}
+	if c.name == "antigravity" {
+		if err := ensureAntigravityNativeLauncher(opts); err != nil {
+			return fmt.Errorf("antigravity native hook launcher: %w", err)
+		}
+	}
 	if err := c.patchConfig(opts, c.hookCommand(opts)); err != nil {
 		return fmt.Errorf("%s hook config: %w", c.name, err)
 	}
@@ -735,10 +741,15 @@ func (c *hookOnlyConnector) setupPluginArtifact(opts SetupOpts) error {
 
 // hookCommand returns the command an agent runs for this connector's hook. On
 // Unix it is the bundled .sh path; on Windows it is the native DefenseClaw
-// `hook` subcommand invocation. The same value is used at setup, teardown, and
+// `hook` subcommand invocation. Antigravity is the exception on Windows: agy
+// executes the command value as a literal executable path, so it uses a
+// self-contained launcher copy with no command-line arguments. The same value is used at setup, teardown, and
 // VerifyClean so the JSON/YAML hook removers (which match on the exact command
 // string) recognize the entries DefenseClaw inserted.
 func (c *hookOnlyConnector) hookCommand(opts SetupOpts) string {
+	if c.name == "antigravity" && runtime.GOOS == "windows" {
+		return antigravityNativeHookCommand(opts)
+	}
 	return hookInvocationCommand(c.name, filepath.Join(opts.DataDir, "hooks", c.scriptName))
 }
 
@@ -765,6 +776,11 @@ func (c *hookOnlyConnector) Teardown(ctx context.Context, opts SetupOpts) error 
 		return c.teardownPluginArtifact(opts)
 	}
 	var errs []string
+	if c.name == "antigravity" {
+		if err := disableAntigravityNativeLauncher(opts); err != nil {
+			errs = append(errs, fmt.Sprintf("disable native hook launcher: %v", err))
+		}
+	}
 
 	path := managedFileBackupTargetPath(opts.DataDir, c.name, "config", c.configPath(opts))
 	restored, err := restoreManagedFileBackupIfUnchanged(opts.DataDir, c.name, "config", path)
@@ -862,11 +878,15 @@ func (c *hookOnlyConnector) SetCredentials(gatewayToken, masterKey string) {
 func (c *hookOnlyConnector) AgentPaths(opts SetupOpts) AgentPaths {
 	caps := c.Capabilities(opts)
 	patched := uniqueNonEmptyStrings(append([]string{c.configPath(opts)}, caps.Telemetry.ConfigPaths...))
-	return AgentPaths{
+	paths := AgentPaths{
 		PatchedFiles: patched,
 		BackupFiles:  []string{managedFileBackupPath(opts.DataDir, c.name, "config")},
 		HookScripts:  hookScriptPathsForConnector(opts, c),
 	}
+	if c.name == "antigravity" && runtime.GOOS == "windows" {
+		paths.GeneratedExecutables = append(paths.GeneratedExecutables, antigravityNativeHookCommand(opts))
+	}
+	return paths
 }
 
 func (c *hookOnlyConnector) HookScripts(opts SetupOpts) []string {

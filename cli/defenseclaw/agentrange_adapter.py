@@ -140,10 +140,12 @@ class AdapterBundle:
     override_path: str
     plan_path: str
     readme_path: str
+    sidecar_path: str
     discovery: AgentRangeDiscovery
     plan: dict[str, Any]
     compose_text: str
     readme_text: str
+    sidecar_text: str
 
 
 def discover_agentrange(range_root: str | Path, compose_file: str = "docker-compose.yml") -> AgentRangeDiscovery:
@@ -212,7 +214,8 @@ def build_adapter_bundle(
     discovery = discover_agentrange(range_root)
     out_dir = Path(output_dir) if output_dir is not None else Path.cwd() / DEFAULT_OUTPUT_SUBDIR
     out_dir = out_dir.expanduser().resolve()
-    sidecar_path = Path(py_inspect.getfile(agentrange_sidecar)).resolve()
+    sidecar_source = Path(py_inspect.getfile(agentrange_sidecar)).resolve()
+    sidecar_path = out_dir / "agentrange_sidecar.py"
     plan = _build_plan(discovery, sidecar_path, gateway_base, mode, fail_mode, inspect_timeout_ms)
     plan["source"]["portable_range_root"] = _portable_path(Path(discovery.range_root), base_dir=out_dir)
     plan["source"]["portable_compose_path"] = _portable_path(Path(discovery.compose_path), base_dir=out_dir)
@@ -226,10 +229,12 @@ def build_adapter_bundle(
         override_path=str(out_dir / "docker-compose.defenseclaw.override.yml"),
         plan_path=str(out_dir / "agentrange-adapter-plan.json"),
         readme_path=str(out_dir / "README.md"),
+        sidecar_path=str(sidecar_path),
         discovery=discovery,
         plan=public_plan,
         compose_text=compose_text,
         readme_text=readme_text,
+        sidecar_text=sidecar_source.read_text(encoding="utf-8"),
     )
 
 
@@ -253,6 +258,7 @@ def write_adapter_bundle(
         Path(bundle.override_path): bundle.compose_text,
         Path(bundle.plan_path): json.dumps(bundle.plan, indent=2, ensure_ascii=False) + "\n",
         Path(bundle.readme_path): bundle.readme_text,
+        Path(bundle.sidecar_path): bundle.sidecar_text,
     }
     existing = [path for path in files if path.exists()]
     if existing and not force:
@@ -704,6 +710,9 @@ routed through DefenseClaw-owned sidecars:
 - OpsPilot -> `defenseclaw-llm-proxy` -> original LLM stub
 - OpsPilot -> `defenseclaw-mcp-proxy` -> original MCP servers
 - host -> `defenseclaw-langflow-ingress` -> original Langflow service
+
+The bundle includes `agentrange_sidecar.py`; keep it beside the generated
+Compose overlay when moving the bundle.
 
 Before starting the range, make sure the DefenseClaw sidecar API is reachable
 from Docker containers at:

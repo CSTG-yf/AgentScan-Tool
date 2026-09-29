@@ -18,6 +18,7 @@ export function attackChainDetailTabs(detail: AttackChainDetail) {
     <Text strong>#{step.order} {step.title}</Text><div><Text type="secondary">{time(step.occurredAt)} · {step.stage}</Text></div>
     {fields([["工具", step.tool], ["资源", step.resource], ["事件 ID", step.sourceEventId], ["来源", step.source]])}
     {step.evidence && <p className="runtime-record-text">{step.evidence}</p>}
+    {step.stack?.length ? <div className="runtime-stack-evidence"><Text strong>运行时函数栈 · {step.stackSource || "采集器来源未知"}</Text><pre>{step.stack.join("\n")}</pre></div> : <Text type="secondary">函数栈：{step.stackStatus === "unsupported" ? "此连接器不支持采集" : "未采集"}</Text>}
   </div> }))} /> : <Empty description="暂无关联步骤" />;
   const actionSummary = decision?.decision_id ? <div className="runtime-chain-step"><Space wrap><Tag>{text(decision.decision)}</Tag><Tag>{text(decision.mode)}</Tag><Text>预计阻断：{decision.would_block === true ? "是" : "否"}</Text></Space><p className="runtime-record-text">{text(decision.reason)}</p></div> : <Empty description="暂无策略决策" />;
   return [

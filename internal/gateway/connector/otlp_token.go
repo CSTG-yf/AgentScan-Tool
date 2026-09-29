@@ -26,6 +26,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/defenseclaw/defenseclaw/internal/safefile"
 )
 
 // OTLPPathTokenScope identifies a connector-bound OTLP token used in
@@ -143,6 +145,9 @@ func EnsureOTLPPathToken(dataDir string, scope OTLPPathTokenScope) (string, erro
 	if err := os.MkdirAll(filepath.Dir(tokenPath), 0o700); err != nil {
 		return "", fmt.Errorf("create OTLP path-token dir: %w", err)
 	}
+	if err := safefile.ProtectPath(filepath.Dir(tokenPath), 0o700); err != nil {
+		return "", fmt.Errorf("secure OTLP path-token dir: %w", err)
+	}
 
 	buf := make([]byte, otlpTokenLen)
 	if _, err := rand.Read(buf); err != nil {
@@ -150,34 +155,8 @@ func EnsureOTLPPathToken(dataDir string, scope OTLPPathTokenScope) (string, erro
 	}
 	tok := hex.EncodeToString(buf)
 
-	tmp := tokenPath + ".tmp"
-	_ = os.Remove(tmp)
-	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
-	if nofollow := otlpOpenNoFollow(); nofollow != 0 {
-		flags |= nofollow
-	}
-	f, err := os.OpenFile(tmp, flags, 0o600)
-	if err != nil {
+	if err := safefile.Write(tokenPath, []byte(tok+"\n")); err != nil {
 		return "", fmt.Errorf("write OTLP path-token: %w", err)
-	}
-	_, err = f.WriteString(tok + "\n")
-	if syncErr := f.Sync(); err == nil {
-		err = syncErr
-	}
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		_ = os.Remove(tmp)
-		return "", fmt.Errorf("write OTLP path-token: %w", err)
-	}
-	if err := os.Chmod(tmp, 0o600); err != nil {
-		_ = os.Remove(tmp)
-		return "", fmt.Errorf("chmod OTLP path-token: %w", err)
-	}
-	if err := os.Rename(tmp, tokenPath); err != nil {
-		_ = os.Remove(tmp)
-		return "", fmt.Errorf("rename OTLP path-token: %w", err)
 	}
 	return tok, nil
 }

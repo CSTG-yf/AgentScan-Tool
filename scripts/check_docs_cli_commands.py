@@ -19,6 +19,7 @@ from pathlib import Path
 
 import click
 from click.testing import CliRunner
+from defenseclaw.commands import cmd_setup
 from defenseclaw.main import cli
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -201,6 +202,15 @@ def _no_op_command_tree() -> click.Command:
 
         node.callback = lambda **_kwargs: None
         for parameter in node.params:
+            # Documentation includes proxy connector examples that are
+            # intentionally unavailable on Windows. This checker validates
+            # the CLI grammar across supported platforms; the platform
+            # support contract has its own parity tests.
+            if parameter.name == "agent_name" and isinstance(parameter.type, click.Choice):
+                parameter.type = click.Choice(
+                    cmd_setup._CONNECTOR_NAMES_FALLBACK,
+                    case_sensitive=parameter.type.case_sensitive,
+                )
             if isinstance(parameter.type, click.Path):
                 # The docs use representative paths.  This check validates
                 # the CLI grammar, not whether a reader created that file.

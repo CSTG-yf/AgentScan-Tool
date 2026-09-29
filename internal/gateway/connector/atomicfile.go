@@ -22,6 +22,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/defenseclaw/defenseclaw/internal/safefile"
 )
 
 // atomicWriteFile writes data to path atomically by writing to a temp file in
@@ -51,16 +53,16 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("create temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
+	if err := safefile.ProtectPath(tmpPath, perm); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("secure temp file: %w", err)
+	}
 
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
 		return fmt.Errorf("write temp file: %w", err)
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("chmod temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
@@ -82,7 +84,7 @@ func atomicFileAlreadyMatches(path string, data []byte, perm os.FileMode) bool {
 	defer file.Close()
 
 	openedInfo, err := file.Stat()
-	if err != nil || !openedInfo.Mode().IsRegular() || openedInfo.Mode().Perm() != perm.Perm() {
+	if err != nil || !openedInfo.Mode().IsRegular() || !atomicFileSecurityMatches(path, openedInfo, perm) {
 		return false
 	}
 	pathInfo, err := os.Lstat(path)

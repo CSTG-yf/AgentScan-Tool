@@ -1,4 +1,13 @@
 use serde_json::{json, Value};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+
+#[derive(Default)]
+pub struct ChangeStreamController {
+    stop: Mutex<Option<Arc<AtomicBool>>>,
+}
 
 fn urlencode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
@@ -178,4 +187,50 @@ pub fn get_changes(
     };
     crate::commands::gateway_api::get_json::<Value>(&app, &path)
         .map_err(|error| format!("获取数据变更游标失败：{error}"))
+}
+
+#[tauri::command]
+pub fn start_change_stream(
+    app: tauri::AppHandle,
+    controller: tauri::State<'_, ChangeStreamController>,
+    cursor: Option<i64>,
+    domains: Vec<String>,
+) -> Result<(), String> {
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let mut active = controller
+            .stop
+            .lock()
+            .map_err(|_| "变更流状态锁不可用".to_owned())?;
+        if let Some(previous) = active.take() {
+            previous.store(true, Ordering::Relaxed);
+        }
+        *active = Some(stop.clone());
+    }
+    std::thread::Builder::new()
+        .name("gateway-change-stream".to_owned())
+        .spawn(move || {
+            crate::commands::gateway_api::stream_change_events(
+                app,
+                stop,
+                cursor.unwrap_or(0).max(0),
+                domains,
+            );
+        })
+        .map_err(|error| format!("启动 Gateway 变更流失败：{error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_change_stream(
+    controller: tauri::State<'_, ChangeStreamController>,
+) -> Result<(), String> {
+    let mut active = controller
+        .stop
+        .lock()
+        .map_err(|_| "变更流状态锁不可用".to_owned())?;
+    if let Some(stop) = active.take() {
+        stop.store(true, Ordering::Relaxed);
+    }
+    Ok(())
 }

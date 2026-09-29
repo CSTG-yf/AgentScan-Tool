@@ -1077,6 +1077,7 @@ func (p *GuardrailProxy) handlePassthrough(w http.ResponseWriter, r *http.Reques
 			verdict = mergePromptVerdicts(verdict, rawVerdict)
 		}
 		p.resolveConfirm(r.Context(), r, verdict, "prompt", label, mode)
+		verdict.ProxyPreUpstreamBlocked = verdict.Action == "block" && mode == "action"
 		elapsed := time.Since(t0)
 		p.logPreCall(label, partial.Messages, verdict, elapsed)
 		p.recordTelemetry(r.Context(), "prompt", label, verdict, elapsed, nil, nil,
@@ -2666,6 +2667,7 @@ func (p *GuardrailProxy) handleChatCompletion(w http.ResponseWriter, r *http.Req
 			verdict = mergePromptVerdicts(verdict, rawVerdict)
 		}
 		p.resolveConfirm(r.Context(), r, verdict, "prompt", req.Model, mode)
+		verdict.ProxyPreUpstreamBlocked = verdict.Action == "block" && mode == "action"
 		elapsed := time.Since(t0)
 
 		// End guardrail span with decision.

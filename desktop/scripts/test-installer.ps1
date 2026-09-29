@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 $desktopRoot = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $desktopRoot
 if (-not $InstallerPath) {
-    $InstallerPath = Join-Path $repoRoot "dist\TraceBastion-Desktop-Setup-x64.exe"
+    $InstallerPath = Join-Path $repoRoot "dist\windows\TraceBastion-Desktop-Setup-Windows-x64.exe"
 }
 $InstallerPath = (Resolve-Path -LiteralPath $InstallerPath).Path
 if (-not $InstallDir) {
