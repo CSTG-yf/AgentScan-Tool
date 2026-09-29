@@ -208,6 +208,14 @@ func (a *APIServer) recordHookRuntimeEvent(ctx context.Context, req agentHookReq
 		},
 	}
 	in.CanonicalAgentID = firstNonEmpty(req.AgentID, env.AgentID, identity.AgentID)
+	if eventType == audit.RuntimeEventToolPreCall && (req.ConnectorName == "codex" || req.ConnectorName == "claudecode") {
+		var args map[string]interface{}
+		if json.Unmarshal(req.ToolArgs, &args) == nil {
+			if digest := fileReadDigestFromInput(req.ToolName, req.CWD, args); digest != "" {
+				in.Attributes["file_read_path_sha256"] = digest
+			}
+		}
+	}
 	if len(resp.Findings) > 0 {
 		in.Attributes["findings"] = resp.Findings
 	}

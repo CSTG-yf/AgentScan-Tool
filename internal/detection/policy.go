@@ -63,6 +63,7 @@ func NewPolicyEngine(store *audit.Store) *PolicyEngine {
 	p.RegisterExecutor(ProcessExecutor{})
 	p.RegisterExecutor(MCPBlockExecutor{Store: store})
 	p.RegisterExecutor(AgentHookBlockExecutor{Store: store})
+	p.RegisterExecutor(FileBlockExecutor{Store: store})
 	p.reloadMode()
 	return p
 }
