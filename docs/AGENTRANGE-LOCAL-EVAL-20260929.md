@@ -54,9 +54,10 @@ A separate 1,000-event action probe raised all four sidecar inspection timeouts
 from 250 to 350 ms at 1.5 events/second. It still had 253 unavailable events
 affecting 197 instances, while end-to-end p95 rose to 1,099.623 ms and
 combined defense CPU p95 was 5.004%. Gateway inspection records exist for
-251/253 unavailable attempts, so the reported `Network is unreachable` error
-usually does not mean the request failed to reach the Gateway. The experiment
-did not improve the overall gate and the sidecars were restored to 250 ms.
+251/253 unavailable attempts, but the sidecar retries failed checks after
+response delivery with the same event ID. Those records cannot establish
+whether the original attempt reached the Gateway or only its retry did. The
+experiment did not improve the overall gate and the sidecars were restored to 250 ms.
 Its ignored run is `bench/runs/20260929-timeout350-rate150-1k/action`.
 
 The earlier natural-rate action replay had an end-to-end p95 that exceeded
