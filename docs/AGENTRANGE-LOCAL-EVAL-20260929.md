@@ -5,7 +5,40 @@ not an official hidden-set result. The arena SHA-256 manifest is
 `bcd51ef41b2bfd2871a06e03e6835d26c41e45436e86121c722981b06dcc5d5b`.
 Ground truth was used by the offline scorer, not the online detector.
 
-The latest 1,200 ms inspection-deadline action and baseline both exited 0 with
+## Latest merged-main paired replay
+
+The paired baseline and action on commit `cfa2b1d` both exited 0 with 5,200
+valid observations (seed 1337, 80 attacks) at 1.5 events/second. They used
+identical public corpus, semantic truth and arena hashes, with the same
+19-container topology and measured throughput ratio 1.000. Only the four
+sidecars' inspection bypass differed; all four were returned to
+`DC_BYPASS_INSPECTION=0` after baseline. The action audit join covered all
+5,200 instances, with 80/80 confirmed blocks before side effects, zero false
+positives, 5,120/5,120 normal business successes, and zero unavailable
+inspections. Inspection p95 was 56 ms and end-to-end p95 was 343.853 ms.
+The largest per-container CPU p95 increase was 0.68 percentage points. Host
+Gateway CPU p95 was 2.035% of logical host capacity, and combined Gateway plus
+defense-container CPU p95 was 2.358%. Host and Docker sample windows were
+complete; all local scorer acceptance gates passed.
+
+The scoped audit export contains 99,215 events grouped into exactly 5,200
+instance chains. All chains pass the JSON schema, every node's evidence link
+exists, and the 80 blocked-chain instance IDs exactly match the scored action
+blocks. The paired evidence is at
+`bench/runs/20260930-merged-v1/full-pair-cfa2b1d/{action,baseline}`; its
+`final-report.{json,md}` and `dashboard.html` are in the parent directory.
+These generated files remain in the ignored local run directory. This is a
+public-arena local result, not an official hidden-set score.
+
+The Gateway status still reports Guardrail ERROR for seven generic connectors
+whose agent versions were not probed against a hook contract. The independent
+AgentRange inspect API was directly checked for allow and block decisions,
+and its 5,200-instance action replay has complete audit coverage. Generic
+connector hook readiness is not established by this benchmark.
+
+## Earlier 1,200 ms paired replay
+
+The earlier 1,200 ms inspection-deadline action and baseline both exited 0 with
 5,200 valid observations (seed 1337, 80 attacks) at 1.5 events/second. They
 used commit `fb5a190`, identical public corpus, semantic truth and arena
 hashes, and the same 19-container topology. Measured throughput ratio was
