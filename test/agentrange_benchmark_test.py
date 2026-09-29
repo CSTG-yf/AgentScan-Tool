@@ -11,7 +11,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
-from bench.agentrange_benchmark import _confusion, _score_host_gateway_cpu, prepare_all, prepare_run, score_run
+from bench.agentrange_benchmark import (
+    _confusion, _score_combined_defense_cpu, _score_host_gateway_cpu, prepare_all, prepare_run, score_run,
+)
 from bench.benchmark import summarize_modes
 from bench.enrich_observations import enrich
 from bench.resource_sampler import docker_stats, sample
@@ -64,15 +66,29 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
             rows = [{
                 "timestamp": f"2026-09-29T00:00:{second:02d}+00:00",
                 "mode": "action", "process_start": "2026-09-28T00:00:00Z",
-                "interval_seconds": 2, "cpu_host_pct": value, "cpu_core_pct": value * 16,
+                "interval_seconds": 2, "logical_processors": 16,
+                "cpu_host_pct": value, "cpu_core_pct": value * 16,
             } for second, value in ((2, 2.0), (4, 3.0), (6, 4.0), (8, 4.5), (10, 4.8))]
             output = run_dir / "host-gateway.jsonl"
             output.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
             report = _score_host_gateway_cpu(run_dir)
             self.assertEqual(report["status"], "complete")
             self.assertEqual(report["cpu_host_pct"]["p95"], 4.8)
+            docker_rows = [{
+                "timestamp": row["timestamp"], "mode": "action",
+                "container": "defenseclaw-proxy", "cpu_pct": 16.0,
+            } for row in rows]
+            combined = _score_combined_defense_cpu(run_dir, docker_rows, report)
+            self.assertEqual(combined["status"], "complete")
+            self.assertEqual(combined["cpu_host_pct"]["p95"], 5.8)
+            self.assertEqual(
+                _score_combined_defense_cpu(run_dir, docker_rows[:1], report)["status"],
+                "partial_window",
+            )
             output.write_text("\n".join(json.dumps(row) for row in rows[3:]) + "\n", encoding="utf-8")
-            self.assertEqual(_score_host_gateway_cpu(run_dir)["status"], "partial_window")
+            partial = _score_host_gateway_cpu(run_dir)
+            self.assertEqual(partial["status"], "partial_window")
+            self.assertEqual(_score_combined_defense_cpu(run_dir, docker_rows, partial)["status"], "partial_window")
             output.write_text("\n".join(json.dumps({**row, "process_start": None}) for row in rows) + "\n", encoding="utf-8")
             self.assertEqual(_score_host_gateway_cpu(run_dir)["status"], "partial_window")
             output.write_text("\n".join(json.dumps({**row, "timestamp": row["timestamp"].removesuffix("+00:00")}) for row in rows) + "\n", encoding="utf-8")
@@ -519,6 +535,7 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
             self.assertTrue(report["acceptance"]["inspect_p95_lt_1000ms"])
             self.assertTrue(report["acceptance"]["inspect_latency_coverage_1"])
             self.assertFalse(report["acceptance"]["host_gateway_cpu_p95_lte_5pct"])
+            self.assertFalse(report["acceptance"]["combined_defense_cpu_p95_lte_5pct"])
             observations[0].pop("inspect_latency_ms")
             (run_dir / "observations.jsonl").write_text("\n".join(json.dumps(row) for row in observations) + "\n", encoding="utf-8")
             self.assertFalse(score_run(run_dir)["acceptance"]["inspect_latency_coverage_1"])

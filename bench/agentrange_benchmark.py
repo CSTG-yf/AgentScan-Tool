@@ -8,6 +8,7 @@ joined only by this post-run scorer.
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_left
 from dataclasses import asdict, is_dataclass
 import hashlib
 import json
@@ -640,6 +641,85 @@ def _score_host_gateway_cpu(run_dir: Path) -> dict[str, Any]:
     }
 
 
+def _score_combined_defense_cpu(
+    run_dir: Path, resources: list[dict[str, Any]], host_report: dict[str, Any]
+) -> dict[str, Any]:
+    result: dict[str, Any] = {"status": host_report["status"], "samples": 0}
+    if host_report["status"] in {"missing", "invalid_samples", "replay_timing_missing", "replay_timing_invalid", "no_window_samples"}:
+        return result
+
+    host_rows = read_jsonl(run_dir / "host-gateway.jsonl")
+    try:
+        host = sorted((datetime.fromisoformat(row["timestamp"]), float(row["cpu_host_pct"]), int(row["logical_processors"])) for row in host_rows)
+    except (KeyError, TypeError, ValueError):
+        return {**result, "status": "invalid_host_samples"}
+    processors = {row[2] for row in host}
+    if len(processors) != 1 or next(iter(processors)) <= 0:
+        return {**result, "status": "invalid_host_samples"}
+    logical_processors = next(iter(processors))
+    host_times = [row[0] for row in host]
+    host_interval = statistics.median(
+        (right - left).total_seconds() for left, right in zip(host_times, host_times[1:])
+    ) if len(host_times) > 1 else 2.0
+    tolerance = max(5.0, 3 * host_interval)
+
+    docker_snapshots: dict[datetime, dict[str, float]] = defaultdict(dict)
+    for row in resources:
+        container = str(row.get("container") or "")
+        if row.get("mode") != "action" or "defenseclaw-" not in container:
+            continue
+        try:
+            timestamp = datetime.fromisoformat(row["timestamp"])
+            cpu = float(row["cpu_pct"])
+        except (KeyError, TypeError, ValueError):
+            return {**result, "status": "invalid_container_samples"}
+        if not math.isfinite(cpu) or cpu < 0 or timestamp.tzinfo is None:
+            return {**result, "status": "invalid_container_samples"}
+        docker_snapshots[timestamp][container] = cpu
+    process = read_json(run_dir / "replay-process.json")
+    started = datetime.fromisoformat(process["started_at"])
+    finished = datetime.fromisoformat(process["finished_at"])
+    docker_snapshots = {
+        timestamp: snapshot for timestamp, snapshot in docker_snapshots.items()
+        if started <= timestamp <= finished
+    }
+    if not docker_snapshots:
+        return {**result, "status": "missing_container_samples"}
+    expected_containers = set.union(*(set(snapshot) for snapshot in docker_snapshots.values()))
+    consistent = all(set(snapshot) == expected_containers for snapshot in docker_snapshots.values())
+    docker_times = sorted(docker_snapshots)
+    docker_interval = statistics.median(
+        (right - left).total_seconds() for left, right in zip(docker_times, docker_times[1:])
+    ) if len(docker_times) > 1 else 2.0
+    docker_edge_limit = max(5.0, 3 * docker_interval)
+    docker_gap_limit = max(10.0, 5 * docker_interval)
+    docker_window_complete = (
+        (docker_times[0] - started).total_seconds() <= docker_edge_limit
+        and (finished - docker_times[-1]).total_seconds() <= docker_edge_limit
+        and all((right - left).total_seconds() <= docker_gap_limit for left, right in zip(docker_times, docker_times[1:]))
+    )
+
+    combined = []
+    for timestamp, snapshot in sorted(docker_snapshots.items()):
+        index = bisect_left(host_times, timestamp)
+        candidates = host[max(0, index - 1):index + 1]
+        nearest = min(candidates, key=lambda item: abs((item[0] - timestamp).total_seconds()))
+        if abs((nearest[0] - timestamp).total_seconds()) <= tolerance:
+            combined.append(nearest[1] + sum(snapshot.values()) / logical_processors)
+    if not combined:
+        return {**result, "status": "no_aligned_samples"}
+    status = "complete" if (
+        host_report["status"] == "complete" and docker_window_complete and consistent and len(combined) == len(docker_snapshots)
+    ) else "partial_window"
+    return {
+        "status": status,
+        "samples": len(combined),
+        "docker_snapshots": len(docker_snapshots),
+        "containers": sorted(expected_containers),
+        "cpu_host_pct": {"p95": _percentile(combined, 0.95), "max": round(max(combined), 3)},
+    }
+
+
 def score_run(run_dir: Path, baseline_run_dir: Path | None = None) -> dict[str, Any]:
     run_dir = run_dir.resolve()
     gt_rows = read_jsonl(run_dir / "gt.jsonl")
@@ -667,6 +747,7 @@ def score_run(run_dir: Path, baseline_run_dir: Path | None = None) -> dict[str, 
         run_mode=run_mode,
     )
     resource_report["host_gateway"] = _score_host_gateway_cpu(run_dir)
+    resource_report["combined_defense_cpu"] = _score_combined_defense_cpu(run_dir, resources, resource_report["host_gateway"])
     if (run_dir / "differential-merge.json").exists():
         resource_report["cpu_increment_pct"] = None
         resource_report["cpu_increment_by_container"] = {}
@@ -689,6 +770,7 @@ def score_run(run_dir: Path, baseline_run_dir: Path | None = None) -> dict[str, 
             "inspect_latency_coverage_1": overall["inspect_latency_ms"]["samples"] == overall["latency_ms"]["samples"] == len(gt_rows),
             "cpu_increment_lte_5pct": resource_report["baseline"]["status"] == "complete" and resource_report["cpu_increment_pct"] is not None and resource_report["cpu_increment_pct"] <= 5,
             "host_gateway_cpu_p95_lte_5pct": resource_report["host_gateway"]["status"] == "complete" and resource_report["host_gateway"]["cpu_host_pct"]["p95"] <= 5,
+            "combined_defense_cpu_p95_lte_5pct": resource_report["combined_defense_cpu"]["status"] == "complete" and resource_report["combined_defense_cpu"]["cpu_host_pct"]["p95"] <= 5,
             "evidence_complete": overall["counts"]["unknown"] == 0,
         },
     }

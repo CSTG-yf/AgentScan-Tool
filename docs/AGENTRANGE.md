@@ -126,7 +126,11 @@ Windows replay, pass `--host-gateway-pid <gateway-process-id>` to
 percent and percent of all logical host processors. Its host 5% gate uses the
 latter and requires samples spanning the complete replay window; a late or
 interrupted sampler is `partial_window`. This host measurement and the Docker
-per-container increment are separate evidence, not a combined CPU total.
+per-container increment are separate evidence. The scorer also time-aligns the
+Gateway and DefenseClaw container samples to estimate their combined p95 as a
+percentage of host logical CPU capacity. It requires both sample windows and
+the container set to be complete; it does not include Docker Desktop overhead
+or unrelated host processes.
 
 For a full-topology CPU baseline, load the same DefenseClaw overlay with
 `DC_BYPASS_INSPECTION=1` only while collecting the baseline resource window.
