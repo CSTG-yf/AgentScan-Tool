@@ -530,17 +530,23 @@ func inspectToolAuthorizationContext(req *ToolInspectRequest) []RuleFinding {
 	if !ok {
 		return nil
 	}
-	requestedTenant, _ := args["tenant"].(string)
-	if strings.TrimSpace(requestedTenant) == "" {
-		requestedTenant, _ = args["tenant_id"].(string)
-	}
-	requestedTenant = strings.TrimSpace(requestedTenant)
-	if requestedTenant == "" || requestedTenant == allowedTenant {
-		return nil
-	}
 	principal := contextPayload.Principal.Subject
 	if principal == "" {
 		principal = contextPayload.Principal.Name
+	}
+	requestedTenant, complete := crossTenantToolArg(args, strings.TrimSpace(allowedTenant))
+	if !complete {
+		return []RuleFinding{{
+			RuleID:     "AUTH-TENANT-SCOPE-UNVERIFIED",
+			Title:      "Tool query exceeds tenant-scope inspection limit",
+			Severity:   "CRITICAL",
+			Confidence: 1,
+			Evidence:   fmt.Sprintf("principal=%s allowed_tenant=%s", principal, allowedTenant),
+			Tags:       []string{"authorization", "tenant", "confused-deputy"},
+		}}
+	}
+	if requestedTenant == "" {
+		return nil
 	}
 	evidence := fmt.Sprintf("principal=%s allowed_tenant=%s requested_tenant=%s",
 		principal, allowedTenant, requestedTenant)
@@ -556,6 +562,67 @@ func inspectToolAuthorizationContext(req *ToolInspectRequest) []RuleFinding {
 		Evidence:   evidence,
 		Tags:       []string{"authorization", "tenant", "confused-deputy"},
 	}}
+}
+
+// crossTenantToolArg only follows structured query containers. Free-form text
+// and unrelated metadata are not authorization targets.
+func crossTenantToolArg(args map[string]interface{}, allowedTenant string) (string, bool) {
+	const maxNodes, maxDepth = 256, 4
+	queryKeys := []string{"filter", "filters", "query", "where", "params", "parameters"}
+	type node struct {
+		value interface{}
+		depth int
+	}
+	stack := []node{{value: args}}
+	truncated := false
+	for visited := 0; len(stack) > 0 && visited < maxNodes; visited++ {
+		current := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		switch value := current.value.(type) {
+		case map[string]interface{}:
+			for _, key := range []string{"tenant", "tenant_id"} {
+				if tenant, ok := value[key].(string); ok {
+					tenant = strings.TrimSpace(tenant)
+					if tenant != "" && tenant != allowedTenant {
+						return tenant, true
+					}
+				}
+			}
+			if current.depth >= maxDepth {
+				for _, key := range queryKeys {
+					switch value[key].(type) {
+					case map[string]interface{}, []interface{}:
+						return "", false
+					}
+				}
+				continue
+			}
+			for _, key := range queryKeys {
+				if child, ok := value[key]; ok {
+					if len(stack) < maxNodes {
+						stack = append(stack, node{value: child, depth: current.depth + 1})
+					} else {
+						truncated = true
+					}
+				}
+			}
+		case []interface{}:
+			if current.depth >= maxDepth {
+				if len(value) > 0 {
+					return "", false
+				}
+				continue
+			}
+			for _, child := range value {
+				if len(stack) >= maxNodes {
+					truncated = true
+					break
+				}
+				stack = append(stack, node{value: child, depth: current.depth + 1})
+			}
+		}
+	}
+	return "", !truncated && len(stack) == 0
 }
 
 // unmarshalArgsObject decodes a tool-call args payload that may

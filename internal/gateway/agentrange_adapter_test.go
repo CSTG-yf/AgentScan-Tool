@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/defenseclaw/defenseclaw/internal/config"
@@ -108,6 +109,14 @@ func TestToolAuthorizationContextTenantScope(t *testing.T) {
 		{"same tenant", `{"tenant":"acme"}`, false},
 		{"other tenant", `{"tenant":"globex"}`, true},
 		{"wildcard tenant", `{"tenant":"*"}`, true},
+		{"nested filter other tenant", `{"filter":{"tenant":"globex"}}`, true},
+		{"nested filters other tenant", `{"filters":[{"tenant_id":"globex"}]}`, true},
+		{"nested query other tenant", `{"query":{"where":{"tenant":"globex"}}}`, true},
+		{"same top-level tenant with nested other tenant", `{"tenant":"acme","filter":{"tenant":"globex"}}`, true},
+		{"nested same tenant", `{"filter":{"tenant":"acme"}}`, false},
+		{"tenant in ordinary text", `{"prompt":"Compare acme and globex tenants"}`, false},
+		{"tenant in unrelated metadata", `{"metadata":{"tenant":"globex"}}`, false},
+		{"oversized filters cannot bypass scope", `{"filters":[` + strings.Repeat(`{"tenant":"acme"},`, 256) + `{"tenant":"globex"}]}`, true},
 		{"unrelated args", `{"name":"latency"}`, false},
 	}
 	for _, tc := range tests {
