@@ -46,6 +46,7 @@ import (
 	"github.com/defenseclaw/defenseclaw/internal/managed"
 	"github.com/defenseclaw/defenseclaw/internal/netguard"
 	"github.com/defenseclaw/defenseclaw/internal/policy"
+	"github.com/defenseclaw/defenseclaw/internal/procattr"
 	"github.com/defenseclaw/defenseclaw/internal/redaction"
 	"github.com/defenseclaw/defenseclaw/internal/sandbox"
 	"github.com/defenseclaw/defenseclaw/internal/telemetry"
@@ -998,6 +999,7 @@ func defaultLaunchConfigRestartHelper() error {
 		return fmt.Errorf("config reload restart: resolve executable: %w", err)
 	}
 	cmd := exec.Command(exe, configRestartHelperArgs(os.Args)...)
+	procattr.Apply(cmd)
 	cmd.Env = os.Environ()
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr

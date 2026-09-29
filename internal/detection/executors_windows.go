@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/defenseclaw/defenseclaw/internal/procattr"
 )
 
 func terminateProcessTrees(ctx context.Context, pids []uint32) (string, error) {
@@ -16,6 +18,7 @@ func terminateProcessTrees(ctx context.Context, pids []uint32) (string, error) {
 	defer cancel()
 	for _, pid := range pids {
 		cmd := exec.CommandContext(deadlineCtx, "taskkill.exe", "/PID", strconv.FormatUint(uint64(pid), 10), "/T", "/F")
+		procattr.Apply(cmd)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			message := strings.TrimSpace(string(output))
 			if message == "" {

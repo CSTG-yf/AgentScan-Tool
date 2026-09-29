@@ -38,6 +38,7 @@ import (
 	"github.com/defenseclaw/defenseclaw/internal/config"
 	"github.com/defenseclaw/defenseclaw/internal/enforce"
 	"github.com/defenseclaw/defenseclaw/internal/gatewaylog"
+	"github.com/defenseclaw/defenseclaw/internal/procattr"
 	"github.com/defenseclaw/defenseclaw/internal/scanner"
 	"github.com/defenseclaw/defenseclaw/internal/version"
 )
@@ -921,7 +922,9 @@ func (w *InstallWatcher) scannerBinaryVersion(binary string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, binary, "--version").CombinedOutput()
+	cmd := exec.CommandContext(ctx, binary, "--version")
+	procattr.Apply(cmd)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return ""
 	}
