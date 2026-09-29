@@ -8,6 +8,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -114,29 +115,52 @@ def discover_assets(root: Path) -> dict[str, dict[str, str]]:
     services = compose.get("services") or {}
     discovered: dict[str, dict[str, str]] = {}
 
-    def add(asset_id: str, kind: str, name: str, source: str) -> None:
+    def add(asset_id: str, kind: str, name: str, source: str, service_name: str = "") -> None:
         discovered[asset_id] = {"id": asset_id, "type": kind, "name": name, "source": source}
+        if service_name:
+            discovered[asset_id]["service_name"] = service_name
 
     for service_name, service in services.items():
         if not isinstance(service, dict):
             continue
         env = _environment(service)
         image = str(service.get("image") or "").lower()
+        build = service.get("build") or ""
+        build_context = build if isinstance(build, str) else str(build.get("context") or "") if isinstance(build, dict) else ""
         service_source = "docker-compose.yml"
-        if service_name.startswith("mcp-") and "SERVER" in env:
+        if "SERVER" in env and (service_name.startswith("mcp-") or Path(build_context).name.startswith("mcp")):
             name = service_name.removeprefix("mcp-")
-            add(f"mcp.{name}", "mcp_server", name, service_source)
+            module = str(env["SERVER"]).split(".", 1)[0]
+            candidate = f"mcp/{module}/server.py"
+            source = candidate if (root / candidate).is_file() else service_source
+            add(f"mcp.{name}", "mcp_server", name, source, service_name)
         elif "LLM_BASE" in env and any(key.startswith("MCP_") for key in env):
             name = service_name.removesuffix("-app")
-            add(f"agent.{name}", "agent", name, service_source)
+            candidate = f"{service_name}/api/app.py"
+            source = candidate if (root / candidate).is_file() else service_source
+            add(f"agent.{name}", "agent", name, source, service_name)
             model = _default_model(root, service_name)
             if model:
-                add(f"model.{model}", "model", model, f"{service_name}/api/app.py")
+                model_service_name = urlsplit(env["LLM_BASE"]).hostname or ""
+                model_service = services.get(model_service_name) or {}
+                model_build = (model_service.get("build") or "") if isinstance(model_service, dict) else ""
+                if isinstance(model_build, str):
+                    model_context = model_build
+                elif isinstance(model_build, dict):
+                    model_context = str(model_build.get("context") or "")
+                else:
+                    model_context = ""
+                model_root = model_context.removeprefix("./")
+                model_candidate = f"{model_root}/{model_service_name.replace('-', '_')}/app.py"
+                model_source = model_candidate if model_root and (root / model_candidate).is_file() else source
+                add(f"model.{model}", "model", model, model_source)
         elif "langflow" in service_name.lower() or "langflow" in image:
-            add(f"framework.{service_name}", "supply_chain_framework", service_name, service_source)
+            candidate = f"{str(build_context).removeprefix('./')}/Dockerfile"
+            source = candidate if build_context and (root / candidate).is_file() else service_source
+            add(f"framework.{service_name}", "supply_chain_framework", service_name, source, service_name)
         elif image.startswith(("postgres:", "mysql:", "mariadb:")):
             name = service_name.split("-", 1)[-1]
-            add(f"database.{name}", "database", service_name, service_source)
+            add(f"database.{name}", "database", service_name, service_source, service_name)
 
         port_name = service_name.removesuffix("-app")
         if image.startswith("postgres:"):
@@ -171,8 +195,12 @@ def compose_service_lines(path: Path) -> dict[int, str]:
     return {}
 
 
-def asset_for_source(source: str, assets: list[dict], *, service: str = "") -> str:
+def asset_for_source(source: str, assets: list[dict], *, service: str = "", discovered: dict | None = None) -> str:
     if service:
+        if discovered:
+            for asset in discovered.values():
+                if asset.get("service_name") == service:
+                    return asset["id"]
         if service.startswith("mcp-"):
             return "mcp." + service.removeprefix("mcp-")
         if service == "langflow":
@@ -183,10 +211,10 @@ def asset_for_source(source: str, assets: list[dict], *, service: str = "") -> s
             return "database." + service.split("-", 1)[-1]
         return "service." + service
     normalized = source.replace("\\", "/")
-    exact = {
-        asset["source"].replace("\\", "/"): asset["id"]
-        for asset in assets if asset["source"] != "docker-compose.yml"
-    }
+    exact = {}
+    for asset in assets:
+        if asset["source"] != "docker-compose.yml":
+            exact.setdefault(asset["source"].replace("\\", "/"), asset["id"])
     if normalized in exact:
         return exact[normalized]
     for asset in assets:
@@ -194,7 +222,9 @@ def asset_for_source(source: str, assets: list[dict], *, service: str = "") -> s
         if "/" in asset_source and normalized.startswith(asset_source.rsplit("/", 1)[0] + "/"):
             return asset["id"]
     if normalized in {".env.example", "docker-compose.yml"}:
-        return "agent.opspilot"
+        agents = [asset["id"] for asset in assets if asset["type"] == "agent"]
+        if len(agents) == 1:
+            return agents[0]
     return "unmapped." + normalized.replace("/", ".")
 
 
@@ -226,7 +256,7 @@ def scan(
                 )
             for line_number, line in candidates:
                 service = compose_lines.get(line_number, "") if relative == "docker-compose.yml" else ""
-                asset_id = asset_for_source(relative, assets, service=service)
+                asset_id = asset_for_source(relative, list(discovered.values()), service=service, discovered=discovered)
                 identity = (rule["id"], asset_id, relative, line_number)
                 if identity in seen:
                     continue
@@ -247,12 +277,11 @@ def scan(
                 )
 
     expected_ids = {asset["id"] for asset in assets}
-    existing_assets = [
-        {**asset, "observed_source": discovered[asset["id"]]["source"]}
-        for asset in assets if asset["id"] in discovered
-    ]
     unexpected_assets = [discovered[asset_id] for asset_id in sorted(set(discovered) - expected_ids)]
-    existing_assets.extend(unexpected_assets)
+    existing_assets = [
+        {**discovered[asset_id], "observed_source": discovered[asset_id]["source"]}
+        for asset_id in sorted(discovered)
+    ]
     asset_observations = [
         {
             "asset_id": asset["id"],

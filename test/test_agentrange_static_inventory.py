@@ -6,7 +6,17 @@ import json
 import tempfile
 import unittest
 
-from integration.static_inventory import asset_for_source, compose_service_lines, discover_assets, python_ast_matches
+import yaml
+
+from integration.static_inventory import (
+    DEFAULT_CONTRACTS_DIR,
+    DEFAULT_RANGE_ROOT,
+    asset_for_source,
+    compose_service_lines,
+    discover_assets,
+    python_ast_matches,
+    scan,
+)
 from integration.static_eval import evaluate
 
 
@@ -77,7 +87,14 @@ services:
   langflow:
     image: langflowai/langflow:1.8
   llm-stub:
+    build: ./llm-stub
     ports: ["8000:8000"]
+  lookup-service:
+    build: ./mcp
+    environment: {SERVER: lookup.server}
+  unrelated-worker:
+    build: ./workers
+    environment: {SERVER: worker.server}
 networks:
   internal-net: {}
 """.lstrip(),
@@ -86,6 +103,9 @@ networks:
             app = root / "atlas-app" / "api"
             app.mkdir(parents=True)
             (app / "app.py").write_text('DEFAULT_MODEL = "atlas-v1"\n', encoding="utf-8")
+            model_app = root / "llm-stub" / "llm_stub"
+            model_app.mkdir(parents=True)
+            (model_app / "app.py").write_text("# model endpoint\n", encoding="utf-8")
             skill = root / "skills" / "triage"
             skill.mkdir(parents=True)
             (skill / "SKILL.md").write_text("# Triage\n", encoding="utf-8")
@@ -94,9 +114,19 @@ networks:
             self.assertTrue({
                 "agent.atlas", "model.atlas-v1", "mcp.search", "database.orders",
                 "framework.langflow", "skill.triage", "network.internal",
+                "mcp.lookup-service",
                 "port.atlas", "port.postgres", "port.llm-stub",
             }.issubset(discovered))
-            self.assertEqual(discovered["model.atlas-v1"]["source"], "atlas-app/api/app.py")
+            self.assertEqual(discovered["model.atlas-v1"]["source"], "llm-stub/llm_stub/app.py")
+            self.assertEqual(
+                asset_for_source("atlas-app/api/app.py", list(discovered.values())),
+                "agent.atlas",
+            )
+            self.assertNotIn("mcp.unrelated-worker", discovered)
+            self.assertEqual(
+                asset_for_source("docker-compose.yml", [], service="lookup-service", discovered=discovered),
+                "mcp.lookup-service",
+            )
 
             lines = compose_service_lines(root / "docker-compose.yml")
             self.assertEqual(lines[9], "postgres-orders")
@@ -104,6 +134,27 @@ networks:
                 asset_for_source("docker-compose.yml", [], service=lines[9]),
                 "database.orders",
             )
+
+    def test_risk_attribution_uses_discovered_source_with_stale_contract(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = yaml.safe_load((DEFAULT_CONTRACTS_DIR / "assets.yaml").read_text(encoding="utf-8"))
+            for asset in contract["assets"]:
+                if asset["id"] == "mcp.notes-sync":
+                    asset["source"] = "stale/notes_sync.py"
+            (root / "assets.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
+
+            result = scan(DEFAULT_RANGE_ROOT, contracts_dir=root)
+            scan_path = root / "scan.json"
+            scan_path.write_text(json.dumps(result), encoding="utf-8")
+            evaluation = evaluate(
+                scan_path,
+                DEFAULT_CONTRACTS_DIR / "static-ground-truth.yaml",
+                DEFAULT_RANGE_ROOT,
+            )
+            self.assertEqual(evaluation["arena_sha256"], "bcd51ef41b2bfd2871a06e03e6835d26c41e45436e86121c722981b06dcc5d5b")
+            self.assertEqual((evaluation["asset"]["tp"], evaluation["risk"]["tp"]), (27, 13))
+            self.assertEqual((evaluation["asset"]["fp"], evaluation["risk"]["fp"]), (0, 0))
 
 
 if __name__ == "__main__":
