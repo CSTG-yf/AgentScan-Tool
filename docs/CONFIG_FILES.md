@@ -480,6 +480,17 @@ redaction is explicitly warned about. Changes requiring a Gateway restart
 are reported as such; saving a value is not presented as proof that it has
 already taken effect.
 
+Settings → Data & Storage reads `GET /api/v1/settings/storage` for the
+configured paths and actual sizes of the audit DB, judge-body DB, and Gateway
+JSONL log. The total is explicitly partial: WAL files, backups, quarantine
+files, and other logs are excluded. No automatic purge is implied by this
+read-only view. Settings → Updates & Versions reads the desktop package version
+and `GET /api/v1/settings/versions`; it reports an offline Gateway rather than
+inventing a component version. Settings → Diagnostics calls
+`POST /api/v1/diagnostics/run` and exports the deliberately narrow,
+credential-free summary from `POST /api/v1/diagnostics/export` into the
+desktop app-data directory.
+
 ### YAML
 
 ```yaml

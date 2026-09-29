@@ -129,6 +129,63 @@ export async function saveNotificationSettings(settings: NotificationSettings): 
   return invoke<SavedSystemSettings<NotificationSettings>>("save_notification_settings", { settings });
 }
 
+export interface StorageFileStatus {
+  path: string;
+  bytes: number;
+  exists: boolean;
+  error?: string;
+}
+
+export interface StorageSettings {
+  dataDir: string;
+  auditDb: StorageFileStatus;
+  judgeBodiesDb: StorageFileStatus;
+  gatewayLog: StorageFileStatus;
+  knownStoredBytes: number;
+  note: string;
+}
+
+export interface GatewayVersionSettings {
+  gatewayVersion: string;
+  schemaVersion: number;
+  configGeneration: number;
+  os: string;
+  architecture: string;
+}
+
+export interface VersionSettings {
+  desktopVersion: string;
+  gateway: GatewayVersionSettings | null;
+  gatewayError: string | null;
+}
+
+export interface DiagnosticReport {
+  capturedAt: string;
+  checks: Array<{ name: string; status: string; detail: string }>;
+  versions: GatewayVersionSettings;
+  storage: { auditBytes: number; judgeBodiesBytes: number; gatewayLogBytes: number };
+}
+
+export async function getStorageSettings(): Promise<StorageSettings> {
+  if (!inTauri()) throw new Error("存储状态需要在桌面应用中读取 Gateway");
+  return invoke<StorageSettings>("get_storage_settings");
+}
+
+export async function getVersionSettings(): Promise<VersionSettings> {
+  if (!inTauri()) throw new Error("版本状态需要在桌面应用中读取 Gateway");
+  return invoke<VersionSettings>("get_version_settings");
+}
+
+export async function runDiagnostics(): Promise<DiagnosticReport> {
+  if (!inTauri()) throw new Error("诊断需要在桌面应用中运行 Gateway");
+  return invoke<DiagnosticReport>("run_diagnostics");
+}
+
+export async function exportDiagnostics(): Promise<{ path: string; bytes: number }> {
+  if (!inTauri()) throw new Error("诊断导出需要在桌面应用中运行 Gateway");
+  return invoke<{ path: string; bytes: number }>("export_diagnostics");
+}
+
 const defaultScanScheduleSettings = (): ScanScheduleSettings => ({
   version: 1,
   environment: { enabled: true, intervalSec: 10 },

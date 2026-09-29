@@ -491,6 +491,7 @@ body { min-height: 100vh; background: #f5f8fc; }
 .settings-form-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 0; border-bottom: 1px solid #eef1f5; }
 .settings-form-row:last-of-type { border-bottom: 0; }
 .settings-form-row > div:first-child { min-width: 0; }
+.settings-form-row .ant-typography { overflow-wrap: anywhere; }
 .settings-form-row .ant-switch, .settings-form-row .ant-input-number { flex: 0 0 auto; }
 .capability-placeholder .ant-card-body { min-height: 350px; display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; }
 .capability-icon { display: grid; place-items: center; width: 58px; height: 58px; margin-bottom: 12px; color: #1677ff; border-radius: 16px; background: #eaf3ff; font-size: 26px; }
