@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ComponentProps } from "react";
 import { CopyOutlined, DownloadOutlined, EyeOutlined, FileTextOutlined, FolderOpenOutlined, ReloadOutlined, SearchOutlined, SecurityScanOutlined } from "@ant-design/icons";
-import { theme, ConfigProvider, Alert, Button, Card, Descriptions, Drawer, Dropdown, Empty, Input, List, message, Modal, Select, Space, Spin, Table, Tabs, Tag, Tooltip, Typography } from "antd";
+import { theme, ConfigProvider, Alert, Button, Card, DatePicker, Descriptions, Drawer, Dropdown, Empty, Input, List, message, Modal, Select, Space, Spin, Table, Tabs, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { staticRiskTag } from "../app/display";
+import { chooseExportDirectory, exportFileToDirectory } from "../app/reportExport";
+import { buildStaticResourceReport } from "../app/staticResourceReport";
 import { staticRiskMeta, staticTypeMeta } from "../data/staticAssets";
 import {
   getStaticResourceAgents,
@@ -11,7 +14,6 @@ import {
   getStaticResourceFindings,
   getStaticResourceScans,
   getStaticResources,
-  exportStaticResourceTextReport,
   revealStaticResourcePath,
   getStaticResourceSummary,
   getScanStatus,
@@ -30,6 +32,7 @@ import type {
 } from "../types";
 
 const { Text, Title } = Typography;
+type RangeValue = Parameters<NonNullable<ComponentProps<typeof DatePicker.RangePicker>["onChange"]>>[0];
 
 const detectionTheme = {
   algorithm: theme.defaultAlgorithm,
@@ -47,7 +50,13 @@ const detectionTheme = {
 };
 
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
+
+function toFilterTimestamp(value: string): string | undefined {
+  if (!value) return undefined;
+  const timestamp = new Date(value);
+  return Number.isFinite(timestamp.getTime()) ? timestamp.toISOString() : undefined;
+}
 
 async function waitForScanCompletion(scanId?: string): Promise<void> {
   if (!scanId) return;
@@ -70,10 +79,6 @@ const API_TYPE_TO_DISPLAY: Record<string, string> = {
   credential: "Credential",
   environment: "Environment",
 };
-
-const DISPLAY_TYPE_TO_API: Record<string, string> = Object.fromEntries(
-  Object.entries(API_TYPE_TO_DISPLAY).map(([api, display]) => [display, api]),
-);
 
 const ALL_TYPES = Object.keys(API_TYPE_TO_DISPLAY);
 
@@ -146,7 +151,7 @@ function formatSize(size?: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function safeReportName(value: string, extension = "md") {
+function safeReportName(value: string, extension = "pdf") {
   const base = (value || "static-resources-report")
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
     .replace(/\s+/g, "-")
@@ -154,86 +159,6 @@ function safeReportName(value: string, extension = "md") {
     .replace(/^[._-]+|[._-]+$/g, "")
     .slice(0, 120) || "static-resources-report";
   return base.toLowerCase().endsWith(`.${extension}`) ? base : `${base}.${extension}`;
-}
-
-function mdCell(value?: string | number | boolean | null) {
-  const text = value === undefined || value === null || value === "" ? "-" : String(value);
-  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
-}
-
-function resourceTypeLabel(resourceType?: string) {
-  const display = API_TYPE_TO_DISPLAY[(resourceType ?? "").toLowerCase()] ?? resourceType ?? "-";
-  return staticTypeMeta[display as keyof typeof staticTypeMeta]?.label ?? display;
-}
-
-function riskLabel(risk?: string) {
-  const normalized = apiRisk(risk ?? "");
-  return staticRiskMeta[normalized]?.label ?? risk ?? "clean";
-}
-
-function statusLabel(status?: string) {
-  return STATUS_META[status ?? ""]?.label ?? status ?? "-";
-}
-
-function buildResourceSummaryText(resource: StaticResourceDetailResponse | StaticResourceListItem) {
-  const agentName = "agent" in resource ? resource.agent?.name : undefined;
-  return [
-    "# 静态资源扫描摘要",
-    "",
-    `- 资源名称: ${resource.name}`,
-    `- 所属 Agent: ${agentName || resource.agent_id || "-"}`,
-    `- 资源类型: ${resourceTypeLabel(resource.resource_type)}`,
-    `- 资源位置: ${resource.path || "-"}`,
-    `- 风险等级: ${riskLabel(resource.risk_level)}`,
-    `- 是否恶意: ${resource.malicious ? "是" : "否"}`,
-    `- 风险发现数: ${resource.finding_count}`,
-    `- 状态: ${statusLabel(resource.status)}`,
-    `- 最近扫描: ${formatTimestamp(resource.last_scan_at)}`,
-    `- 更新时间: ${formatTimestamp(resource.updated_at)}`,
-  ].join("\n");
-}
-
-function buildAgentResourceSection(agent: StaticResourceAgentSummary, resources: StaticResourceListItem[]) {
-  const lines = [
-    `## ${agent.name || agent.agent_id}`,
-    "",
-    `- Agent ID: ${agent.agent_id}`,
-    `- Agent Type: ${agent.agent_type || "-"}`,
-    `- 资源数: ${resources.length}`,
-    `- 风险资源: ${resources.filter((item) => ["medium", "high", "critical"].includes((item.risk_level || "").toLowerCase())).length}`,
-    "",
-  ];
-  if (!resources.length) {
-    lines.push("暂无静态资源。", "");
-    return lines.join("\n");
-  }
-  lines.push("| 序号 | 名称 | 类型 | 位置 | 风险 | 恶意 | 发现数 | 状态 | 最近扫描 |");
-  lines.push("| --- | --- | --- | --- | --- | --- | ---: | --- | --- |");
-  resources.forEach((resource, index) => {
-    lines.push(
-      `| ${index + 1} | ${mdCell(resource.name)} | ${mdCell(resourceTypeLabel(resource.resource_type))} | ${mdCell(resource.path)} | ${mdCell(riskLabel(resource.risk_level))} | ${resource.malicious ? "是" : "否"} | ${resource.finding_count} | ${mdCell(statusLabel(resource.status))} | ${mdCell(formatTimestamp(resource.last_scan_at))} |`,
-    );
-  });
-  lines.push("");
-  return lines.join("\n");
-}
-
-function buildStaticResourcesReport(sections: Array<{ agent: StaticResourceAgentSummary; resources: StaticResourceListItem[] }>) {
-  const totalResources = sections.reduce((sum, section) => sum + section.resources.length, 0);
-  const totalRiskResources = sections.reduce(
-    (sum, section) => sum + section.resources.filter((item) => ["medium", "high", "critical"].includes((item.risk_level || "").toLowerCase())).length,
-    0,
-  );
-  return [
-    "# 静态资源检测报告",
-    "",
-    `- 导出时间: ${formatTimestamp(new Date().toISOString())}`,
-    `- Agent 数量: ${sections.length}`,
-    `- 资源总数: ${totalResources}`,
-    `- 风险资源: ${totalRiskResources}`,
-    "",
-    ...sections.map((section) => buildAgentResourceSection(section.agent, section.resources)),
-  ].join("\n");
 }
 
 interface StaticAssetsPageProps {
@@ -261,11 +186,14 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [exportAgentType, setExportAgentType] = useState("all");
-  const [exportStartTime, setExportStartTime] = useState("");
-  const [exportEndTime, setExportEndTime] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [dateRange, setDateRange] = useState<RangeValue>(null);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [advancedFilters, setAdvancedFilters] = useState(false);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [listItems, setListItems] = useState<StaticResourceListItem[]>([]);
   const [listTotal, setListTotal] = useState(0);
   const [listLoading, setListLoading] = useState(false);
@@ -299,7 +227,10 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
 
   // Debounce the search keyword.
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(query.trim()), 350);
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query.trim());
+      setPage(1);
+    }, 350);
     return () => clearTimeout(timer);
   }, [query]);
 
@@ -365,12 +296,14 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
     setListLoading(true);
     getStaticResources({
       agentId: selectedAgentId,
-      resourceType: selectedType === "all" ? undefined : DISPLAY_TYPE_TO_API[selectedType],
+      resourceType: selectedType === "all" ? undefined : selectedType,
       riskLevel: riskFilter === "all" ? undefined : riskFilter,
       status: statusFilter === "all" ? undefined : statusFilter,
       keyword: debouncedQuery || undefined,
+      startTime: toFilterTimestamp(startTime),
+      endTime: toFilterTimestamp(endTime),
       page,
-      pageSize: PAGE_SIZE,
+      pageSize,
     })
       .then((response) => {
         if (cancelled) return;
@@ -389,12 +322,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
     return () => {
       cancelled = true;
     };
-  }, [selectedAgentId, selectedType, riskFilter, statusFilter, debouncedQuery, page, listReloadNonce]);
-
-  // Reset pagination whenever the filter shape (not the page) changes.
-  useEffect(() => {
-    setPage(1);
-  }, [selectedAgentId, selectedType, riskFilter, statusFilter, debouncedQuery]);
+  }, [selectedAgentId, selectedType, riskFilter, statusFilter, debouncedQuery, startTime, endTime, page, pageSize, listReloadNonce]);
 
   const selectedAgent = useMemo(
     () => agents.find((agent) => agent.agent_id === selectedAgentId),
@@ -505,12 +433,25 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
 
   const handleSelectAgent = (agentId: string) => {
     setSelectedAgentId(agentId);
+    setPage(1);
     setSelectedType("all");
     setRiskFilter("all");
     setStatusFilter("all");
     setQuery("");
     setResourceDetailOpen(false);
     setDetailResourceId(undefined);
+  };
+
+  const resetListFilters = () => {
+    setSelectedType("all");
+    setRiskFilter("all");
+    setStatusFilter("all");
+    setQuery("");
+    setDebouncedQuery("");
+    setStartTime("");
+    setEndTime("");
+    setDateRange(null);
+    setPage(1);
   };
 
   const handleRefresh = async () => {
@@ -609,22 +550,17 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
     }
   };
 
-  const saveTextReport = useCallback(
-    async (contentText: string, defaultFileName: string) => {
-      if (inTauri) {
-        return exportStaticResourceTextReport(contentText, defaultFileName);
-      }
-      const blob = new Blob([contentText], { type: "text/markdown;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = defaultFileName;
-      anchor.click();
-      URL.revokeObjectURL(url);
-      return defaultFileName;
-    },
-    [inTauri],
-  );
+  const savePdfReport = (html: string, defaultFileName: string, directory: string | undefined) =>
+    exportFileToDirectory(directory, { content: html, defaultFileName, format: "pdf" });
+
+  const reportFilters = {
+    "资源类型": selectedType === "all" ? "全部" : API_TYPE_TO_DISPLAY[selectedType] ?? selectedType,
+    "风险等级": riskFilter === "all" ? "全部" : staticRiskMeta[apiRisk(riskFilter)]?.label ?? riskFilter,
+    "资源状态": statusFilter === "all" ? "全部" : STATUS_META[statusFilter]?.label ?? statusFilter,
+    "关键词": debouncedQuery || "不限",
+    "开始时间": startTime ? formatTimestamp(startTime) : "不限",
+    "结束时间": endTime ? formatTimestamp(endTime) : "不限",
+  };
 
   const fetchAllResourcesForAgent = useCallback(async (agentId: string, applyFilters = false) => {
     const pageSize = 200;
@@ -632,30 +568,43 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
     let total = Number.POSITIVE_INFINITY;
     const rows: StaticResourceListItem[] = [];
     while (rows.length < total) {
-      const response = await getStaticResources({ agentId, resourceType: applyFilters && selectedType !== "all" ? DISPLAY_TYPE_TO_API[selectedType] : undefined, riskLevel: applyFilters && riskFilter !== "all" ? riskFilter : undefined, status: applyFilters && statusFilter !== "all" ? statusFilter : undefined, keyword: applyFilters ? debouncedQuery || undefined : undefined, page: nextPage, pageSize });
+      const response = await getStaticResources({
+        agentId,
+        resourceType: applyFilters && selectedType !== "all" ? selectedType : undefined,
+        riskLevel: applyFilters && riskFilter !== "all" ? riskFilter : undefined,
+        status: applyFilters && statusFilter !== "all" ? statusFilter : undefined,
+        keyword: applyFilters ? debouncedQuery || undefined : undefined,
+        startTime: applyFilters ? toFilterTimestamp(startTime) : undefined,
+        endTime: applyFilters ? toFilterTimestamp(endTime) : undefined,
+        page: nextPage,
+        pageSize,
+      });
       const items = response.items ?? [];
       rows.push(...items);
       total = response.total ?? rows.length;
       if (!items.length || rows.length >= total) break;
       nextPage += 1;
     }
-    if (!applyFilters || (!exportStartTime && !exportEndTime)) return rows;
-    const start = exportStartTime ? new Date(exportStartTime).getTime() : Number.NEGATIVE_INFINITY;
-    const end = exportEndTime ? new Date(exportEndTime).getTime() : Number.POSITIVE_INFINITY;
-    return rows.filter(row => { const time = new Date(row.last_scan_at || row.updated_at).getTime(); return time >= start && time <= end; });
-  }, [debouncedQuery, exportEndTime, exportStartTime, riskFilter, selectedType, statusFilter]);
+    return rows;
+  }, [debouncedQuery, endTime, startTime, riskFilter, selectedType, statusFilter]);
 
   const exportResourceSummary = async (resource: StaticResourceDetailResponse | StaticResourceListItem | undefined) => {
     if (!resource) return;
     setSummaryExporting(true);
     try {
-      const fileName = safeReportName(`${resource.name || "resource"}-scan-summary.md`);
-      const path = await saveTextReport(buildResourceSummaryText(resource), fileName);
-      if (path) {
-        message.success(`资源扫描摘要已导出：${path}`);
-      } else {
+      const directory = await chooseExportDirectory("选择资源扫描摘要导出文件夹");
+      if (directory === undefined) throw new Error("请在桌面应用中导出 PDF 报告");
+      if (directory === null) {
         message.info("已取消导出");
+        return;
       }
+      const fileName = safeReportName(`${resource.name || "resource"}-scan-summary.pdf`);
+      const html = buildStaticResourceReport([{
+        agent: { agent_id: resource.agent_id, name: "agent" in resource ? resource.agent.name : resource.agent_id, agent_type: "agent" in resource ? resource.agent.agent_type ?? "" : "" },
+        resources: [resource],
+      }], { title: "静态资源扫描摘要", summary: true });
+      const path = await savePdfReport(html, fileName, directory);
+      message.success(`资源扫描摘要已导出：${path}`);
     } catch (error) {
       message.error(`导出摘要失败：${String(error)}`);
     } finally {
@@ -670,15 +619,17 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
     }
     setAgentReportExporting(true);
     try {
-      const resources = await fetchAllResourcesForAgent(selectedAgent.agent_id, true);
-      const contentText = buildStaticResourcesReport([{ agent: selectedAgent, resources }]);
-      const fileName = safeReportName(`${selectedAgent.name || selectedAgent.agent_id}-static-resources-${new Date().toISOString().slice(0, 10)}.md`);
-      const path = await saveTextReport(contentText, fileName);
-      if (path) {
-        message.success(`当前 Agent 资源报告已导出：${path}`);
-      } else {
+      const directory = await chooseExportDirectory("选择静态资源报告导出文件夹");
+      if (directory === undefined) throw new Error("请在桌面应用中导出 PDF 报告");
+      if (directory === null) {
         message.info("已取消导出");
+        return;
       }
+      const resources = await fetchAllResourcesForAgent(selectedAgent.agent_id, true);
+      const contentText = buildStaticResourceReport([{ agent: selectedAgent, resources }], { filters: reportFilters });
+      const fileName = safeReportName(`${selectedAgent.name || selectedAgent.agent_id}-static-resources-${new Date().toISOString().slice(0, 10)}.pdf`);
+      const path = await savePdfReport(contentText, fileName, directory);
+      message.success(`当前 Agent 资源报告已导出：${path}`);
     } catch (error) {
       message.error(`导出当前 Agent 资源失败：${String(error)}`);
     } finally {
@@ -694,19 +645,21 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
     }
     setAllReportExporting(true);
     try {
+      const directory = await chooseExportDirectory("选择静态资源报告导出文件夹");
+      if (directory === undefined) throw new Error("请在桌面应用中导出 PDF 报告");
+      if (directory === null) {
+        message.info("已取消导出");
+        return;
+      }
       const sections: Array<{ agent: StaticResourceAgentSummary; resources: StaticResourceListItem[] }> = [];
       for (const agent of scopedAgents) {
         const resources = await fetchAllResourcesForAgent(agent.agent_id, true);
         sections.push({ agent, resources });
       }
-      const contentText = buildStaticResourcesReport(sections);
-      const fileName = safeReportName(`static-resources-report-${new Date().toISOString().slice(0, 10)}.md`);
-      const path = await saveTextReport(contentText, fileName);
-      if (path) {
-        message.success(`静态资源报告已导出：${path}`);
-      } else {
-        message.info("已取消导出");
-      }
+      const contentText = buildStaticResourceReport(sections, { filters: { ...reportFilters, "Agent 类型": exportAgentType === "all" ? "全部" : exportAgentType } });
+      const fileName = safeReportName(`static-resources-report-${new Date().toISOString().slice(0, 10)}.pdf`);
+      const path = await savePdfReport(contentText, fileName, directory);
+      message.success(`静态资源报告已导出：${path}`);
     } catch (error) {
       message.error(`导出静态资源报告失败：${String(error)}`);
     } finally {
@@ -820,7 +773,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
             disabled={!agents.length}
             onClick={() => void exportAllAgentResources()}
           >
-            导出报告
+            导出静态资源检测报告
           </Button>
           <Button
             type="primary"
@@ -906,7 +859,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
                 <button
                   className={`static-type-card static-type-card-all ${selectedType === "all" ? "static-type-card-active" : ""}`}
                   type="button"
-                  onClick={() => setSelectedType("all")}
+                  onClick={() => { setSelectedType("all"); setPage(1); }}
                 >
                   <span>全部资源</span>
                   <strong>{summaryHeader.total_resources} Resources</strong>
@@ -917,7 +870,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
                     key={card.apiType}
                     className={`static-type-card ${card.count === 0 ? "static-type-card-empty" : ""} ${selectedType === card.apiType ? "static-type-card-active" : ""}`}
                     type="button"
-                    onClick={() => setSelectedType(card.apiType)}
+                    onClick={() => { setSelectedType(card.apiType); setPage(1); }}
                   >
                     <span>{staticTypeMeta[card.display as keyof typeof staticTypeMeta]?.label ?? card.display}</span>
                     <strong>{card.count} Resources</strong>
@@ -927,7 +880,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
               </div>
 
               <Card bordered={false} className="static-table-card">
-                <div className="static-filter-bar">
+                <div className="event-filters standard-filter-bar static-resource-filters">
                   <Input
                     allowClear
                     prefix={<SearchOutlined />}
@@ -938,7 +891,7 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
                   <Select
               classNames={{ popup: { root: "static-detection-filter-popup" } }}
                     value={selectedType}
-                    onChange={(value) => setSelectedType(value as TypeFilter)}
+                    onChange={(value) => { setSelectedType(value as TypeFilter); setPage(1); }}
                     options={[
                       { value: "all", label: "全部类型" },
                       ...typeCards.map((card) => ({
@@ -947,12 +900,25 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
                       })),
                     ]}
                   />
-                  <Input aria-label="导出开始时间" type="datetime-local" title="导出开始时间" value={exportStartTime} onChange={event => setExportStartTime(event.target.value)} />
-                  <Input aria-label="导出结束时间" type="datetime-local" title="导出结束时间" value={exportEndTime} onChange={event => setExportEndTime(event.target.value)} />
+                  <DatePicker.RangePicker
+                    aria-label="更新时间范围"
+                    showTime
+                    value={dateRange}
+                    onChange={(value) => {
+                      setDateRange(value);
+                      setStartTime(value?.[0]?.toISOString() ?? "");
+                      setEndTime(value?.[1]?.toISOString() ?? "");
+                      setPage(1);
+                    }}
+                  />
+                  <Button onClick={() => setAdvancedFilters(value => !value)}>{advancedFilters ? "收起" : "高级筛选"}</Button>
+                  <Button onClick={resetListFilters}>重置</Button>
+                </div>
+                {advancedFilters && <div className="event-filters advanced standard-filter-bar standard-filter-advanced static-filter-advanced">
                   <Select
               classNames={{ popup: { root: "static-detection-filter-popup" } }}
                     value={riskFilter}
-                    onChange={(value) => setRiskFilter(value as RiskFilter)}
+                    onChange={(value) => { setRiskFilter(value as RiskFilter); setPage(1); }}
                     options={[
                       { value: "all", label: "全部风险" },
                       ...Object.entries(staticRiskMeta).map(([risk, meta]) => ({ value: risk, label: meta.label })),
@@ -961,13 +927,13 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
                   <Select
               classNames={{ popup: { root: "static-detection-filter-popup" } }}
                     value={statusFilter}
-                    onChange={(value) => setStatusFilter(value as StatusFilter)}
+                    onChange={(value) => { setStatusFilter(value as StatusFilter); setPage(1); }}
                     options={[
                       { value: "all", label: "全部状态" },
                       ...Object.entries(STATUS_META).map(([status, meta]) => ({ value: status, label: meta.label })),
                     ]}
                   />
-                </div>
+                </div>}
                 <div className="static-table-title">
                   <Space>
                     <Text strong>{selectedTypeLabel}</Text>
@@ -994,10 +960,15 @@ export function StaticAssetsPage({ loading = false, refreshNonce = 0 }: StaticAs
                   locale={{ emptyText: "当前筛选条件下没有资源" }}
                   pagination={{
                     current: page,
-                    pageSize: PAGE_SIZE,
+                    pageSize,
                     total: listTotal,
-                    showSizeChanger: false,
-                    onChange: (next) => setPage(next),
+                    showSizeChanger: true,
+                    pageSizeOptions: [10, 20, 50, 100, 200],
+                    showTotal: (total) => `共 ${total} 条`,
+                    onChange: (nextPage, nextPageSize) => {
+                      setPage(nextPageSize === pageSize ? nextPage : 1);
+                      setPageSize(nextPageSize);
+                    },
                   }}
                   rowClassName={(resource) => (resource.resource_id === detailResourceId ? "static-table-row-active" : "")}
                   onRow={(resource) => ({ onClick: () => handleOpenResource(resource) })}

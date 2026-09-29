@@ -12,8 +12,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/defenseclaw/defenseclaw/internal/audit"
 	"github.com/defenseclaw/defenseclaw/internal/scanner"
@@ -154,6 +156,8 @@ func (a *APIServer) handleStaticResourceList(w http.ResponseWriter, r *http.Requ
 		RiskLevel:    strings.TrimSpace(q.Get("risk_level")),
 		Status:       strings.TrimSpace(q.Get("status")),
 		Keyword:      strings.TrimSpace(q.Get("keyword")),
+		Page:         1,
+		PageSize:     20,
 	}
 	if v := strings.TrimSpace(q.Get("malicious")); v != "" {
 		b := strings.EqualFold(v, "true") || v == "1"
@@ -164,10 +168,50 @@ func (a *APIServer) handleStaticResourceList(w http.ResponseWriter, r *http.Requ
 		filter.ScanCompleted = &b
 	}
 	if v := strings.TrimSpace(q.Get("page")); v != "" {
-		fmt.Sscanf(v, "%d", &filter.Page)
+		page, err := strconv.Atoi(v)
+		if err != nil || page < 1 || page > 100_000 {
+			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "page must be between 1 and 100000"})
+			return
+		}
+		filter.Page = page
 	}
 	if v := strings.TrimSpace(q.Get("page_size")); v != "" {
-		fmt.Sscanf(v, "%d", &filter.PageSize)
+		pageSize, err := strconv.Atoi(v)
+		if err != nil || pageSize < 1 {
+			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "page_size must be a positive integer"})
+			return
+		}
+		if pageSize > 200 {
+			pageSize = 200
+		}
+		filter.PageSize = pageSize
+	}
+	parseTime := func(name string) (string, bool) {
+		value := strings.TrimSpace(q.Get(name))
+		if value == "" {
+			return "", true
+		}
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": name + " must be an RFC3339 timestamp"})
+			return "", false
+		}
+		return parsed.UTC().Format(time.RFC3339Nano), true
+	}
+	var ok bool
+	if filter.StartTime, ok = parseTime("start_time"); !ok {
+		return
+	}
+	if filter.EndTime, ok = parseTime("end_time"); !ok {
+		return
+	}
+	if filter.StartTime != "" && filter.EndTime != "" {
+		start, _ := time.Parse(time.RFC3339Nano, filter.StartTime)
+		end, _ := time.Parse(time.RFC3339Nano, filter.EndTime)
+		if start.After(end) {
+			a.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "start_time must not be after end_time"})
+			return
+		}
 	}
 
 	page, err := a.store.ListStaticResourcesPage(filter)

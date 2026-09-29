@@ -16,6 +16,7 @@ import {
 import { theme, ConfigProvider, Avatar, Button, Card, Descriptions, Drawer, Empty, Input, Select, Space, Spin, Table, Tag, Tooltip, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { formatUptime } from "../app/display";
+import { chooseExportDirectory } from "../app/reportExport";
 import { exportAgentsReportPdf, getAgentDetail, getScanStatus, triggerAgentScan } from "../bridge";
 import type { AgentInventory, AgentStatus } from "../types";
 
@@ -391,13 +392,17 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
     }
     setExporting(true);
     try {
-      const details = await loadDetailsForExport(rows);
-      const path = await exportAgentsReportPdf(details, reportFileName(details));
-      if (path) {
-        message.success(`PDF 报告已导出：${path}`);
-      } else {
+      const directory = await chooseExportDirectory("选择 Agent PDF 报告导出文件夹");
+      if (directory === null) {
         message.info("已取消导出");
+        return;
       }
+      if (directory === undefined) {
+        throw new Error("浏览器预览模式不支持生成 PDF，请在桌面应用中导出");
+      }
+      const details = await loadDetailsForExport(rows);
+      const path = await exportAgentsReportPdf(details, reportFileName(details), directory);
+      message.success(`PDF 报告已导出：${path}`);
     } catch (error) {
       message.error(`导出 PDF 报告失败：${String(error)}`);
     } finally {
@@ -524,7 +529,7 @@ export function AgentsPage({ agents, totalAgents, warning, loading = false, onRe
         <div className="agent-header-actions">
           <Space>
             <Button type="primary" icon={<DownloadOutlined />} loading={exporting} disabled={!selectedExportIds.length} onClick={() => void exportReport(agents.filter(agent => selectedExportIds.includes(agent.id)))}>
-              导出所选 Agent{selectedExportIds.length ? `（${selectedExportIds.length}）` : ""}
+              导出Agent检测报告{selectedExportIds.length ? `（${selectedExportIds.length}）` : ""}
             </Button>
             <Tooltip title="重新读取数据库中的 Agent 列表，不执行扫描">
               <Button icon={<ReloadOutlined />} loading={listRefreshing} disabled={!onRefresh || loading || refreshing} onClick={() => void refreshAgentList()}>

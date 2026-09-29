@@ -1,12 +1,4 @@
-use std::{fs, path::PathBuf, process::Command};
-
 use serde_json::Value;
-
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 fn urlencode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
@@ -52,6 +44,8 @@ pub fn get_static_resources(
     scan_status: Option<String>,
     status: Option<String>,
     keyword: Option<String>,
+    start_time: Option<String>,
+    end_time: Option<String>,
     page: Option<i64>,
     page_size: Option<i64>,
 ) -> Result<Value, String> {
@@ -76,6 +70,12 @@ pub fn get_static_resources(
     }
     if let Some(value) = keyword.as_deref().filter(|v| !v.trim().is_empty()) {
         query.push(format!("keyword={}", urlencode(value)));
+    }
+    if let Some(value) = start_time.as_deref().filter(|v| !v.trim().is_empty()) {
+        query.push(format!("start_time={}", urlencode(value)));
+    }
+    if let Some(value) = end_time.as_deref().filter(|v| !v.trim().is_empty()) {
+        query.push(format!("end_time={}", urlencode(value)));
     }
     let page = page.unwrap_or(1).clamp(1, 100_000);
     let page_size = page_size.unwrap_or(20).clamp(1, 200);
@@ -220,20 +220,16 @@ pub fn get_static_resource_scans(
 pub fn export_static_resource_text_report(
     content: String,
     default_file_name: Option<String>,
-) -> Result<Option<String>, String> {
-    let file_name = safe_report_file_name(
+    directory: String,
+) -> Result<String, String> {
+    crate::commands::report_export::write_text_export(
+        &directory,
         default_file_name
             .as_deref()
             .unwrap_or("static-resources-report.md"),
-    );
-    let Some(path) = choose_static_report_output_path(&file_name)? else {
-        return Ok(None);
-    };
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| format!("创建导出目录失败：{error}"))?;
-    }
-    fs::write(&path, content).map_err(|error| format!("写入静态资源报告失败：{error}"))?;
-    Ok(Some(path.to_string_lossy().to_string()))
+        &content,
+        &["md", "txt"],
+    )
 }
 
 #[tauri::command]
@@ -254,7 +250,7 @@ pub fn update_static_resource_status(
 }
 
 #[tauri::command]
-pub fn reveal_static_resource_path(path: String) -> Result<(), String> {
+pub async fn reveal_static_resource_path(path: String) -> Result<(), String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err("资源路径为空".to_string());
@@ -262,7 +258,10 @@ pub fn reveal_static_resource_path(path: String) -> Result<(), String> {
     if trimmed.contains("://") {
         return Err("虚拟资源（运行时快照）没有对应的磁盘路径".to_string());
     }
-    reveal_in_file_explorer(trimmed)
+    let path = trimmed.to_owned();
+    tauri::async_runtime::spawn_blocking(move || reveal_in_file_explorer(&path))
+        .await
+        .map_err(|error| format!("打开文件管理器任务失败：{error}"))?
 }
 
 #[cfg(windows)]
@@ -287,110 +286,10 @@ fn reveal_in_file_explorer(path: &str) -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn reveal_in_file_explorer(path: &str) -> Result<(), String> {
-    let target = std::path::Path::new(path);
-    let directory = if target.is_dir() {
-        target
-    } else {
-        target.parent().unwrap_or(target)
-    };
-    std::process::Command::new("xdg-open")
-        .arg(directory)
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("打开文件管理器失败：{error}"))
+    crate::resource_opener::reveal(path)
 }
 
 #[cfg(all(not(windows), not(target_os = "linux")))]
 fn reveal_in_file_explorer(_path: &str) -> Result<(), String> {
     Err("当前平台不支持在文件资源管理器中定位文件".to_string())
-}
-
-fn safe_report_file_name(raw: &str) -> String {
-    let trimmed = raw.trim();
-    let mut name = if trimmed.is_empty() {
-        "static-resources-report.md".to_string()
-    } else {
-        trimmed
-            .chars()
-            .map(|ch| match ch {
-                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' | '\0'..='\u{1f}' => '_',
-                _ => ch,
-            })
-            .collect::<String>()
-    };
-    let lower = name.to_lowercase();
-    if !(lower.ends_with(".md") || lower.ends_with(".txt")) {
-        name.push_str(".md");
-    }
-    name
-}
-
-fn choose_static_report_output_path(default_file_name: &str) -> Result<Option<PathBuf>, String> {
-    #[cfg(windows)]
-    {
-        let file_name = default_file_name.replace('\'', "''");
-        let script = format!(
-            r#"
-$OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-Add-Type -AssemblyName System.Windows.Forms
-$dialog = New-Object System.Windows.Forms.SaveFileDialog
-$dialog.Title = '导出静态资源报告'
-$dialog.Filter = 'Markdown 文件 (*.md)|*.md|文本文件 (*.txt)|*.txt'
-$dialog.DefaultExt = 'md'
-$dialog.AddExtension = $true
-$dialog.OverwritePrompt = $true
-$dialog.FileName = '{file_name}'
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
-  Write-Output $dialog.FileName
-}}
-"#
-        );
-        let output = quiet_command("powershell.exe")
-            .args([
-                "-NoProfile",
-                "-STA",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                &script,
-            ])
-            .output()
-            .map_err(|error| format!("打开保存对话框失败：{error}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "保存对话框失败：{}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
-        }
-        let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if selected.is_empty() {
-            return Ok(None);
-        }
-        let mut path = PathBuf::from(selected);
-        if path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("")
-            .is_empty()
-        {
-            path.set_extension("md");
-        }
-        return Ok(Some(path));
-    }
-
-    #[cfg(not(windows))]
-    {
-        let mut path =
-            std::env::current_dir().map_err(|error| format!("读取当前目录失败：{error}"))?;
-        path.push(default_file_name);
-        Ok(Some(path))
-    }
-}
-
-fn quiet_command(program: &str) -> Command {
-    let mut command = Command::new(program);
-    #[cfg(windows)]
-    command.creation_flags(CREATE_NO_WINDOW);
-    command
 }

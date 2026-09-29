@@ -47,10 +47,76 @@ pub(crate) fn gateway_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> 
             .join("resources")
             .join(binary_name),
     );
-    candidates
+    let bundled = candidates
         .into_iter()
         .find(|path| path.is_file())
-        .ok_or_else(|| format!("bundled {binary_name} was not found"))
+        .ok_or_else(|| format!("bundled {binary_name} was not found"))?;
+
+    #[cfg(target_os = "linux")]
+    {
+        return install_linux_gateway(app, &bundled, binary_name);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    Ok(bundled)
+}
+
+#[cfg(target_os = "linux")]
+fn install_linux_gateway(
+    app: &tauri::AppHandle,
+    bundled: &Path,
+    binary_name: &str,
+) -> Result<PathBuf, String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    // AppImage resources live below /tmp/.mount_* and disappear when the
+    // AppImage is unmounted. The gateway is a detached daemon, so give each
+    // application version a stable executable path outside that mount.
+    let install_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("resolve application data directory: {error}"))?
+        .join("gateway")
+        .join(app.package_info().version.to_string());
+    fs::create_dir_all(&install_dir)
+        .map_err(|error| format!("create {}: {error}", install_dir.display()))?;
+
+    let installed = install_dir.join(binary_name);
+    let needs_copy = match (fs::read(bundled), fs::read(&installed)) {
+        (Ok(source), Ok(destination)) => source != destination,
+        (Ok(_), Err(_)) => true,
+        (Err(error), _) => {
+            return Err(format!(
+                "read bundled gateway {}: {error}",
+                bundled.display()
+            ))
+        }
+    };
+
+    if needs_copy {
+        let temporary = install_dir.join(format!(".{binary_name}.{}.tmp", std::process::id()));
+        fs::copy(bundled, &temporary).map_err(|error| {
+            format!(
+                "copy bundled gateway {} to {}: {error}",
+                bundled.display(),
+                temporary.display()
+            )
+        })?;
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o755))
+            .map_err(|error| format!("set permissions on {}: {error}", temporary.display()))?;
+        fs::rename(&temporary, &installed).map_err(|error| {
+            format!(
+                "install gateway {} as {}: {error}",
+                temporary.display(),
+                installed.display()
+            )
+        })?;
+    } else {
+        fs::set_permissions(&installed, fs::Permissions::from_mode(0o755))
+            .map_err(|error| format!("set permissions on {}: {error}", installed.display()))?;
+    }
+
+    Ok(installed)
 }
 
 pub(crate) fn desktop_defenseclaw_home(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -295,7 +361,18 @@ pub(crate) fn ensure_gateway_home(app: &tauri::AppHandle, mode: &str) -> Result<
         "observe"
     };
     let config_path = home.join("config.yaml");
-    let home_text = home.to_string_lossy().replace('\\', "\\\\");
+    let home_path = yaml_quoted_path(&home);
+    let audit_db = yaml_quoted_path(&home.join("audit.db"));
+    let judge_bodies_db = yaml_quoted_path(&home.join("judge_bodies.db"));
+    let quarantine_dir = yaml_quoted_path(&home.join("quarantine"));
+    let device_key_file = yaml_quoted_path(&home.join("device.key"));
+    let environment = if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(windows) {
+        "windows"
+    } else {
+        "darwin"
+    };
     let agentrange_root = configured_agentrange_root(app);
     let claw_block = render_claw_block(agentrange_root.as_deref());
     let skill_dirs = agentrange_root
@@ -310,13 +387,13 @@ pub(crate) fn ensure_gateway_home(app: &tauri::AppHandle, mode: &str) -> Result<
     let plugin_watcher_enabled = watcher_enabled && agentrange_root.is_none();
     let contents = format!(
         r#"config_version: 7
-data_dir: "{home}"
-audit_db: "{home}\\audit.db"
-judge_bodies_db: "{home}\\judge_bodies.db"
-quarantine_dir: "{home}\\quarantine"
+data_dir: {home}
+audit_db: {audit_db}
+judge_bodies_db: {judge_bodies_db}
+quarantine_dir: {quarantine_dir}
 plugin_dir: ""
 policy_dir: ""
-environment: windows
+environment: {environment}
 {claw_block}
 guardrail:
   enabled: true
@@ -343,9 +420,9 @@ guardrail:
 gateway:
   host: 127.0.0.1
   port: 18789
-  api_bind: 0.0.0.0
+  api_bind: 127.0.0.1
   token_env: DEFENSECLAW_GATEWAY_TOKEN
-  device_key_file: "{home}\\device.key"
+  device_key_file: {device_key_file}
   auto_approve_safe: false
   reconnect_ms: 800
   max_reconnect_ms: 15000
@@ -369,7 +446,12 @@ gateway:
     interval: 30
     debounce: 2
 "#,
-        home = home_text,
+        home = home_path,
+        audit_db = audit_db,
+        judge_bodies_db = judge_bodies_db,
+        quarantine_dir = quarantine_dir,
+        device_key_file = device_key_file,
+        environment = environment,
         mode = mode,
         claw_block = claw_block,
         watch_block = watch_block,
@@ -458,7 +540,11 @@ fn ensure_gateway_ready_inner(app: &tauri::AppHandle) -> Result<LifecycleResult,
         });
     }
 
-    let started = run_gateway_action(app, "start")?;
+    // A daemon PID can remain valid even after its API subsystem has stopped.
+    // `start` only checks that PID and would report "already running", leaving
+    // the desktop unable to reach /health. Restart is safe when no daemon is
+    // running and repairs this live-process/dead-API state when one is.
+    let started = run_gateway_action(app, "restart")?;
     if !started.success {
         return Ok(started);
     }
