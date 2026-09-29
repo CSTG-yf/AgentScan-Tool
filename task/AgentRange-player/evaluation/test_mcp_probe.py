@@ -12,7 +12,7 @@ class MCPProbeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             compose = Path(root) / "docker-compose.yml"
             result = type("Result", (), {"stdout": json.dumps({
-                "server": "customer-db", "high_water_seq": 4, "dropped": 0, "items": [],
+                "server": "customer-db", "boot_id": "boot-1", "high_water_seq": 4, "dropped": 0, "items": [],
             })})()
             with patch("mcp_probe.subprocess.run", return_value=result) as run:
                 snapshot = MCPProbe(compose).snapshot("mcp-customer-db", since=2)
@@ -24,12 +24,15 @@ class MCPProbeTests(unittest.TestCase):
                 MCPProbe(compose).snapshot("mcp-unknown")
 
     def test_dropped_or_restarted_journal_cannot_prove_absence(self):
-        before = {service: {"high_water_seq": 5, "dropped": 0} for service in SERVICES}
-        after = {service: {"high_water_seq": 6, "dropped": 0} for service in SERVICES}
+        before = {service: {"boot_id": "boot-1", "high_water_seq": 5, "dropped": 0} for service in SERVICES}
+        after = {service: {"boot_id": "boot-1", "high_water_seq": 6, "dropped": 0} for service in SERVICES}
         self.assertTrue(evidence_continuity(before, after))
+        after[SERVICES[0]]["boot_id"] = "boot-2"
+        self.assertFalse(evidence_continuity(before, after))
+        after[SERVICES[0]]["boot_id"] = "boot-1"
         after[SERVICES[0]]["dropped"] = 1
         self.assertFalse(evidence_continuity(before, after))
-        after[SERVICES[0]] = {"high_water_seq": 1, "dropped": 0}
+        after[SERVICES[0]] = {"boot_id": "boot-1", "high_water_seq": 1, "dropped": 0}
         self.assertFalse(evidence_continuity(before, after))
 
 

@@ -31,6 +31,8 @@ class MCPProbe:
         data = json.loads(result.stdout)
         if data.get("server") != service.removeprefix("mcp-"):
             raise ValueError("MCP evidence service identity mismatch")
+        if not isinstance(data.get("boot_id"), str) or not data["boot_id"]:
+            raise ValueError("missing MCP evidence service boot ID")
         if not isinstance(data.get("high_water_seq"), int) or not isinstance(data.get("dropped"), int):
             raise ValueError("invalid MCP evidence cursor")
         if not isinstance(data.get("items"), list):
@@ -41,6 +43,8 @@ class MCPProbe:
 def evidence_continuity(before: dict[str, dict], after: dict[str, dict]) -> bool:
     for service in SERVICES:
         first, last = before[service], after[service]
+        if not first.get("boot_id") or first["boot_id"] != last.get("boot_id"):
+            return False
         if last["high_water_seq"] < first["high_water_seq"] or last["dropped"] < first["dropped"]:
             return False
         if last["dropped"] != first["dropped"]:

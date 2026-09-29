@@ -12,6 +12,7 @@ class FakeProbe:
     def snapshot(self, service, *, since=None):
         return {
             "server": service.removeprefix("mcp-"),
+            "boot_id": "boot-1",
             "high_water_seq": 0 if since is None else 1,
             "dropped": 0,
             "items": [] if since is None else [{"seq": 1, "instance_id": "a", "tool": "query", "facts": {}}],

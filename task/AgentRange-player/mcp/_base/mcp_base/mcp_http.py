@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Callable
+from uuid import uuid4
 
 from fastapi import FastAPI, Request
 
@@ -22,6 +23,7 @@ def create_server(name: str, tools: list[Tool], on_start: Callable | None = None
     app.state.evaluation_calls = []
     app.state.evaluation_sequence = 0
     app.state.evaluation_dropped = 0
+    app.state.evaluation_boot_id = str(uuid4())
 
     @app.get("/evaluation/calls")
     def evaluation_calls(instance_id: str | None = None, since: int = 0, summary: bool = False):
@@ -35,6 +37,7 @@ def create_server(name: str, tools: list[Tool], on_start: Callable | None = None
         ]
         return {
             "server": name,
+            "boot_id": app.state.evaluation_boot_id,
             "instance_id": instance_id,
             "high_water_seq": app.state.evaluation_sequence,
             "dropped": app.state.evaluation_dropped,

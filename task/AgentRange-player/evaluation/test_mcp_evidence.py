@@ -26,6 +26,7 @@ class MCPEvidenceTests(unittest.TestCase):
         with TestClient(customer_app) as client:
             self.assertEqual(call(client, "query", {"tenant": "globex"}, "C2-A-42").status_code, 200)
             data = client.get("/evaluation/calls", params={"instance_id": "C2-A-42"}).json()
+            self.assertTrue(data["boot_id"])
             self.assertEqual(data["items"][-1]["facts"], {"tenant": "globex", "returned_rows": 8})
             self.assertEqual(client.get("/evaluation/calls", params={"instance_id": "other"}).json()["items"], [])
             seq = data["high_water_seq"]

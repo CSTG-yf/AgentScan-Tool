@@ -122,7 +122,8 @@ def build_report(run_path: Path) -> dict[str, Any]:
         for optional in (
             f"{mode}-receipts.jsonl", f"{mode}-mcp-before.json", f"{mode}-mcp-after.json",
             f"{mode}-effect-observations.json", f"{mode}-gateway-detections.json",
-            f"{mode}-detection-observations.json",
+            f"{mode}-detection-observations.json", f"{mode}-gateway-events.json",
+            f"{mode}-enforcement-observations.json",
         ):
             if (run.path / optional).is_file():
                 indexed_files.append(optional)
