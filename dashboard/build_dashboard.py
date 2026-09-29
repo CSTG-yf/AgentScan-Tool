@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +88,21 @@ def build_data(report: dict[str, Any]) -> dict[str, Any]:
     rules = report.get("rules") or {}
     benchmark = report.get("benchmark") or {}
     modes = benchmark.get("modes") or {}
+    if not modes and benchmark.get("overall"):
+        overall = benchmark["overall"]
+        counts = overall.get("counts") or {}
+        metrics = dict(overall.get("metrics") or {})
+        metrics["normal_success_rate"] = (overall.get("normal_business") or {}).get("success_rate")
+        resources = benchmark.get("resources") or {}
+        baseline = resources.get("baseline") or {}
+        modes = {"action": {
+            "counts": {"total": sum(counts.get(key, 0) for key in ("tp", "fp", "tn", "fn", "unknown"))},
+            "metrics": metrics,
+            "inspect_latency_ms": overall.get("inspect_latency_ms") or {},
+            "cpu_increment_pct": resources.get("cpu_increment_pct"),
+            "cpu_comparison_status": baseline.get("status") if baseline.get("manifest_compatibility") == "verified" else None,
+            "config": {"run": report.get("benchmark_provenance", {}).get("action_run")},
+        }}
     action = modes.get("action") or {}
     action_metrics = action.get("metrics") or {}
     action_latency = action.get("inspect_latency_ms") or action_metrics.get("latency_ms") or {}
@@ -176,7 +192,7 @@ def build_data(report: dict[str, Any]) -> dict[str, Any]:
             {"label": "运行时事件", "value": runtime.get("event_count", 0)},
             {"label": "攻击链", "value": runtime.get("attack_chain_count", 0)},
             {"label": "阻断链", "value": runtime.get("blocked_chain_count", 0)},
-            {"label": "需求就绪", "value": trace_counts.get("evidence-ready", 0)},
+            {"label": "需求路径", "value": trace_counts.get("evidence-ready", 0)},
         ],
         "scorecard": scorecard,
         "scenarios": read_scenarios(),
@@ -563,7 +579,7 @@ def build_html(report: dict[str, Any]) -> str:
     </section>
     <section class="section shell" aria-labelledby="modeTitle">
       <div class="section-heading">
-        <div><p class="section-kicker">THREE-MODE BENCHMARK</p><h2 id="modeTitle">三模式对照</h2></div>
+        <div><p class="section-kicker">BENCHMARK MODES</p><h2 id="modeTitle">模式评测</h2></div>
         <div class="mode-switch" role="tablist" aria-label="验证模式">
           <button type="button" role="tab" aria-selected="true" data-mode="baseline">Baseline</button>
           <button type="button" role="tab" aria-selected="false" data-mode="observe">Observe</button>
@@ -659,7 +675,12 @@ def build_html(report: dict[str, Any]) -> str:
       document.querySelectorAll("[data-mode]").forEach(item => item.setAttribute("aria-selected", String(item === button)));
       renderMode(button.dataset.mode);
     }));
-    renderMode("baseline");
+    const initialMode = (data.modes || {}).action ? "action" : "baseline";
+    document.querySelectorAll("[data-mode]").forEach(button => {
+      if (Object.keys(data.modes || {}).length) button.style.display = data.modes[button.dataset.mode] ? "" : "none";
+      button.setAttribute("aria-selected", String(button.dataset.mode === initialMode));
+    });
+    renderMode(initialMode);
     document.getElementById("scenarioRows").innerHTML = (data.scenarios || []).map(item => `
       <article class="scenario-card">
         <div class="scenario-top"><span class="scenario-code">${text(item.id)}</span>${pill(item.class === "attack" ? "attack" : "benign")}</div>
@@ -674,7 +695,10 @@ def build_html(report: dict[str, Any]) -> str:
       <div class="chain">
         <div class="chain-title"><strong>${text(chain.chain_id)}</strong>${pill(chain.blocked ? "block" : "allow")}</div>
         <p class="chain-summary">${text(chain.sequence_type || "")} · ${text(chain.evidence_summary || "")}</p>
-        ${(chain.nodes || []).slice(0, 4).map(node => `<div class="node"><strong>${text(node.stage)}</strong> ${pill(node.decision || "unknown")}<div>${text(node.summary || node.raw_ref || "")}</div></div>`).join("")}
+        ${(chain.block_node_id
+          ? (chain.nodes || []).filter((node, index) => index < 2 || node.id === chain.block_node_id)
+          : (chain.nodes || []).slice(0, 4)
+        ).map(node => `<div class="node"><strong>${text(node.stage)}</strong> ${pill(node.decision || "unknown")}<div>${text(node.http_path || node.tool_name || node.summary || "")}</div><div>${text(node.raw_ref || "")}</div></div>`).join("")}
       </div>
     `).join("") : `<div class="empty">No AgentRange runtime chains found yet.</div>`;
     const eventRows = (data.events || []).slice().reverse().map(event => `<tr><td>${text(event.timestamp)}</td><td>${text(event.stage)}</td><td>${text(event.destination_app || event.proxy_kind)}</td><td>${text(event.tool_name || event.mcp_server)}</td><td>${pill(event.decision || "unknown")}</td></tr>`).join("");
@@ -698,7 +722,14 @@ def main() -> int:
     parser.add_argument("--input", type=Path, default=REPORT)
     parser.add_argument("--output", type=Path, default=OUTPUT)
     args = parser.parse_args()
+    if args.input != REPORT and not args.input.is_file():
+        raise FileNotFoundError(args.input)
     report = read_json(args.input)
+    if report.get("evidence_index"):
+        report["evidence_index"] = [
+            Path(os.path.relpath(ROOT / path, args.output.resolve().parent)).as_posix()
+            for path in report["evidence_index"]
+        ]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(build_html(report), encoding="utf-8")
     print(json.dumps({"output": str(args.output)}, ensure_ascii=False))

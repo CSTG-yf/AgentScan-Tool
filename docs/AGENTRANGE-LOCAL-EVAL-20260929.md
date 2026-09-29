@@ -20,6 +20,13 @@ sample windows were complete; all local scorer acceptance gates passed. This
 is a public-arena local result, not an official hidden-set score. The paired
 evidence is at `bench/runs/20260930-probe1200-cache-full-rate150-v1/{action,baseline}`.
 Four sidecars were returned to `DC_BYPASS_INSPECTION=0` after baseline.
+The scoped audit export contains 99,237 events grouped into exactly 5,200
+instance chains, including the same 80 blocked instances as the scored action
+observations. The local report and dashboard are at
+`bench/runs/20260930-probe1200-cache-full-rate150-v1/final-report.{json,md}`
+and `dashboard.html`; their evidence index points to this paired replay and the
+static fixture artifacts, not the historical `bench/results` summary. These
+large generated files remain in the ignored local run directory.
 
 The same 1,200 ms candidate first completed a 1,000-event action check with
 16/16 blocks, no false positives, 984/984 normal successes, zero unavailable

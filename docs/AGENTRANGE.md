@@ -66,12 +66,18 @@ docker compose --env-file .\task\AgentRange-player-full\.env.example -f .\task\A
 python .\integration\static_inventory.py --output .\integration\reports\static-scan.json
 python .\integration\static_eval.py --scan .\integration\reports\static-scan.json --output .\integration\reports\static-eval.json
 python .\integration\rule_contract.py --output .\integration\reports\rule-contract.json
-python .\integration\attack_chain.py --audit-db "$env:DEFENSECLAW_HOME\audit.db"
-python .\bench\benchmark.py summarize
-python .\integration\report.py
-python .\dashboard\build_dashboard.py
-Start-Process .\dashboard\index.html
+python .\integration\attack_chain.py --audit-db "$env:DEFENSECLAW_HOME\audit.db" --run-dir .\bench\runs\<run-id>\action
+python .\integration\report.py --benchmark-run-dir .\bench\runs\<run-id>
+python .\dashboard\build_dashboard.py --input .\bench\runs\<run-id>\final-report.json --output .\bench\runs\<run-id>\dashboard.html
+Start-Process .\bench\runs\<run-id>\dashboard.html
 ```
+
+单轮取证要求 `action/replay-process.json` 显示回放成功，且 `observations.jsonl`
+中的 action 实例与 `run.json` 的总数一一对应。审计事件同时按回放时间窗和实例 ID
+筛选；生成的 `runtime-events.jsonl`、`attack-chains.json` 保存在该轮 `action/`
+下，`final-report.json`、`final-report.md` 保存在 `<run-id>/` 下。报告中的
+阻断实例和指标因此可以追溯到同一轮回放。未指定运行目录时，脚本仍读取原有
+`integration/reports/` 和 `bench/results/`，仅供历史汇总，不应作为本轮验收报告。
 
 The static evaluator uses a separately curated, arena-hash-pinned local
 fixture to score asset and risk precision/recall. The scanner does not read
@@ -156,10 +162,10 @@ successful block.
 | --- | --- |
 | `integration/reports/static-scan.json` | 合同资产覆盖、静态风险命中及良性对照结果 |
 | `integration/reports/rule-contract.json` | 通用规则对合同内攻击/良性样例的匹配与耗时检查 |
-| `integration/reports/runtime-events.jsonl`、`attack-chains.json` | 从指定审计库导出的 AgentRange 事件与顺序关联链 |
+| `bench/runs/<run-id>/action/runtime-events.jsonl`、`attack-chains.json` | 按该轮时间窗和实例 ID 导出的 AgentRange 事件与顺序关联链 |
 | `bench/results/summary.json` | 运行时统计，以及已有 baseline/observe/action 报告的汇总 |
-| `integration/reports/final-report.json`、`final-report.md` | 静态、运行时、评测及需求证据索引 |
-| `dashboard/index.html` | 可在浏览器打开的静态评审页面 |
+| `bench/runs/<run-id>/final-report.json`、`final-report.md` | 单轮静态、运行时、配对评测及需求证据索引 |
+| `bench/runs/<run-id>/dashboard.html` | 可在浏览器打开的单轮静态评审页面 |
 
 **汇总不等于完成评测。** `bench/benchmark.py summarize` 读取 `bench/results/baseline.json`、`observe.json`、`action.json`，不会启动三种模式的回放或生成这些输入。缺失模式保留在 `missing_modes`；验收还应检查事件数量、延迟样本数、召回率、误报率及实际执行结果。CPU 汇总只接受 `agentrange_benchmark.py score` 生成的逐容器 p95 对照；只有旧 `resources.after` 单快照时标记为 `legacy_snapshot_unverified`，不会计算或通过 CPU 增量。静态合同命中率不能替代真实运行时检出率；`requirements_contract.py` 的 `evidence-ready` 仅表示证据路径存在。
 

@@ -25,7 +25,26 @@
           "asset_id": {"type": "string"},
           "summary": {"type": "string"},
           "evidence_level": {"enum": ["direct", "time_window_inference"]},
-          "raw_ref": {"type": "string"}
+          "raw_ref": {"type": "string"},
+          "prompt_excerpt": {"type": "string", "maxLength": 500},
+          "request_excerpt": {"type": "string", "maxLength": 500},
+          "http_method": {"type": "string"},
+          "http_path": {"type": "string"},
+          "app_frames_source": {"enum": ["", "client_reported"]},
+          "app_frames": {
+            "type": "array",
+            "maxItems": 12,
+            "items": {
+              "type": "object",
+              "required": ["module", "function", "line"],
+              "properties": {
+                "module": {"type": "string"},
+                "function": {"type": "string"},
+                "line": {"type": "integer", "minimum": 1}
+              },
+              "additionalProperties": false
+            }
+          }
         },
         "additionalProperties": true
       }
