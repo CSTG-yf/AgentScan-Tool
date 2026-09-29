@@ -11,6 +11,8 @@ import argparse
 from dataclasses import asdict, is_dataclass
 import hashlib
 import json
+import math
+import statistics
 import subprocess
 import sys
 from collections import defaultdict
@@ -579,6 +581,65 @@ def _score_resources(
     }
 
 
+def _score_host_gateway_cpu(run_dir: Path) -> dict[str, Any]:
+    rows = read_jsonl(run_dir / "host-gateway.jsonl")
+    result: dict[str, Any] = {"status": "missing", "samples": 0}
+    if not rows:
+        return result
+    process = read_json(run_dir / "replay-process.json")
+    try:
+        started = datetime.fromisoformat(process["started_at"])
+        finished = datetime.fromisoformat(process["finished_at"])
+    except (KeyError, TypeError, ValueError):
+        return {**result, "status": "replay_timing_missing"}
+    if started.tzinfo is None or finished.tzinfo is None or finished <= started:
+        return {**result, "status": "replay_timing_invalid"}
+
+    samples = []
+    mode = read_json(run_dir / "run.json").get("mode")
+    for row in rows:
+        try:
+            timestamp = datetime.fromisoformat(row["timestamp"])
+            host_pct = float(row["cpu_host_pct"])
+            core_pct = float(row["cpu_core_pct"])
+            interval = float(row["interval_seconds"])
+        except (KeyError, TypeError, ValueError):
+            return {**result, "status": "invalid_samples"}
+        if (row.get("mode") != mode or not all(math.isfinite(value) and value >= 0 for value in (host_pct, core_pct, interval))
+                or interval == 0 or timestamp.tzinfo is None):
+            return {**result, "status": "invalid_samples"}
+        if started <= timestamp <= finished:
+            samples.append((timestamp, host_pct, core_pct, interval, row.get("process_start")))
+    if not samples:
+        return {**result, "status": "no_window_samples"}
+
+    samples.sort(key=lambda item: item[0])
+    host_values = [item[1] for item in samples]
+    core_values = [item[2] for item in samples]
+    expected_interval = statistics.median(item[3] for item in samples)
+    start_gap = max(0.0, (samples[0][0] - started).total_seconds())
+    end_gap = max(0.0, (finished - samples[-1][0]).total_seconds())
+    max_gap = max(((right[0] - left[0]).total_seconds() for left, right in zip(samples, samples[1:])), default=0.0)
+    edge_limit = max(5.0, 3 * expected_interval)
+    gap_limit = max(10.0, 5 * expected_interval)
+    process_starts = {item[4] for item in samples}
+    status = "complete" if (
+        len(process_starts) == 1 and next(iter(process_starts))
+        and start_gap <= edge_limit and end_gap <= edge_limit and max_gap <= gap_limit
+    ) else "partial_window"
+    return {
+        "status": status,
+        "samples": len(samples),
+        "cpu_host_pct": {"p95": _percentile(host_values, 0.95), "max": max(host_values)},
+        "cpu_core_pct": {"p95": _percentile(core_values, 0.95), "max": max(core_values)},
+        "coverage": {
+            "start_gap_seconds": round(start_gap, 3),
+            "end_gap_seconds": round(end_gap, 3),
+            "max_sample_gap_seconds": round(max_gap, 3),
+        },
+    }
+
+
 def score_run(run_dir: Path, baseline_run_dir: Path | None = None) -> dict[str, Any]:
     run_dir = run_dir.resolve()
     gt_rows = read_jsonl(run_dir / "gt.jsonl")
@@ -605,6 +666,7 @@ def score_run(run_dir: Path, baseline_run_dir: Path | None = None) -> dict[str, 
         baseline_run_dir=baseline_run_dir,
         run_mode=run_mode,
     )
+    resource_report["host_gateway"] = _score_host_gateway_cpu(run_dir)
     if (run_dir / "differential-merge.json").exists():
         resource_report["cpu_increment_pct"] = None
         resource_report["cpu_increment_by_container"] = {}
@@ -626,6 +688,7 @@ def score_run(run_dir: Path, baseline_run_dir: Path | None = None) -> dict[str, 
             "inspect_p95_lt_1000ms": (overall["inspect_latency_ms"]["p95"] or float("inf")) < 1000,
             "inspect_latency_coverage_1": overall["inspect_latency_ms"]["samples"] == overall["latency_ms"]["samples"] == len(gt_rows),
             "cpu_increment_lte_5pct": resource_report["baseline"]["status"] == "complete" and resource_report["cpu_increment_pct"] is not None and resource_report["cpu_increment_pct"] <= 5,
+            "host_gateway_cpu_p95_lte_5pct": resource_report["host_gateway"]["status"] == "complete" and resource_report["host_gateway"]["cpu_host_pct"]["p95"] <= 5,
             "evidence_complete": overall["counts"]["unknown"] == 0,
         },
     }

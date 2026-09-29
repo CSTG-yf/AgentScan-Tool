@@ -7,15 +7,17 @@ import tempfile
 import unittest
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
-from bench.agentrange_benchmark import _confusion, prepare_all, prepare_run, score_run
+from bench.agentrange_benchmark import _confusion, _score_host_gateway_cpu, prepare_all, prepare_run, score_run
 from bench.benchmark import summarize_modes
 from bench.enrich_observations import enrich
 from bench.resource_sampler import docker_stats, sample
 from bench.side_effect_probes import c2_delta, evaluate_side_effects
 from bench.live_replay import run as run_live_replay
+from bench import live_replay_with_resources
 from bench import agentrange_replay
 from bench.merge_observation_run import merge as merge_observation_run
 
@@ -28,6 +30,54 @@ def write_replay_timing(run_dir: Path) -> None:
 
 
 class AgentRangeBenchmarkTest(unittest.TestCase):
+    def test_resource_wrapper_starts_host_sampler_with_replay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = argparse.Namespace(
+                run_dir=Path(directory) / "action", range_root=Path("task/AgentRange-player-full"),
+                mode="action", seed=1337, total=4, malicious_target=1, samples=10,
+                interval_ms=500, only=None, target_rate=1.5,
+                host_gateway_pid=16740, host_interval_ms=2000,
+            )
+            docker_sampler = MagicMock()
+            host_sampler = MagicMock()
+            docker_sampler.poll.return_value = None
+            host_sampler.poll.return_value = None
+            with patch.object(live_replay_with_resources, "sys", SimpleNamespace(executable="python", platform="win32")), \
+                    patch.object(live_replay_with_resources.shutil, "which", return_value="pwsh"), \
+                    patch.object(live_replay_with_resources.subprocess, "Popen", side_effect=[docker_sampler, host_sampler]) as spawn, \
+                    patch.object(live_replay_with_resources.subprocess, "run", return_value=SimpleNamespace(returncode=0)):
+                self.assertEqual(live_replay_with_resources.run(args), 0)
+            host_command = spawn.call_args_list[1].args[0]
+            self.assertIn("host_gateway_sampler.ps1", host_command[host_command.index("-File") + 1])
+            self.assertEqual(host_command[host_command.index("-GatewayProcessId") + 1], "16740")
+            docker_sampler.terminate.assert_called_once()
+            host_sampler.terminate.assert_called_once()
+
+    def test_host_gateway_cpu_requires_full_replay_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory)
+            (run_dir / "run.json").write_text('{"mode":"action"}', encoding="utf-8")
+            (run_dir / "replay-process.json").write_text(json.dumps({
+                "started_at": "2026-09-29T00:00:00+00:00",
+                "finished_at": "2026-09-29T00:00:10+00:00",
+            }), encoding="utf-8")
+            rows = [{
+                "timestamp": f"2026-09-29T00:00:{second:02d}+00:00",
+                "mode": "action", "process_start": "2026-09-28T00:00:00Z",
+                "interval_seconds": 2, "cpu_host_pct": value, "cpu_core_pct": value * 16,
+            } for second, value in ((2, 2.0), (4, 3.0), (6, 4.0), (8, 4.5), (10, 4.8))]
+            output = run_dir / "host-gateway.jsonl"
+            output.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+            report = _score_host_gateway_cpu(run_dir)
+            self.assertEqual(report["status"], "complete")
+            self.assertEqual(report["cpu_host_pct"]["p95"], 4.8)
+            output.write_text("\n".join(json.dumps(row) for row in rows[3:]) + "\n", encoding="utf-8")
+            self.assertEqual(_score_host_gateway_cpu(run_dir)["status"], "partial_window")
+            output.write_text("\n".join(json.dumps({**row, "process_start": None}) for row in rows) + "\n", encoding="utf-8")
+            self.assertEqual(_score_host_gateway_cpu(run_dir)["status"], "partial_window")
+            output.write_text("\n".join(json.dumps({**row, "timestamp": row["timestamp"].removesuffix("+00:00")}) for row in rows) + "\n", encoding="utf-8")
+            self.assertEqual(_score_host_gateway_cpu(run_dir)["status"], "invalid_samples")
+
     def test_action_requires_enforced_block_not_would_block(self):
         truth = [{"instance_id": "attack", "label": "malicious", "scenario_id": "C2-A"}]
         observation = {
@@ -468,6 +518,7 @@ class AgentRangeBenchmarkTest(unittest.TestCase):
             self.assertEqual(report["resources"]["cpu_increment_by_container"]["mcp"], 1.5)
             self.assertTrue(report["acceptance"]["inspect_p95_lt_1000ms"])
             self.assertTrue(report["acceptance"]["inspect_latency_coverage_1"])
+            self.assertFalse(report["acceptance"]["host_gateway_cpu_p95_lte_5pct"])
             observations[0].pop("inspect_latency_ms")
             (run_dir / "observations.jsonl").write_text("\n".join(json.dumps(row) for row in observations) + "\n", encoding="utf-8")
             self.assertFalse(score_run(run_dir)["acceptance"]["inspect_latency_coverage_1"])

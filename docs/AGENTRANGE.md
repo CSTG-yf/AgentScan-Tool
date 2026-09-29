@@ -118,6 +118,16 @@ window. Resource samplers can safely append to one evidence file concurrently;
 each snapshot is serialized with a lock sidecar, and malformed lines are never
 repaired or replaced with zeros.
 
+Docker sampling does not include the Windows-hosted Go Gateway. For a full
+Windows replay, pass `--host-gateway-pid <gateway-process-id>` to
+`bench/live_replay_with_resources.py` in both modes. The wrapper then starts
+`bench/host_gateway_sampler.ps1` with the replay and writes
+`host-gateway.jsonl`. The scorer reports Gateway CPU as both core-equivalent
+percent and percent of all logical host processors. Its host 5% gate uses the
+latter and requires samples spanning the complete replay window; a late or
+interrupted sampler is `partial_window`. This host measurement and the Docker
+per-container increment are separate evidence, not a combined CPU total.
+
 For a full-topology CPU baseline, load the same DefenseClaw overlay with
 `DC_BYPASS_INSPECTION=1` only while collecting the baseline resource window.
 This keeps the ingress/proxy containers present while avoiding gateway calls;
