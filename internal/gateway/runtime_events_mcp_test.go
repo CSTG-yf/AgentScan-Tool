@@ -25,6 +25,20 @@ func TestHookRuntimeEventCarriesMCPServerForEnforcement(t *testing.T) {
 	}
 }
 
+func TestHookRuntimeEventInfersMCPServerFromToolName(t *testing.T) {
+	store, _ := testStoreAndLogger(t)
+	SetRuntimeEventStore(store)
+	t.Cleanup(func() { SetRuntimeEventStore(nil) })
+	api := &APIServer{store: store}
+	api.recordHookRuntimeEvent(context.Background(), agentHookRequest{
+		ConnectorName: "codex", HookEventName: "PreToolUse", ToolName: "mcp__jira__createIssue",
+	}, agentHookResponse{Action: "allow", Mode: "action"})
+	rows, err := store.ListRuntimeEvents(audit.RuntimeEventFilter{EventSource: audit.RuntimeSourceAgentHook, Limit: 10})
+	if err != nil || len(rows) != 1 || rows[0].MCPServer != "jira" || rows[0].Attributes["pre_call_block_capable"] != true {
+		t.Fatalf("inferred MCP evidence = %+v, %v", rows, err)
+	}
+}
+
 func TestHookRuntimeEventDoesNotClaimUnknownConnectorCanBlock(t *testing.T) {
 	store, _ := testStoreAndLogger(t)
 	SetRuntimeEventStore(store)

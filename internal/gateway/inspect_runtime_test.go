@@ -26,6 +26,26 @@ func runtimeTestAPI(t *testing.T) *APIServer {
 	return a
 }
 
+func TestInspectRuntimeMCPPreCallDeclaresBlockingSurface(t *testing.T) {
+	a := runtimeTestAPI(t)
+	c := runtimeInspectContext()
+	c.ProxyKind = "mcp"
+	c.Operation = "mcp.invoke"
+	c.ToolName = "mcp__jira__createIssue"
+	c.MCPServer = "jira"
+	c.HTTPPath = "/api/v1/inspect/tool"
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/inspect/tool", nil)
+	r.Header.Set("X-DefenseClaw-Connector", "agentrange")
+	id, ok := a.beginInspectRuntime(httptest.NewRecorder(), r, c, c.SessionID)
+	if !ok || id <= 0 {
+		t.Fatal("authenticated MCP pre-call was not recorded")
+	}
+	event, exists, err := a.store.GetRuntimeEvent(id)
+	if err != nil || !exists || event.MCPServer != "jira" || event.Attributes["pre_call_block_capable"] != true {
+		t.Fatalf("MCP pre-call capability = %+v, exists=%v err=%v", event, exists, err)
+	}
+}
+
 func callRuntimeInspect(a *APIServer, c *InspectRuntimeContext, content string) *httptest.ResponseRecorder {
 	b, _ := json.Marshal(RequestInspectRequest{Content: content, SessionID: c.SessionID, RuntimeContext: c})
 	r := httptest.NewRequest("POST", "/api/v1/inspect/request", bytes.NewReader(b))

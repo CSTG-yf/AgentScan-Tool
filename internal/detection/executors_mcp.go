@@ -35,16 +35,24 @@ func (e MCPBlockExecutor) Execute(ctx context.Context, req RuntimeExecutionReque
 		return "", "", fmt.Errorf("only an explicit MCP blacklist or known-malicious MCP resource can justify a persistent server block")
 	}
 	var server, connector string
+	sawServer := false
 	for _, evidence := range req.Evidence {
-		name := strings.TrimSpace(evidence.Event.MCPServer)
+		ev := evidence.Event
+		name := strings.TrimSpace(ev.MCPServer)
 		if name == "" {
+			continue
+		}
+		sawServer = true
+		if ev.EventType != audit.RuntimeEventToolPreCall || ev.Attributes["pre_call_block_capable"] != true ||
+			!(ev.EventSource == audit.RuntimeSourceAgentHook ||
+				(ev.EventSource == audit.RuntimeSourceGuardrail && ev.Attributes["connector"] == "agentrange" && ev.Attributes["proxy_kind"] == "mcp" && ev.Attributes["phase"] == "pre")) {
 			continue
 		}
 		if server != "" && server != name {
 			return "", "", fmt.Errorf("ambiguous MCP evidence: more than one server")
 		}
 		server = name
-		if value, ok := evidence.Event.Attributes["connector"].(string); ok {
+		if value, ok := ev.Attributes["connector"].(string); ok {
 			value = strings.TrimSpace(value)
 			if connector != "" && value != "" && connector != value {
 				return "", "", fmt.Errorf("ambiguous MCP evidence: more than one connector")
@@ -55,6 +63,9 @@ func (e MCPBlockExecutor) Execute(ctx context.Context, req RuntimeExecutionReque
 		}
 	}
 	if server == "" {
+		if sawServer {
+			return "", "", fmt.Errorf("no confirmed block-capable pre-call MCP evidence")
+		}
 		return "", "", fmt.Errorf("no explicit MCP server in detection evidence")
 	}
 	if detection.DetectionType == "known_malicious_resource_invocation" {

@@ -46,7 +46,8 @@ func TestRuntimeDecisionMCPExecutorBlocksNextToolCall(t *testing.T) {
 	}
 	decision := audit.RuntimeDecision{DecisionID: "D-mcp-gate", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointMCP}
 	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
-		MCPServer: "jira", Attributes: map[string]any{"connector": "codex"},
+		EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook,
+		MCPServer: "jira", Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": true},
 	}}}
 	status, _, _ := engine.ExecuteNonProxy(context.Background(), decision, "MCP_BLOCK", evidence, true)
 	if status != audit.ResponseStatusExecuted {
@@ -59,6 +60,29 @@ func TestRuntimeDecisionMCPExecutorBlocksNextToolCall(t *testing.T) {
 	_, allowed := postInspect(t, api, `{"tool":"mcp__jira__createIssue","connector":"claudecode","args":{}}`)
 	if allowed.Action == "block" {
 		t.Fatal("connector-scoped block leaked to another connector")
+	}
+}
+
+func TestRuntimeDecisionMCPExecutorBlocksAgentRangeNextToolCall(t *testing.T) {
+	api, store := toolPolicyAPI(t, "action")
+	d, err := store.RecordRuntimeDetection(audit.RuntimeDetectionInput{
+		DetectionType: "configured_blacklist", Attributes: map[string]any{"blacklist_target_type": "mcp"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision := audit.RuntimeDecision{DecisionID: "D-range-mcp", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointMCP}
+	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
+		EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceGuardrail,
+		MCPServer: "jira", Attributes: map[string]any{"connector": "agentrange", "proxy_kind": "mcp", "phase": "pre", "pre_call_block_capable": true},
+	}}}
+	status, _, _ := detection.NewPolicyEngine(store).ExecuteNonProxy(context.Background(), decision, "MCP_BLOCK", evidence, true)
+	if status != audit.ResponseStatusExecuted {
+		t.Fatalf("AgentRange MCP executor status = %s", status)
+	}
+	_, blocked := postInspect(t, api, `{"tool":"mcp__jira__createIssue","connector":"agentrange","args":{}}`)
+	if blocked.Action != "block" {
+		t.Fatalf("next AgentRange MCP call action = %s; expected block", blocked.Action)
 	}
 }
 

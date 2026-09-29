@@ -20,13 +20,44 @@ func TestMCPBlockExecutorRequiresIdentifiedServer(t *testing.T) {
 	}
 }
 
+func TestMCPBlockExecutorRejectsUncontrolledEvidence(t *testing.T) {
+	store := newDetectionTestStore(t)
+	d := explicitMCPDetection(t, store)
+	decision := audit.RuntimeDecision{DecisionID: "D-uncontrolled", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointMCP}
+	for _, ev := range []audit.BehaviorEvent{
+		{EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceOSSensor, MCPServer: "jira", Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": true}},
+		{EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook, MCPServer: "jira", Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": false}},
+		{EventType: audit.RuntimeEventToolPostCall, EventSource: audit.RuntimeSourceAgentHook, MCPServer: "jira", Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": true}},
+	} {
+		status, _, result := NewPolicyEngine(store).ExecuteNonProxy(context.Background(), decision, "MCP_BLOCK", []audit.DetectionEvidence{{Event: ev}}, true)
+		if status != audit.ResponseStatusFailed || !strings.Contains(result, "no confirmed block-capable") {
+			t.Fatalf("uncontrolled MCP evidence reported success: %s %s", status, result)
+		}
+	}
+}
+
+func TestMCPBlockExecutorAcceptsAuthenticatedAgentRangePreCall(t *testing.T) {
+	store := newDetectionTestStore(t)
+	d := explicitMCPDetection(t, store)
+	decision := audit.RuntimeDecision{DecisionID: "D-range", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointMCP}
+	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
+		EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceGuardrail,
+		MCPServer: "jira", Attributes: map[string]any{"connector": "agentrange", "proxy_kind": "mcp", "phase": "pre", "pre_call_block_capable": true},
+	}}}
+	status, _, _ := NewPolicyEngine(store).ExecuteNonProxy(context.Background(), decision, "MCP_BLOCK", evidence, true)
+	if status != audit.ResponseStatusExecuted {
+		t.Fatalf("authenticated AgentRange pre-call gate = %s", status)
+	}
+}
+
 func TestMCPBlockExecutorPersistsScopedGate(t *testing.T) {
 	store := newDetectionTestStore(t)
 	d := explicitMCPDetection(t, store)
 	policy := NewPolicyEngine(store)
 	decision := audit.RuntimeDecision{DecisionID: "D-jira", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointMCP}
 	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
-		MCPServer: "jira", Attributes: map[string]any{"connector": "codex"},
+		EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook,
+		MCPServer: "jira", Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": true},
 	}}}
 	status, target, result := policy.ExecuteNonProxy(context.Background(), decision, "MCP_BLOCK", evidence, true)
 	if status != audit.ResponseStatusExecuted || target != "jira" || !strings.Contains(result, "future calls") {
@@ -48,7 +79,7 @@ func TestMCPBlockExecutorRejectsAmbiguousGlobalScope(t *testing.T) {
 	d := explicitMCPDetection(t, store)
 	policy := NewPolicyEngine(store)
 	decision := audit.RuntimeDecision{DecisionID: "D-jira", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointMCP}
-	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{MCPServer: "jira"}}}
+	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook, MCPServer: "jira", Attributes: map[string]any{"pre_call_block_capable": true}}}}
 	status, _, result := policy.ExecuteNonProxy(context.Background(), decision, "MCP_BLOCK", evidence, true)
 	if status != audit.ResponseStatusFailed || !strings.Contains(result, "no connector identity") {
 		t.Fatalf("unexpected result: %s %s", status, result)
@@ -67,7 +98,8 @@ func TestMCPBlockExecutorRejectsMaliciousSkillAsServer(t *testing.T) {
 	policy := NewPolicyEngine(store)
 	decision := audit.RuntimeDecision{DecisionID: "D-skill", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointMCP}
 	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
-		MCPServer: "jira", Attributes: map[string]any{"connector": "codex"},
+		EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook,
+		MCPServer: "jira", Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": true},
 	}}}
 	status, _, _ := policy.ExecuteNonProxy(context.Background(), decision, "MCP_BLOCK", evidence, true)
 	if status != audit.ResponseStatusFailed {
@@ -89,7 +121,8 @@ func TestMCPBlockExecutorRequiresMatchingMaliciousResource(t *testing.T) {
 	policy := NewPolicyEngine(store)
 	decision := audit.RuntimeDecision{DecisionID: "D-resource", DetectionID: d.DetectionID, EnforcementPoint: audit.EnforcementPointMCP}
 	evidence := []audit.DetectionEvidence{{Event: audit.BehaviorEvent{
-		MCPServer: "github", Attributes: map[string]any{"connector": "codex"},
+		EventType: audit.RuntimeEventToolPreCall, EventSource: audit.RuntimeSourceAgentHook,
+		MCPServer: "github", Attributes: map[string]any{"connector": "codex", "pre_call_block_capable": true},
 	}}}
 	status, _, result := policy.ExecuteNonProxy(context.Background(), decision, "MCP_BLOCK", evidence, true)
 	if status != audit.ResponseStatusFailed || !strings.Contains(result, "does not match") {

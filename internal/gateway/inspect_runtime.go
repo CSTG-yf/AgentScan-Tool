@@ -127,7 +127,7 @@ func (a *APIServer) beginInspectRuntime(w http.ResponseWriter, r *http.Request, 
 		Operation: safeRuntimeLabel(c.Operation), Target: safeRuntimeLabel(c.ProxyKind),
 		ToolName: safeRuntimeLabel(tool), MCPServer: safeRuntimeLabel(c.MCPServer),
 		Outcome: "observed", Timestamp: time.Now().UTC(),
-		Attributes: map[string]any{"connector": "agentrange", "call_id": c.CallID, "phase": c.Phase, "proxy_kind": c.ProxyKind, "inspection_status": "pending", "http_method": c.HTTPMethod, "http_path": redaction.ForSinkMessageContent(strings.Split(c.HTTPPath, "?")[0])},
+		Attributes: map[string]any{"connector": "agentrange", "call_id": c.CallID, "phase": c.Phase, "proxy_kind": c.ProxyKind, "pre_call_block_capable": kind == audit.RuntimeEventToolPreCall && c.ProxyKind == "mcp" && c.Phase == "pre", "inspection_status": "pending", "http_method": c.HTTPMethod, "http_path": redaction.ForSinkMessageContent(strings.Split(c.HTTPPath, "?")[0])},
 	})
 	if err != nil {
 		w.Header().Set("X-DefenseClaw-Runtime-Status", "failed")
