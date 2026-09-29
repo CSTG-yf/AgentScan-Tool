@@ -32,10 +32,12 @@ import json
 import os
 import shutil
 import tempfile
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from defenseclaw.config import _lock_file_exclusive, _unlock_file
 from defenseclaw.registries.manifest import Manifest, ManifestEntry, parse_manifest
 
 
@@ -132,11 +134,25 @@ def cache_root(data_dir: str) -> Path:
 
 def source_dir(data_dir: str, source_id: str) -> Path:
     """Per-source directory under :func:`cache_root`."""
-    if not source_id or "/" in source_id or ".." in source_id:
+    if not source_id or "/" in source_id or "\\" in source_id or ".." in source_id or Path(source_id).is_absolute():
         raise ValueError(f"invalid source id: {source_id!r}")
     d = cache_root(data_dir) / source_id
     d.mkdir(mode=0o700, exist_ok=True)
     return d
+
+
+@contextmanager
+def source_sync_lock(data_dir: str, source_id: str):
+    """Serialize manual and scheduled sync of the same source across processes."""
+    path = source_dir(data_dir, source_id) / ".sync.lock"
+    with path.open("a+b") as lock_file:
+        if os.name != "nt":
+            os.chmod(path, 0o600)
+        _lock_file_exclusive(lock_file)
+        try:
+            yield
+        finally:
+            _unlock_file(lock_file)
 
 
 def index_path(data_dir: str, source_id: str) -> Path:

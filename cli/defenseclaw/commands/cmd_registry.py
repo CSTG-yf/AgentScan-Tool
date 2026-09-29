@@ -35,6 +35,7 @@ import json as _json
 import os
 import re
 import sys
+import time
 from dataclasses import asdict
 from typing import Any
 
@@ -46,6 +47,7 @@ from defenseclaw.config import (
     REGISTRY_KINDS,
     Config,
     RegistrySource,
+    load as load_config,
 )
 from defenseclaw.context import AppContext, pass_ctx
 from defenseclaw.registries import (
@@ -66,6 +68,7 @@ from defenseclaw.registries.sync import (
     manual_set_verdict,
     promote_from_cache,
 )
+from defenseclaw.registries.scheduler import RegistryScheduler
 
 # ---------------------------------------------------------------------------
 # Validation helpers
@@ -882,6 +885,56 @@ def _print_sync_reports(reports: list[SyncReport]) -> None:
         for err in r.errors:
             click.echo(f"  {ux.dim('!')} {r.source_id}: {err}")
     click.echo()
+
+
+@registry.group("scheduler")
+def scheduler_group() -> None:
+    """Inspect or run the persistent Registry auto-sync scheduler."""
+
+
+@scheduler_group.command("status")
+@pass_ctx
+def scheduler_status(app: AppContext) -> None:
+    """Show saved per-source next-run and failure state."""
+    cfg = _require_cfg(app)
+    scheduler = RegistryScheduler(cfg.data_dir, load_config, lambda _cfg, _source: SyncReport())
+    state = scheduler.state()["sources"]
+    rows = [{
+        "source_id": source.id,
+        "enabled": source.enabled,
+        "auto_sync": source.auto_sync,
+        "sync_interval_hours": source.sync_interval_hours,
+        **state.get(source.id, {}),
+    } for source in cfg.registries.sources]
+    _emit_json(rows)
+
+
+@scheduler_group.command("run")
+@click.option("--once", is_flag=True, help="Run only one due-source pass and exit")
+@pass_ctx
+def scheduler_run(app: AppContext, once: bool) -> None:
+    """Run auto-sync independently of the desktop window.
+
+    Use a systemd or Windows service manager to keep this foreground
+    process alive. Disabled sources and sources without auto_sync stay idle.
+    """
+    cfg = _require_cfg(app)
+
+    def scheduled_sync(current: Config, source: RegistrySource) -> SyncReport:
+        app.cfg = current
+        callback = _make_scan_callback(app, allow_private=False, scan_stdio=False)
+        return sync_source(current, current.data_dir, source, scan_callback=callback)
+
+    scheduler = RegistryScheduler(cfg.data_dir, load_config, scheduled_sync)
+    try:
+        while True:
+            results = scheduler.tick()
+            _emit_json(results)
+            if once:
+                break
+            time.sleep(60)
+    except KeyboardInterrupt:
+        return
 
 
 # Lazy scanner factory — keeps the heavy SDK import off the hot path

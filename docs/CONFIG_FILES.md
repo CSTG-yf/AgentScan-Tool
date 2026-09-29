@@ -80,9 +80,7 @@ registries:
       content: skill          # skill | mcp | both
       auth_env: DEFENSECLAW_REGISTRY_TOKEN  # NAME of env var holding the token
       enabled: true
-      # auto_sync / sync_interval_hours are RESERVED for v2.
-      # No scheduler reads them today — run `defenseclaw registry
-      # sync --all` (or wire it into cron / systemd-timer) for now.
+      # The opt-in `defenseclaw registry scheduler run` process reads these.
       auto_sync: false
       sync_interval_hours: 24
     - id: skills-sh-public
@@ -98,12 +96,12 @@ entries into `asset_policy.{skill,mcp}.registry` with
 `Reason="registry:<id>"` so admission can attribute the rule back to
 its source.
 
-> **Note on `auto_sync`** — This field is persisted but **not yet
-> honoured at runtime**. There is no in-process scheduler that
-> periodically calls `registry sync` today; setting `auto_sync: true`
-> only preserves the bit for a future release. Until then, schedule
-> `defenseclaw registry sync --all` from cron / a systemd timer / your
-> CI loop.
+> **Note on `auto_sync`** — Set it to `true` only for sources you want
+> scheduled, then keep `defenseclaw registry scheduler run` alive using
+> your service manager. The desktop app and installer do not start the
+> Python CLI scheduler automatically. `registry scheduler status` shows
+> persisted per-source outcomes and next-run times. A zero interval skips
+> automatic sync; manual `registry sync` continues to work independently.
 
 ---
 
