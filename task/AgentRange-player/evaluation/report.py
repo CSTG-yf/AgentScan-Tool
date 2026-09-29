@@ -119,7 +119,11 @@ def build_report(run_path: Path) -> dict[str, Any]:
             raise ValueError(f"{mode} report does not match instance observations")
         summaries[mode] = recalculated
         indexed_files.extend((observations_name, report_name))
-        for optional in (f"{mode}-receipts.jsonl", f"{mode}-mcp-before.json", f"{mode}-mcp-after.json", f"{mode}-effect-observations.json"):
+        for optional in (
+            f"{mode}-receipts.jsonl", f"{mode}-mcp-before.json", f"{mode}-mcp-after.json",
+            f"{mode}-effect-observations.json", f"{mode}-gateway-detections.json",
+            f"{mode}-detection-observations.json",
+        ):
             if (run.path / optional).is_file():
                 indexed_files.append(optional)
 
