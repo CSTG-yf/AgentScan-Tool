@@ -5,6 +5,41 @@ not an official hidden-set result. The arena SHA-256 manifest is
 `bcd51ef41b2bfd2871a06e03e6835d26c41e45436e86121c722981b06dcc5d5b`.
 Ground truth was used by the offline scorer, not the online detector.
 
+## Nested tenant-scope fix and paired replay
+
+The `bbdb661` Gateway extends authenticated tenant-scope checks into bounded
+structured query containers. Direct live requests confirmed that an outer
+tenant inside `filter` is blocked at `CRITICAL`, while an in-scope filter and a
+plain-text tenant mention remain allowed. Gateway package tests and 62
+AgentRange Python regression tests passed. On this Windows host, application
+control denied direct execution of the newly built standalone EXE; the replay
+ran the same committed Go source through `go run` with the existing Gateway
+configuration and audit store. A packaged EXE was not runtime-verified here.
+
+The new baseline/action pair is at
+`bench/runs/20260930-bbdb661-v1/full-pair/{baseline,action}`. Each mode exited
+0 with 5,200 valid observations (seed 1337, 80 attacks) at a target rate of
+1.5 events/second. The manifests have identical commit, arena, public corpus,
+and semantic truth hashes. All 19 containers matched; measured throughput
+ratio was 0.999. Only the four sidecars' inspection bypass changed between
+modes, and all four remain at `DC_BYPASS_INSPECTION=0`.
+
+The action replay confirmed 80/80 blocks before side effects, zero false
+positives, 5,120/5,120 normal business successes, and zero unavailable
+inspections. Inspection p95 was 62 ms and end-to-end p95 was 368.412 ms. The
+largest per-container CPU p95 increase was 0.43 percentage points. Host
+Gateway CPU p95 was 2.181% of logical host capacity; combined Gateway plus
+defense-container CPU p95 was 2.494%. Host and Docker sampling windows were
+complete, and all 12 local scorer gates passed.
+
+The scoped audit export has 99,215 events in exactly 5,200 chains. Every chain
+passes the JSON schema, every nonempty raw evidence reference resolves, and
+the 80 blocked-chain instance IDs exactly match observations whose block
+preceded the dangerous side effect. The generated `final-report.{json,md}`
+and `dashboard.html` are in the pair directory. These generated artifacts
+remain in the ignored local run directory. This is a public-arena local
+result, not an official hidden-set score.
+
 ## Latest merged-main paired replay
 
 The paired baseline and action on commit `cfa2b1d` both exited 0 with 5,200
