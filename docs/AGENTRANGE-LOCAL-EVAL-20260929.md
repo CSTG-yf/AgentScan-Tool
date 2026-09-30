@@ -5,14 +5,35 @@ not an official hidden-set result. The arena SHA-256 manifest is
 `bcd51ef41b2bfd2871a06e03e6835d26c41e45436e86121c722981b06dcc5d5b`.
 Ground truth was used by the offline scorer, not the online detector.
 
-The post-pair authorization hardening is tracked separately from the paired
-`bbdb661` result below. Live adversarial checks after that pair found structured
-query forms outside the public corpus contract: field/value predicates,
-tenant arrays, `$in`, and JSON-string filters. The follow-up implementation
-adds bounded parsing for these forms and blocks unknown predicates. Its
-targeted Gateway test and live request matrix pass; a fresh full 5,200-event
-pair is required before attributing the benchmark numbers below to the newer
-implementation.
+## Latest structured-query hardening and full pair
+
+Commit `f87d578` extends the bounded tenant authorization parser to
+field/value predicates, tenant arrays, `$in`, and JSON-string filters and
+blocks unknown predicates. Targeted Gateway tests and a live request matrix
+passed. Its separate full pair is at
+`bench/runs/20260930-f87d578-v1/full-pair/{baseline,action}`. Both modes exited
+0 with 5,200 valid, unique observations, 80 attacks, seed 1337, and target
+rate 1.5 events/second. Manifests have matching code, arena, public-corpus,
+and semantic-truth hashes. All 19 containers matched; measured throughput
+ratio was 0.999. Only the four sidecars' inspection bypass differed, and all
+four were restored to `DC_BYPASS_INSPECTION=0` for action.
+
+Action confirmed 80/80 blocks before dangerous side effects, zero false
+positives, 5,120/5,120 normal business successes, and zero unavailable
+inspections. Inspection p95 was 140 ms and end-to-end p95 was 554.515 ms,
+each with 5,200 samples. The largest per-container CPU p95 increase was
+0.67 percentage points. Host Gateway CPU p95 was 2.232% of logical host
+capacity; combined Gateway plus defense-container CPU p95 was 2.594%.
+Host and Docker windows were complete, and all 12 local scorer gates passed.
+
+The scoped audit export has 99,285 events in exactly 5,200 chains. Every chain
+passes the JSON schema, every nonempty raw evidence reference resolves, and
+the 80 blocked-chain instance IDs exactly match observations with a block
+before the side effect. The generated `final-report.{json,md}` and
+`dashboard.html` are in the pair directory. A concise competition delivery
+guide and interactive algorithm display are at [delivery](AGENTRANGE-DELIVERY.md)
+and [showcase](AGENTRANGE-SHOWCASE.html). These are local public-arena
+results, not official hidden-set scores.
 
 ## Nested tenant-scope fix and paired replay
 

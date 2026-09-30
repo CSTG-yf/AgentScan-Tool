@@ -2,6 +2,8 @@
 
 本文描述比赛分支当前可运行的实现。正式评分以官网发布的 Docker 靶场和隐藏样本为准；公开靶场的本地评测只用于复现与调参。
 
+可直接打开 [交互式算法展示页](AGENTRANGE-SHOWCASE.html) 查看阶段、场景与本轮 benchmark；靶场拓扑和复现命令见 [交付说明](AGENTRANGE-DELIVERY.md)。
+
 ## 输入与信任边界
 
 - 静态输入是靶场的 Compose、配置、Skill 和 MCP 源文件。`integration/static_inventory.py` 从 Compose 和源码发现资产，再用 Python AST、配置字段及风险规则检查可执行行为。`integration/risk_taxonomy.yaml` 给出风险类别和证据规则。
@@ -18,6 +20,25 @@
 5. `observe` 保留 `raw_action` 和 `would_block` 供调试，但不执行拒绝；`action` 才执行阻断。检查服务异常由适配配置的 `DC_FAIL_MODE` 决定，当前公开靶场 overlay 为 `open`，因此评测单独统计检查不可用次数，不能把失败放行算作正常检测。
 
 通用规则位于 `internal/gateway/rules.go` 和 `policies/guardrail/`；租户授权在 `internal/gateway/inspect.go`；流量选择、转发与阻断在 `cli/defenseclaw/agentrange_sidecar.py`。这些规则依赖可观察的行为和授权上下文，不匹配公开靶场的场景编号或实例 ID。
+
+工具调用的核心顺序可写为：
+
+```text
+principal_scope = authenticated_context(session, trace)
+targets, complete = bounded_structured_query_targets(tool_args)
+if principal_scope exists and (!complete or targets exceed principal_scope):
+    return block(reason="authorization")
+if mcp_server_or_tool_is_explicitly_blocked:
+    return block(reason="policy")
+if tool_is_explicitly_allowed:
+    return code_content_check_if_write_tool_else_allow()
+findings = scan_behavior_rules(tool_name, tool_args)
+decision = resolve(findings, connector_policy_mode)
+record(decision, rule_evidence, timing, actual_forwarding_result)
+return decision
+```
+
+`bounded_structured_query_targets` 只沿结构化查询键和租户字段遍历，最多 256 个节点、4 层；无法验证的查询返回 `complete=false`。该授权检查先于工具 allow-list，因此允许使用工具不等于允许访问其他租户。`observe` 会保留原始阻断判定，但只在 `action` 执行拒绝。
 
 ## 证据与评估
 

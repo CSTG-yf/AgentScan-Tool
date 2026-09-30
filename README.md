@@ -317,7 +317,7 @@ Windows CLI 的安装文档检查可直接运行：
 
 项目提供独立的 AgentRange 验证链路：项目侧适配器生成 Compose overlay，sidecar 检查运行流量，`integration/` 导出静态与运行时证据，`bench/` 汇总各模式结果，`dashboard/` 生成 HTML 报告。桌面“靶场控制”也可管理靶场与回放。
 
-需要 Docker Compose、原始靶场和 CLI/Gateway 环境。完整的网络配置、启动命令、回放前提、报告生成和停止步骤见 [AgentRange 操作指南](docs/AGENTRANGE.md)。
+需要 Docker Compose、原始靶场和 CLI/Gateway 环境。比赛交付入口见 [靶场、算法与评测说明](docs/AGENTRANGE-DELIVERY.md) 和 [离线算法展示页](docs/AGENTRANGE-SHOWCASE.html)；完整的网络配置、启动命令、回放前提、报告生成和停止步骤见 [AgentRange 操作指南](docs/AGENTRANGE.md)。
 
 | 入口或产物 | 用途 |
 | --- | --- |

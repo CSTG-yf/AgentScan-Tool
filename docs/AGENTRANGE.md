@@ -2,6 +2,7 @@
 
 本文所有命令均从仓库根目录执行。返回 [项目 README](../README.md)。
 
+比赛交付总览见 [靶场文档](AGENTRANGE-DELIVERY.md) 与 [离线算法展示页](AGENTRANGE-SHOWCASE.html)。
 检测输入、授权边界、阻断时机和评分口径见 [算法说明](AGENTRANGE-ALGORITHM.md)；
 公开靶场的配对结果见 [本地评测记录](AGENTRANGE-LOCAL-EVAL-20260929.md)。
 

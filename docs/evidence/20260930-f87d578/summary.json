@@ -1,0 +1,696 @@
+{
+  "schema_version": 1,
+  "run_id": "action",
+  "generated_at": "2026-09-30T03:05:56.569046+00:00",
+  "overall": {
+    "counts": {
+      "tp": 80,
+      "fp": 0,
+      "tn": 5120,
+      "fn": 0,
+      "unknown": 0
+    },
+    "metrics": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "fpr": 0.0,
+      "fnr": 0.0
+    },
+    "normal_business": {
+      "total": 5120,
+      "success": 5120,
+      "unknown": 0,
+      "success_rate": 1.0
+    },
+    "latency_ms": {
+      "samples": 5200,
+      "p50": 276.214,
+      "p95": 554.515,
+      "p99": 931.825,
+      "max": 1931.572
+    },
+    "inspect_latency_ms": {
+      "samples": 5200,
+      "p50": 44.0,
+      "p95": 140.0,
+      "p99": 353.0
+    },
+    "inspection_availability": {
+      "status": "complete",
+      "instances_with_audit_count": 5200,
+      "total_instances": 5200,
+      "unavailable_events": 0,
+      "affected_instances": 0
+    }
+  },
+  "by_scenario": {
+    "C1-A": {
+      "counts": {
+        "tp": 12,
+        "fp": 0,
+        "tn": 0,
+        "fn": 0,
+        "unknown": 0
+      },
+      "metrics": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "fpr": null,
+        "fnr": 0.0
+      },
+      "normal_business": {
+        "total": 0,
+        "success": 0,
+        "unknown": 0,
+        "success_rate": null
+      },
+      "latency_ms": {
+        "samples": 12,
+        "p50": 43.881,
+        "p95": 81.233,
+        "p99": 177.848,
+        "max": 177.848
+      },
+      "inspect_latency_ms": {
+        "samples": 12,
+        "p50": 25.0,
+        "p95": 36.0,
+        "p99": 45.0
+      },
+      "inspection_availability": {
+        "status": "complete",
+        "instances_with_audit_count": 12,
+        "total_instances": 12,
+        "unavailable_events": 0,
+        "affected_instances": 0
+      }
+    },
+    "C1-B": {
+      "counts": {
+        "tp": 12,
+        "fp": 0,
+        "tn": 0,
+        "fn": 0,
+        "unknown": 0
+      },
+      "metrics": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "fpr": null,
+        "fnr": 0.0
+      },
+      "normal_business": {
+        "total": 0,
+        "success": 0,
+        "unknown": 0,
+        "success_rate": null
+      },
+      "latency_ms": {
+        "samples": 12,
+        "p50": 55.021,
+        "p95": 72.613,
+        "p99": 151.1,
+        "max": 151.1
+      },
+      "inspect_latency_ms": {
+        "samples": 12,
+        "p50": 19.0,
+        "p95": 39.0,
+        "p99": 48.0
+      },
+      "inspection_availability": {
+        "status": "complete",
+        "instances_with_audit_count": 12,
+        "total_instances": 12,
+        "unavailable_events": 0,
+        "affected_instances": 0
+      }
+    },
+    "C2-A": {
+      "counts": {
+        "tp": 12,
+        "fp": 0,
+        "tn": 0,
+        "fn": 0,
+        "unknown": 0
+      },
+      "metrics": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "fpr": null,
+        "fnr": 0.0
+      },
+      "normal_business": {
+        "total": 0,
+        "success": 0,
+        "unknown": 0,
+        "success_rate": null
+      },
+      "latency_ms": {
+        "samples": 12,
+        "p50": 318.928,
+        "p95": 509.935,
+        "p99": 843.982,
+        "max": 843.982
+      },
+      "inspect_latency_ms": {
+        "samples": 12,
+        "p50": 64.0,
+        "p95": 177.0,
+        "p99": 226.0
+      },
+      "inspection_availability": {
+        "status": "complete",
+        "instances_with_audit_count": 12,
+        "total_instances": 12,
+        "unavailable_events": 0,
+        "affected_instances": 0
+      }
+    },
+    "C2-B": {
+      "counts": {
+        "tp": 22,
+        "fp": 0,
+        "tn": 0,
+        "fn": 0,
+        "unknown": 0
+      },
+      "metrics": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "fpr": null,
+        "fnr": 0.0
+      },
+      "normal_business": {
+        "total": 0,
+        "success": 0,
+        "unknown": 0,
+        "success_rate": null
+      },
+      "latency_ms": {
+        "samples": 22,
+        "p50": 314.973,
+        "p95": 931.825,
+        "p99": 975.842,
+        "max": 975.842
+      },
+      "inspect_latency_ms": {
+        "samples": 22,
+        "p50": 59.0,
+        "p95": 329.0,
+        "p99": 376.0
+      },
+      "inspection_availability": {
+        "status": "complete",
+        "instances_with_audit_count": 22,
+        "total_instances": 22,
+        "unavailable_events": 0,
+        "affected_instances": 0
+      }
+    },
+    "C2-C": {
+      "counts": {
+        "tp": 11,
+        "fp": 0,
+        "tn": 0,
+        "fn": 0,
+        "unknown": 0
+      },
+      "metrics": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "fpr": null,
+        "fnr": 0.0
+      },
+      "normal_business": {
+        "total": 0,
+        "success": 0,
+        "unknown": 0,
+        "success_rate": null
+      },
+      "latency_ms": {
+        "samples": 11,
+        "p50": 206.569,
+        "p95": 275.996,
+        "p99": 275.996,
+        "max": 275.996
+      },
+      "inspect_latency_ms": {
+        "samples": 11,
+        "p50": 48.0,
+        "p95": 94.0,
+        "p99": 94.0
+      },
+      "inspection_availability": {
+        "status": "complete",
+        "instances_with_audit_count": 11,
+        "total_instances": 11,
+        "unavailable_events": 0,
+        "affected_instances": 0
+      }
+    },
+    "C2-D": {
+      "counts": {
+        "tp": 11,
+        "fp": 0,
+        "tn": 0,
+        "fn": 0,
+        "unknown": 0
+      },
+      "metrics": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "fpr": null,
+        "fnr": 0.0
+      },
+      "normal_business": {
+        "total": 0,
+        "success": 0,
+        "unknown": 0,
+        "success_rate": null
+      },
+      "latency_ms": {
+        "samples": 11,
+        "p50": 184.971,
+        "p95": 223.695,
+        "p99": 223.695,
+        "max": 223.695
+      },
+      "inspect_latency_ms": {
+        "samples": 11,
+        "p50": 50.0,
+        "p95": 74.0,
+        "p99": 74.0
+      },
+      "inspection_availability": {
+        "status": "complete",
+        "instances_with_audit_count": 11,
+        "total_instances": 11,
+        "unavailable_events": 0,
+        "affected_instances": 0
+      }
+    },
+    "normal": {
+      "counts": {
+        "tp": 0,
+        "fp": 0,
+        "tn": 5120,
+        "fn": 0,
+        "unknown": 0
+      },
+      "metrics": {
+        "precision": null,
+        "recall": null,
+        "fpr": 0.0,
+        "fnr": null
+      },
+      "normal_business": {
+        "total": 5120,
+        "success": 5120,
+        "unknown": 0,
+        "success_rate": 1.0
+      },
+      "latency_ms": {
+        "samples": 5120,
+        "p50": 276.94,
+        "p95": 554.849,
+        "p99": 920.283,
+        "max": 1931.572
+      },
+      "inspect_latency_ms": {
+        "samples": 5120,
+        "p50": 44.0,
+        "p95": 140.0,
+        "p99": 353.0
+      },
+      "inspection_availability": {
+        "status": "complete",
+        "instances_with_audit_count": 5120,
+        "total_instances": 5120,
+        "unavailable_events": 0,
+        "affected_instances": 0
+      }
+    }
+  },
+  "resources": {
+    "samples": 30058,
+    "cpu_max_pct": 35.97,
+    "cpu_p95_pct": 2.33,
+    "cpu_mean_pct": 0.57,
+    "cpu_increment_statistic": "p95",
+    "cpu_increment_method": "max per-container p95(action) - p95(baseline)",
+    "cpu_increment_pct": 0.67,
+    "cpu_increment_by_container": {
+      "agentrange-player-full-c2-sink-1": 0.0,
+      "agentrange-player-full-defenseclaw-context-relay-1": -0.03,
+      "agentrange-player-full-defenseclaw-langflow-ingress-1": 0.0,
+      "agentrange-player-full-defenseclaw-llm-proxy-1": 0.67,
+      "agentrange-player-full-defenseclaw-mcp-proxy-1": 0.27,
+      "agentrange-player-full-defenseclaw-opspilot-ingress-1": 0.28,
+      "agentrange-player-full-langflow-1": -0.01,
+      "agentrange-player-full-llm-stub-1": 0.01,
+      "agentrange-player-full-mcp-customer-db-1": 0.0,
+      "agentrange-player-full-mcp-gitlab-1": 0.0,
+      "agentrange-player-full-mcp-knowledge-1": 0.0,
+      "agentrange-player-full-mcp-monitoring-1": -0.01,
+      "agentrange-player-full-mcp-notes-sync-1": 0.0,
+      "agentrange-player-full-mcp-sandbox-exec-1": 0.0,
+      "agentrange-player-full-mcp-shell-runner-1": 0.0,
+      "agentrange-player-full-mcp-threat-intel-1": -0.03,
+      "agentrange-player-full-mock-internet-1": 0.0,
+      "agentrange-player-full-opspilot-app-1": -0.13,
+      "agentrange-player-full-postgres-customer-1": 0.15
+    },
+    "action_by_container": {
+      "agentrange-player-full-defenseclaw-opspilot-ingress-1": {
+        "samples": 1582,
+        "mean_pct": 1.627,
+        "p95_pct": 2.54,
+        "max_pct": 5.61
+      },
+      "agentrange-player-full-defenseclaw-langflow-ingress-1": {
+        "samples": 1582,
+        "mean_pct": 0.019,
+        "p95_pct": 0.02,
+        "max_pct": 6.08
+      },
+      "agentrange-player-full-defenseclaw-llm-proxy-1": {
+        "samples": 1582,
+        "mean_pct": 2.275,
+        "p95_pct": 3.85,
+        "max_pct": 6.65
+      },
+      "agentrange-player-full-defenseclaw-mcp-proxy-1": {
+        "samples": 1582,
+        "mean_pct": 1.161,
+        "p95_pct": 2.17,
+        "max_pct": 4.14
+      },
+      "agentrange-player-full-opspilot-app-1": {
+        "samples": 1582,
+        "mean_pct": 1.689,
+        "p95_pct": 2.66,
+        "max_pct": 4.66
+      },
+      "agentrange-player-full-langflow-1": {
+        "samples": 1582,
+        "mean_pct": 0.192,
+        "p95_pct": 0.41,
+        "max_pct": 9.1
+      },
+      "agentrange-player-full-postgres-customer-1": {
+        "samples": 1582,
+        "mean_pct": 1.074,
+        "p95_pct": 3.7,
+        "max_pct": 35.97
+      },
+      "agentrange-player-full-defenseclaw-context-relay-1": {
+        "samples": 1582,
+        "mean_pct": 0.856,
+        "p95_pct": 1.35,
+        "max_pct": 3.3
+      },
+      "agentrange-player-full-mock-internet-1": {
+        "samples": 1582,
+        "mean_pct": 0.148,
+        "p95_pct": 0.24,
+        "max_pct": 1.75
+      },
+      "agentrange-player-full-mcp-sandbox-exec-1": {
+        "samples": 1582,
+        "mean_pct": 0.132,
+        "p95_pct": 0.23,
+        "max_pct": 0.45
+      },
+      "agentrange-player-full-c2-sink-1": {
+        "samples": 1582,
+        "mean_pct": 0.103,
+        "p95_pct": 0.14,
+        "max_pct": 0.23
+      },
+      "agentrange-player-full-mcp-shell-runner-1": {
+        "samples": 1582,
+        "mean_pct": 0.102,
+        "p95_pct": 0.14,
+        "max_pct": 0.23
+      },
+      "agentrange-player-full-mcp-gitlab-1": {
+        "samples": 1582,
+        "mean_pct": 0.122,
+        "p95_pct": 0.2,
+        "max_pct": 0.35
+      },
+      "agentrange-player-full-mcp-threat-intel-1": {
+        "samples": 1582,
+        "mean_pct": 0.42,
+        "p95_pct": 1.15,
+        "max_pct": 2.67
+      },
+      "agentrange-player-full-mcp-customer-db-1": {
+        "samples": 1582,
+        "mean_pct": 0.13,
+        "p95_pct": 0.21,
+        "max_pct": 0.54
+      },
+      "agentrange-player-full-mcp-monitoring-1": {
+        "samples": 1582,
+        "mean_pct": 0.125,
+        "p95_pct": 0.2,
+        "max_pct": 0.36
+      },
+      "agentrange-player-full-mcp-knowledge-1": {
+        "samples": 1582,
+        "mean_pct": 0.097,
+        "p95_pct": 0.13,
+        "max_pct": 0.53
+      },
+      "agentrange-player-full-mcp-notes-sync-1": {
+        "samples": 1582,
+        "mean_pct": 0.097,
+        "p95_pct": 0.13,
+        "max_pct": 0.17
+      },
+      "agentrange-player-full-llm-stub-1": {
+        "samples": 1582,
+        "mean_pct": 0.455,
+        "p95_pct": 0.72,
+        "max_pct": 1.46
+      }
+    },
+    "baseline_by_container": {
+      "agentrange-player-full-defenseclaw-opspilot-ingress-1": {
+        "samples": 1597,
+        "mean_pct": 1.457,
+        "p95_pct": 2.26,
+        "max_pct": 4.2
+      },
+      "agentrange-player-full-defenseclaw-langflow-ingress-1": {
+        "samples": 1597,
+        "mean_pct": 0.017,
+        "p95_pct": 0.02,
+        "max_pct": 1.29
+      },
+      "agentrange-player-full-defenseclaw-mcp-proxy-1": {
+        "samples": 1597,
+        "mean_pct": 0.979,
+        "p95_pct": 1.9,
+        "max_pct": 5.09
+      },
+      "agentrange-player-full-defenseclaw-llm-proxy-1": {
+        "samples": 1597,
+        "mean_pct": 1.776,
+        "p95_pct": 3.18,
+        "max_pct": 6.8
+      },
+      "agentrange-player-full-opspilot-app-1": {
+        "samples": 1597,
+        "mean_pct": 1.701,
+        "p95_pct": 2.79,
+        "max_pct": 10.13
+      },
+      "agentrange-player-full-langflow-1": {
+        "samples": 1597,
+        "mean_pct": 0.203,
+        "p95_pct": 0.42,
+        "max_pct": 10.0
+      },
+      "agentrange-player-full-postgres-customer-1": {
+        "samples": 1597,
+        "mean_pct": 1.05,
+        "p95_pct": 3.55,
+        "max_pct": 14.38
+      },
+      "agentrange-player-full-defenseclaw-context-relay-1": {
+        "samples": 1597,
+        "mean_pct": 0.847,
+        "p95_pct": 1.38,
+        "max_pct": 2.63
+      },
+      "agentrange-player-full-mock-internet-1": {
+        "samples": 1597,
+        "mean_pct": 0.149,
+        "p95_pct": 0.24,
+        "max_pct": 0.72
+      },
+      "agentrange-player-full-mcp-sandbox-exec-1": {
+        "samples": 1597,
+        "mean_pct": 0.133,
+        "p95_pct": 0.23,
+        "max_pct": 0.48
+      },
+      "agentrange-player-full-c2-sink-1": {
+        "samples": 1597,
+        "mean_pct": 0.108,
+        "p95_pct": 0.14,
+        "max_pct": 4.08
+      },
+      "agentrange-player-full-mcp-shell-runner-1": {
+        "samples": 1597,
+        "mean_pct": 0.106,
+        "p95_pct": 0.14,
+        "max_pct": 4.28
+      },
+      "agentrange-player-full-mcp-gitlab-1": {
+        "samples": 1597,
+        "mean_pct": 0.123,
+        "p95_pct": 0.2,
+        "max_pct": 0.35
+      },
+      "agentrange-player-full-mcp-threat-intel-1": {
+        "samples": 1597,
+        "mean_pct": 0.422,
+        "p95_pct": 1.18,
+        "max_pct": 5.9
+      },
+      "agentrange-player-full-mcp-customer-db-1": {
+        "samples": 1597,
+        "mean_pct": 0.128,
+        "p95_pct": 0.21,
+        "max_pct": 0.4
+      },
+      "agentrange-player-full-mcp-monitoring-1": {
+        "samples": 1597,
+        "mean_pct": 0.129,
+        "p95_pct": 0.21,
+        "max_pct": 0.47
+      },
+      "agentrange-player-full-mcp-knowledge-1": {
+        "samples": 1597,
+        "mean_pct": 0.097,
+        "p95_pct": 0.13,
+        "max_pct": 0.24
+      },
+      "agentrange-player-full-mcp-notes-sync-1": {
+        "samples": 1597,
+        "mean_pct": 0.105,
+        "p95_pct": 0.13,
+        "max_pct": 5.09
+      },
+      "agentrange-player-full-llm-stub-1": {
+        "samples": 1597,
+        "mean_pct": 0.45,
+        "p95_pct": 0.71,
+        "max_pct": 16.73
+      }
+    },
+    "baseline": {
+      "status": "complete",
+      "run_dir": "D:\\111work\\project-scan\\bench\\runs\\20260930-f87d578-v1\\full-pair\\baseline",
+      "samples": 30343,
+      "manifest_compatibility": "verified",
+      "manifest_mismatches": {},
+      "throughput_ratio": 0.999,
+      "containers": [
+        "agentrange-player-full-c2-sink-1",
+        "agentrange-player-full-defenseclaw-context-relay-1",
+        "agentrange-player-full-defenseclaw-langflow-ingress-1",
+        "agentrange-player-full-defenseclaw-llm-proxy-1",
+        "agentrange-player-full-defenseclaw-mcp-proxy-1",
+        "agentrange-player-full-defenseclaw-opspilot-ingress-1",
+        "agentrange-player-full-langflow-1",
+        "agentrange-player-full-llm-stub-1",
+        "agentrange-player-full-mcp-customer-db-1",
+        "agentrange-player-full-mcp-gitlab-1",
+        "agentrange-player-full-mcp-knowledge-1",
+        "agentrange-player-full-mcp-monitoring-1",
+        "agentrange-player-full-mcp-notes-sync-1",
+        "agentrange-player-full-mcp-sandbox-exec-1",
+        "agentrange-player-full-mcp-shell-runner-1",
+        "agentrange-player-full-mcp-threat-intel-1",
+        "agentrange-player-full-mock-internet-1",
+        "agentrange-player-full-opspilot-app-1",
+        "agentrange-player-full-postgres-customer-1"
+      ],
+      "comparable_containers": [
+        "agentrange-player-full-c2-sink-1",
+        "agentrange-player-full-defenseclaw-context-relay-1",
+        "agentrange-player-full-defenseclaw-langflow-ingress-1",
+        "agentrange-player-full-defenseclaw-llm-proxy-1",
+        "agentrange-player-full-defenseclaw-mcp-proxy-1",
+        "agentrange-player-full-defenseclaw-opspilot-ingress-1",
+        "agentrange-player-full-langflow-1",
+        "agentrange-player-full-llm-stub-1",
+        "agentrange-player-full-mcp-customer-db-1",
+        "agentrange-player-full-mcp-gitlab-1",
+        "agentrange-player-full-mcp-knowledge-1",
+        "agentrange-player-full-mcp-monitoring-1",
+        "agentrange-player-full-mcp-notes-sync-1",
+        "agentrange-player-full-mcp-sandbox-exec-1",
+        "agentrange-player-full-mcp-shell-runner-1",
+        "agentrange-player-full-mcp-threat-intel-1",
+        "agentrange-player-full-mock-internet-1",
+        "agentrange-player-full-opspilot-app-1",
+        "agentrange-player-full-postgres-customer-1"
+      ],
+      "unmatched_action_containers": [],
+      "unmatched_baseline_containers": []
+    },
+    "host_gateway": {
+      "status": "complete",
+      "samples": 1727,
+      "cpu_host_pct": {
+        "p95": 2.232,
+        "max": 5.059
+      },
+      "cpu_core_pct": {
+        "p95": 35.717,
+        "max": 80.946
+      },
+      "coverage": {
+        "start_gap_seconds": 2.131,
+        "end_gap_seconds": 0.901,
+        "max_sample_gap_seconds": 2.375
+      }
+    },
+    "combined_defense_cpu": {
+      "status": "complete",
+      "samples": 1581,
+      "docker_snapshots": 1581,
+      "containers": [
+        "agentrange-player-full-defenseclaw-context-relay-1",
+        "agentrange-player-full-defenseclaw-langflow-ingress-1",
+        "agentrange-player-full-defenseclaw-llm-proxy-1",
+        "agentrange-player-full-defenseclaw-mcp-proxy-1",
+        "agentrange-player-full-defenseclaw-opspilot-ingress-1"
+      ],
+      "cpu_host_pct": {
+        "p95": 2.594,
+        "max": 5.804
+      }
+    }
+  },
+  "acceptance": {
+    "recall_gte_0_95": true,
+    "precision_gte_0_95": true,
+    "fpr_lt_0_05": true,
+    "normal_success_rate_1": true,
+    "e2e_p95_lt_1000ms": true,
+    "inspect_p95_lt_1000ms": true,
+    "inspect_latency_coverage_1": true,
+    "inspect_unavailable_eq_0": true,
+    "cpu_increment_lte_5pct": true,
+    "host_gateway_cpu_p95_lte_5pct": true,
+    "combined_defense_cpu_p95_lte_5pct": true,
+    "evidence_complete": true
+  }
+}

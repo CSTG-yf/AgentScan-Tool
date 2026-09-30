@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentRange 算法与评测 | DefenseClaw</title>
+  <style>
+    :root {
+      --bg: #f3f5f3;
+      --surface: #ffffff;
+      --ink: #202a2d;
+      --muted: #647477;
+      --line: #d7dfdc;
+      --deep: #273337;
+      --teal: #087c6d;
+      --teal-pale: #e0f1ed;
+      --red: #ae4742;
+      --red-pale: #f9e9e6;
+      --blue: #3b6f95;
+      --blue-pale: #e8f0f5;
+      --amber: #96671c;
+      --amber-pale: #f7efe0;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font-family: Bahnschrift, "Microsoft YaHei UI", "Noto Sans CJK SC", sans-serif; letter-spacing: 0; }
+    button, a { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+    a { color: var(--teal); }
+    [hidden] { display: none !important; }
+    .topbar { min-height: 66px; padding: 12px 28px; display: flex; align-items: center; justify-content: space-between; gap: 18px; background: var(--deep); color: #f5f8f6; border-bottom: 3px solid var(--teal); }
+    .brand { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+    .brand strong { font-size: 18px; white-space: nowrap; }
+    .brand span { color: #b5c7c2; font-size: 12px; white-space: nowrap; }
+    .top-meta { display: flex; align-items: center; gap: 18px; color: #c1cfcb; font-size: 12px; }
+    .top-meta a { color: #a4dfcf; white-space: nowrap; }
+    .scope-tag { padding: 5px 8px; border: 1px solid #65817b; border-radius: 4px; white-space: nowrap; }
+    .app { display: grid; grid-template-columns: 226px minmax(0, 1fr); min-height: calc(100vh - 66px); }
+    .rail { padding: 28px 16px; border-right: 1px solid var(--line); background: #e9eeeb; }
+    .rail-title { margin: 0 12px 10px; color: var(--muted); font-size: 11px; font-weight: 700; }
+    .view-nav { display: grid; gap: 3px; }
+    .view-nav button { width: 100%; min-height: 42px; padding: 9px 12px; text-align: left; border: 0; border-left: 3px solid transparent; border-radius: 0 4px 4px 0; background: transparent; color: #536468; font-size: 14px; }
+    .view-nav button[aria-selected="true"] { color: var(--teal); background: var(--surface); border-left-color: var(--teal); font-weight: 700; }
+    .rail-provenance { margin: 32px 12px 0; padding-top: 16px; border-top: 1px solid #ced9d3; color: var(--muted); font-size: 11px; line-height: 1.65; }
+    .rail-provenance b { display: block; margin: 3px 0 11px; color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
+    main { width: min(1240px, 100%); padding: 30px 42px 70px; min-width: 0; }
+    .page-heading { display: flex; justify-content: space-between; gap: 20px; align-items: end; margin-bottom: 24px; }
+    .eyebrow { margin: 0 0 7px; color: var(--teal); font-size: 11px; font-weight: 800; }
+    h1 { margin: 0; font-size: 31px; line-height: 1.2; }
+    h2 { margin: 0; font-size: 21px; line-height: 1.3; }
+    h3 { margin: 0; font-size: 15px; }
+    p { line-height: 1.65; }
+    .heading-note { margin: 0; color: var(--muted); text-align: right; font-size: 12px; max-width: 360px; }
+    .section-rule { border-top: 1px solid var(--line); margin: 28px 0; }
+    .section-head { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; margin-bottom: 16px; }
+    .section-head p { margin: 0; color: var(--muted); font-size: 12px; }
+    .pipeline { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; position: relative; }
+    .pipeline::before { content: ""; position: absolute; top: 25px; left: 7%; right: 7%; height: 2px; background: #abc9bf; }
+    .stage-button { position: relative; z-index: 1; min-height: 111px; padding: 9px 12px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); text-align: left; }
+    .stage-button[aria-selected="true"] { border-color: var(--teal); box-shadow: inset 0 -3px var(--teal); }
+    .stage-no { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--teal); color: white; font-size: 12px; font-weight: 800; }
+    .stage-button strong { display: block; margin-top: 11px; font-size: 13px; }
+    .stage-button small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .stage-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .72fr); gap: 28px; margin-top: 14px; padding: 25px 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .stage-detail p { margin: 10px 0 0; color: #526265; font-size: 13px; }
+    .keyline { margin: 0 0 9px; color: var(--muted); font-size: 11px; font-weight: 700; }
+    .detail-list { margin: 11px 0 0; padding: 0; list-style: none; }
+    .detail-list li { padding: 8px 0; border-bottom: 1px solid #ebefec; font-size: 12px; }
+    .detail-list li:last-child { border-bottom: 0; }
+    .boundary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .boundary-block { border-top: 3px solid var(--blue); padding: 16px 0 0; }
+    .boundary-block.danger { border-top-color: var(--red); }
+    .boundary-block p { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+    code { font-family: Consolas, "Cascadia Code", monospace; font-size: .92em; overflow-wrap: anywhere; }
+    .scenario-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 25px; }
+    .scenario-list { display: grid; align-content: start; gap: 4px; }
+    .scenario-list button { width: 100%; min-height: 53px; padding: 10px 12px; border: 1px solid transparent; border-radius: 5px; background: transparent; text-align: left; color: var(--ink); }
+    .scenario-list button[aria-selected="true"] { background: var(--surface); border-color: var(--line); border-left: 3px solid var(--teal); }
+    .scenario-list span, .scenario-list strong { display: block; }
+    .scenario-list span { color: var(--muted); font-size: 11px; }
+    .scenario-list strong { margin-top: 3px; font-size: 13px; }
+    .scenario-detail { min-width: 0; padding: 26px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .scenario-detail header { display: flex; justify-content: space-between; gap: 14px; align-items: start; }
+    .scenario-detail h2 { margin-top: 5px; }
+    .pill { display: inline-block; width: max-content; max-width: 100%; padding: 5px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+    .pill.block { color: var(--red); background: var(--red-pale); }
+    .pill.allow { color: var(--teal); background: var(--teal-pale); }
+    .pill.neutral { color: var(--blue); background: var(--blue-pale); }
+    .scenario-summary { color: #536265; margin: 14px 0 18px; font-size: 13px; }
+    .fact-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .fact { min-width: 0; padding: 15px 12px 15px 0; }
+    .fact + .fact { border-left: 1px solid var(--line); padding-left: 13px; }
+    .fact span { display: block; color: var(--muted); font-size: 11px; }
+    .fact strong { display: block; margin-top: 5px; font-size: 19px; overflow-wrap: anywhere; }
+    .trace-heading { margin: 23px 0 11px; font-size: 14px; }
+    .trace-list { margin: 0; padding: 0 0 0 20px; list-style: none; border-left: 2px solid #c7dbd3; }
+    .trace-list li { position: relative; padding: 1px 0 14px 13px; font-size: 12px; }
+    .trace-list li::before { content: ""; position: absolute; left: -26px; top: 3px; width: 9px; height: 9px; border-radius: 50%; background: var(--blue); border: 2px solid var(--surface); }
+    .trace-list li.blocked::before { background: var(--red); }
+    .trace-list b { display: block; }
+    .trace-list span { color: var(--muted); overflow-wrap: anywhere; }
+    .scope-note { margin: 15px 0 0; color: var(--muted); font-size: 12px; }
+    .metric-strip { display: grid; grid-template-columns: repeat(6, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .metric { padding: 18px 12px; min-width: 0; }
+    .metric + .metric { border-left: 1px solid var(--line); }
+    .metric strong { display: block; font-size: 22px; overflow-wrap: anywhere; }
+    .metric span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .metric.primary strong { color: var(--teal); }
+    .metric.alert strong { color: var(--red); }
+    .metric.cool strong { color: var(--blue); }
+    .benchmark-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(290px, .75fr); gap: 34px; margin-top: 30px; }
+    .benchmark-grid > section { min-width: 0; }
+    .measure { margin: 19px 0; }
+    .measure-head { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+    .measure-track { height: 12px; margin-top: 9px; background: #dfe6e2; border-radius: 3px; overflow: hidden; }
+    .measure-fill { display: block; height: 100%; max-width: 100%; background: var(--teal); }
+    .measure-fill.blue { background: var(--blue); }
+    .measure-fill.amber { background: var(--amber); }
+    .small-copy { color: var(--muted); font-size: 12px; }
+    .method-list { padding: 0; margin: 13px 0 0; list-style: none; }
+    .method-list li { border-top: 1px solid var(--line); padding: 11px 0; color: #4e5d60; font-size: 12px; line-height: 1.55; }
+    .data-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+    .data-table th, .data-table td { border-bottom: 1px solid var(--line); padding: 10px 9px; vertical-align: top; }
+    .data-table th { color: var(--muted); font-weight: 700; background: #ebefec; }
+    .data-table td.numeric, .data-table th.numeric { text-align: right; white-space: nowrap; }
+    .table-wrap { overflow-x: auto; }
+    .gate-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 28px; }
+    .gate { display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+    .gate b { color: var(--teal); }
+    .gate b.fail { color: var(--red); }
+    .boundary-list { display: grid; gap: 0; }
+    .boundary-row { display: grid; grid-template-columns: 190px 1fr; gap: 18px; padding: 17px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+    .boundary-row strong { color: var(--deep); }
+    .boundary-row span { color: #526265; line-height: 1.6; }
+    .footer { margin-top: 35px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+    @media (max-width: 1050px) { main { padding-inline: 25px; } .metric-strip { grid-template-columns: repeat(3, 1fr); } .metric:nth-child(4) { border-left: 0; } .metric:nth-child(n+4) { border-top: 1px solid var(--line); } }
+    @media (max-width: 760px) {
+      .topbar { padding-inline: 15px; }
+      .brand { display: block; }
+      .brand strong, .brand span { display: block; }
+      .top-meta .scope-tag { display: none; }
+      .app { display: block; }
+      .rail { padding: 0 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .rail-title, .rail-provenance { display: none; }
+      .view-nav { display: flex; overflow-x: auto; gap: 4px; }
+      .view-nav button { min-width: 94px; text-align: center; border-left: 0; border-bottom: 3px solid transparent; border-radius: 0; white-space: nowrap; }
+      .view-nav button[aria-selected="true"] { border-left: 0; border-bottom-color: var(--teal); }
+      main { padding: 24px 15px 45px; }
+      .page-heading { display: block; }
+      .heading-note { margin-top: 8px; text-align: left; }
+      .pipeline { grid-template-columns: repeat(5, minmax(130px, 1fr)); overflow-x: auto; padding-bottom: 4px; }
+      .pipeline::before { display: none; }
+      .stage-detail, .boundary-grid, .scenario-layout, .benchmark-grid, .gate-grid { grid-template-columns: 1fr; }
+      .scenario-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .scenario-detail { padding: 18px; }
+      .fact-grid { grid-template-columns: repeat(2, 1fr); }
+      .fact:nth-child(3) { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); }
+      .fact:nth-child(4) { border-top: 1px solid var(--line); }
+      .metric-strip { grid-template-columns: repeat(2, 1fr); }
+      .metric:nth-child(odd) { border-left: 0; }
+      .metric:nth-child(4) { border-left: 1px solid var(--line); }
+      .metric:nth-child(n+3) { border-top: 1px solid var(--line); }
+      .boundary-row { grid-template-columns: 1fr; gap: 3px; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><strong>DefenseClaw</strong><span>AgentRange 算法与评测</span></div>
+    <div class="top-meta"><span class="scope-tag">本地公开靶场</span><a href="AGENTRANGE-DELIVERY.md">靶场文档</a></div>
+  </header>
+  <div class="app">
+    <aside class="rail">
+      <p class="rail-title">工作区</p>
+      <nav class="view-nav" aria-label="展示视图">
+        <button type="button" data-view="flow" aria-selected="true">决策流程</button>
+        <button type="button" data-view="scenarios" aria-selected="false">场景回放</button>
+        <button type="button" data-view="benchmark" aria-selected="false">Benchmark</button>
+        <button type="button" data-view="boundary" aria-selected="false">证据边界</button>
+      </nav>
+      <div class="rail-provenance">运行提交<b id="railCommit"></b>靶场 SHA-256<b id="railArena"></b>生成于<b id="railTime"></b></div>
+    </aside>
+    <main>
+      <section id="view-flow" data-panel>
+        <div class="page-heading"><div><p class="eyebrow">01 / DECISION ENGINE</p><h1>运行时决策</h1></div><p class="heading-note">在线检查只读取当前请求、工具参数、响应和已认证主体；离线标签只用于评分。</p></div>
+        <div class="pipeline" role="tablist" aria-label="算法阶段">
+          <button class="stage-button" type="button" role="tab" aria-controls="stageDetail" data-stage="inventory" aria-selected="true"><span class="stage-no">01</span><strong>资产发现</strong><small>Compose / AST / 配置</small></button>
+          <button class="stage-button" type="button" role="tab" aria-controls="stageDetail" data-stage="context" aria-selected="false"><span class="stage-no">02</span><strong>身份绑定</strong><small>JWT / 会话 / trace</small></button>
+          <button class="stage-button" type="button" role="tab" aria-controls="stageDetail" data-stage="inspect" aria-selected="false"><span class="stage-no">03</span><strong>前置检查</strong><small>请求 / 工具调用</small></button>
+          <button class="stage-button" type="button" role="tab" aria-controls="stageDetail" data-stage="decision" aria-selected="false"><span class="stage-no">04</span><strong>策略决策</strong><small>授权 / 行为规则</small></button>
+          <button class="stage-button" type="button" role="tab" aria-controls="stageDetail" data-stage="audit" aria-selected="false"><span class="stage-no">05</span><strong>执行与审计</strong><small>放行 / 拒绝 / 证据</small></button>
+        </div>
+        <div class="stage-detail" id="stageDetail" role="tabpanel"></div>
+        <div class="section-rule"></div>
+        <div class="section-head"><h2>两个信任边界</h2></div>
+        <div class="boundary-grid">
+          <div class="boundary-block"><h3>已认证主体</h3><p>入口 JWT 和服务端上下文决定租户范围。文本里的“我是管理员”或工具参数自带的身份声明不能提升权限。</p></div>
+          <div class="boundary-block danger"><h3>外部内容与副作用</h3><p>提示词、网页、Skill 内容和 MCP 参数都按不可信输入处理。高风险调用必须在转发到目标服务之前拒绝；响应阶段阻断不声称撤销既有副作用。</p></div>
+        </div>
+      </section>
+      <section id="view-scenarios" data-panel hidden>
+        <div class="page-heading"><div><p class="eyebrow">02 / SCENARIO EVIDENCE</p><h1>场景回放</h1></div><p class="heading-note">左侧是固定公开场景；右侧指标来自本轮 action 评分，节点只显示代表性审计链。</p></div>
+        <div class="scenario-layout"><div class="scenario-list" id="scenarioList" aria-label="选择场景"></div><div class="scenario-detail" id="scenarioDetail"></div></div>
+      </section>
+      <section id="view-benchmark" data-panel hidden>
+        <div class="page-heading"><div><p class="eyebrow">03 / PAIRED EVALUATION</p><h1>Benchmark</h1></div><p class="heading-note">同一提交、相同公开语料和 19 容器拓扑；baseline 旁路检查，action 执行检查。</p></div>
+        <div class="metric-strip" id="metricStrip"></div>
+        <div class="benchmark-grid">
+          <section><h2>时延与 CPU</h2><div id="measureRows"></div><p class="small-copy">条形长度为本地目标上限的比例；CPU 增量与宿主占用是不同测量口径。</p></section>
+          <section><h2>配对条件</h2><ul class="method-list" id="methodRows"></ul></section>
+        </div>
+        <div class="section-rule"></div>
+        <div class="section-head"><h2>场景明细</h2><p>攻击场景显示检出数；正常场景显示成功数。</p></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>场景</th><th class="numeric">实例</th><th class="numeric">成功/检出</th><th class="numeric">检查 p95</th><th class="numeric">端到端 p95</th></tr></thead><tbody id="scenarioTable"></tbody></table></div>
+        <div class="section-rule"></div>
+        <div class="section-head"><h2>本地验收门槛</h2><p>正式评分以官网附件和隐藏样本为准。</p></div><div class="gate-grid" id="gateRows"></div>
+      </section>
+      <section id="view-boundary" data-panel hidden>
+        <div class="page-heading"><div><p class="eyebrow">04 / INTERPRETATION</p><h1>证据边界</h1></div><p class="heading-note">数字可追溯到同一轮本地回放，但不外推到尚未核验的官方附件。</p></div>
+        <div class="boundary-list">
+          <div class="boundary-row"><strong>检测输入</strong><span>Sidecar 和 Gateway 使用运行时流量、主体上下文与策略。<code>scenario_id</code>、<code>gt.jsonl</code> 和管理轨迹接口只进入离线评分。</span></div>
+          <div class="boundary-row"><strong>阻断证据</strong><span>TP 需要真实拒绝先于危险副作用，且探针确认副作用未到达。缺少探针记为 unknown。</span></div>
+          <div class="boundary-row"><strong>攻击链</strong><span id="chainBoundary"></span></div>
+          <div class="boundary-row"><strong>静态标注</strong><span id="staticBoundary"></span></div>
+          <div class="boundary-row"><strong>故障策略</strong><span>当前侧车配置为检查不可用时放行；故障放行不算成功检测，本轮单独统计不可用次数。</span></div>
+          <div class="boundary-row"><strong>官方成绩</strong><span>官网匿名页当前未显示可核验的靶场附件下载入口；本页只能说明本地公开靶场结果，不能代表官方隐藏集或正式 CPU 测量口径。</span></div>
+        </div>
+      </section>
+      <p class="footer">DefenseClaw / AgentRange · 本地评测提交 <span id="footerCommit"></span></p>
+    </main>
+  </div>
+  <script id="showcase-data" type="application/json">__SHOWCASE_DATA__</script>
+  <script>
+    const data = JSON.parse(document.getElementById('showcase-data').textContent);
+    const text = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    const number = value => value == null ? '—' : Number(value).toLocaleString('zh-CN');
+    const ms = value => value == null ? '—' : `${Number(value).toFixed(Number(value) >= 100 ? 0 : 1)} ms`;
+    const pct = value => value == null ? '—' : `${(Number(value) * 100).toFixed(1)}%`;
+    const stageData = {
+      inventory: { title: '先确定防护范围', body: '从 Compose、配置、Skill 和 MCP 定义提取资产与依赖。Python AST 识别可执行调用和文件操作，保留源文件与行号。静态发现提供风险入口，但不替代运行时阻断。', input: ['Compose 服务与网络', 'Skill / MCP 源文件', '模型与策略配置'], output: ['资产和调用关系', '风险类型与证据位置', '需要布置的检查点'] },
+      context: { title: '把可信身份绑定到调用链', body: 'OpsPilot 入口读取已验证的主体和租户范围，关联会话与 trace，再向 LLM 和 MCP 调用传播。提示词与工具参数里的身份文字始终是数据。', input: ['已认证 JWT / 主体', '服务端租户范围', '会话与 trace'], output: ['可信主体上下文', '下游工具检查可用的授权范围', '外部声明无法覆盖的身份边界'] },
+      inspect: { title: '在转发前检查危险动作', body: '四个侧车覆盖 OpsPilot 入口、Langflow 入口、LLM 代理和 MCP 代理。请求、工具调用、工具响应及最终响应按阶段进入统一 inspect 接口。', input: ['HTTP 请求与工具参数', '提示词及外部内容', '目标路径和工具名'], output: ['阶段化检查事件', '检查耗时', '待执行的动作与目标'] },
+      decision: { title: '先授权，再匹配行为规则', body: '租户目标会沿结构化查询容器、条件数组和 JSON 字符串检查；越界或无法完整验证则阻断。随后匹配命令执行、敏感路径、外传和提示词注入等行为。', input: ['主体租户范围', '结构化查询目标', '通用行为规则'], output: ['allow / block', '风险类型和严重度', '规则与授权理由'] },
+      audit: { title: '用实际执行结果闭合证据', body: 'Action 的 block 在危险请求转发前返回 403。允许的流量继续执行并记录结果；审计按本轮时间窗与实例 ID 关联，离线探针验证副作用是否到达。', input: ['阻断/放行决定', '实际响应与副作用探针', '审计事件'], output: ['正常业务结果', '可追溯攻击链', '实例级 TP / FP / FN / unknown'] },
+    };
+    function showView(name) {
+      document.querySelectorAll('[data-view]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.view === name)));
+      document.querySelectorAll('[data-panel]').forEach(panel => { panel.hidden = panel.id !== `view-${name}`; });
+    }
+    document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.view)));
+    function showStage(name) {
+      const stage = stageData[name];
+      document.querySelectorAll('[data-stage]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.stage === name)));
+      document.getElementById('stageDetail').innerHTML = `<div><p class="keyline">当前阶段</p><h2>${text(stage.title)}</h2><p>${text(stage.body)}</p></div><div><p class="keyline">输入</p><ul class="detail-list">${stage.input.map(item => `<li>${text(item)}</li>`).join('')}</ul><p class="keyline" style="margin-top:18px">输出</p><ul class="detail-list">${stage.output.map(item => `<li>${text(item)}</li>`).join('')}</ul></div>`;
+    }
+    document.querySelectorAll('[data-stage]').forEach(button => button.addEventListener('click', () => showStage(button.dataset.stage)));
+    showStage('inventory');
+    document.getElementById('railCommit').textContent = data.commit || '—';
+    document.getElementById('railArena').textContent = data.arena_sha256 || '—';
+    document.getElementById('railTime').textContent = data.generated_at ? new Date(data.generated_at).toLocaleString('zh-CN') : '—';
+    document.getElementById('footerCommit').textContent = (data.commit || '').slice(0, 7);
+    const scenarios = data.scenarios || [];
+    document.getElementById('scenarioList').innerHTML = scenarios.map(item => `<button type="button" data-scenario="${text(item.id)}" aria-selected="false"><span>${text(item.id)}</span><strong>${text(item.name)}</strong></button>`).join('');
+    function showScenario(id) {
+      const item = scenarios.find(row => row.id === id);
+      if (!item) return;
+      document.querySelectorAll('[data-scenario]').forEach(button => button.setAttribute('aria-selected', String(button.dataset.scenario === id)));
+      const benign = item.class === 'benign';
+      const count = benign ? Number(item.counts.tn || 0) : Number(item.counts.tp || 0);
+      const total = benign ? count + Number(item.counts.fp || 0) : count + Number(item.counts.fn || 0);
+      const nodes = item.sample?.nodes || [];
+      const trace = nodes.length ? nodes.map(node => `<li class="${node.blocked ? 'blocked' : ''}"><b>${text(node.stage || 'event')}${node.blocked ? ' · 阻断' : ''}</b><span>${text(node.tool_name || node.http_path || node.asset_id || '')}</span><br><span>${text(node.raw_ref || '')}</span></li>`).join('') : '<li><b>完整审计链保存在本机评测目录</b><span>本页仅收录报告选取的代表性节点。</span></li>';
+      document.getElementById('scenarioDetail').innerHTML = `<header><div><p class="eyebrow">${text(item.id)} / ${text(item.target)}</p><h2>${text(item.name)}</h2></div><span class="pill ${benign ? 'allow' : 'block'}">${benign ? '正常放行' : '转发前阻断'}</span></header><p class="scenario-summary">${text(item.explanation)}。危险动作：${text(item.danger || '无')}。</p><div class="fact-grid"><div class="fact"><span>检查点</span><strong>${text(item.checkpoint)}</strong></div><div class="fact"><span>${benign ? '业务成功' : '攻击检出'}</span><strong>${number(count)} / ${number(total)}</strong></div><div class="fact"><span>检查 p95</span><strong>${ms(item.inspect_p95)}</strong></div><div class="fact"><span>端到端 p95</span><strong>${ms(item.e2e_p95)}</strong></div></div><h3 class="trace-heading">代表性审计节点</h3><ol class="trace-list">${trace}</ol><p class="scope-note">${item.sample ? `实例 ${text(item.sample.instance_id)}；完整原始事件和全部链未推送到 Git。` : '本场景未被摘要报告选为代表链，统计仍来自全部实例。'}</p>`;
+    }
+    document.querySelectorAll('[data-scenario]').forEach(button => button.addEventListener('click', () => showScenario(button.dataset.scenario)));
+    if (scenarios.length) showScenario(scenarios[0].id);
+    const counts = data.counts || {};
+    const normal = data.normal || {};
+    const metrics = [
+      ['攻击检出', `${number(counts.tp)} / ${number(Number(counts.tp || 0) + Number(counts.fn || 0))}`, 'primary'],
+      ['误报', number(counts.fp), 'alert'],
+      ['正常业务', `${number(normal.success)} / ${number(normal.total)}`, 'primary'],
+      ['检查 p95', ms(data.inspect?.p95), 'cool'],
+      ['端到端 p95', ms(data.e2e?.p95), 'cool'],
+      ['CPU 增量', data.cpu?.increment == null ? '—' : `${Number(data.cpu.increment).toFixed(2)} pp`, 'primary'],
+    ];
+    document.getElementById('metricStrip').innerHTML = metrics.map(([label, value, tone]) => `<div class="metric ${tone}"><strong>${text(value)}</strong><span>${text(label)}</span></div>`).join('');
+    const measures = [
+      ['检查时延 p95', data.inspect?.p95, 1000, ''],
+      ['端到端时延 p95', data.e2e?.p95, 1000, 'blue'],
+      ['逐容器 CPU p95 最大增量', data.cpu?.increment, 5, 'amber'],
+      ['Gateway CPU p95', data.cpu?.host_p95, 5, 'blue'],
+      ['联合防护 CPU p95', data.cpu?.combined_p95, 5, ''],
+    ];
+    document.getElementById('measureRows').innerHTML = measures.map(([label, value, limit, tone]) => `<div class="measure"><div class="measure-head"><strong>${text(label)}</strong><span>${value == null ? '—' : `${Number(value).toFixed(value < 10 ? 2 : 1)} ${limit === 1000 ? 'ms' : label.includes('增量') ? 'pp' : '%'}`} / ${limit} ${limit === 1000 ? 'ms' : label.includes('增量') ? 'pp' : '%'}</span></div><div class="measure-track"><span class="measure-fill ${tone}" style="width:${value == null ? 0 : Math.max(0, Math.min(100, Number(value) / limit * 100))}%"></span></div></div>`).join('');
+    const cpu = data.cpu || {};
+    const method = [
+      `5,200 个实例，其中 ${Number(counts.tp || 0) + Number(counts.fn || 0)} 个攻击；seed 1337，目标速率 1.5 实例/秒。`,
+      `Baseline 与 action 清单兼容：${data.provenance_verified ? '已验证' : '未验证'}；实际吞吐比 ${cpu.throughput_ratio == null ? '—' : Number(cpu.throughput_ratio).toFixed(3)}。`,
+      `${number(cpu.matched_containers)} 个相同容器配对；baseline 只旁路四个检查侧车。`,
+      `检查不可用 ${number(data.availability?.unavailable_events)} 次；检查延迟覆盖 ${number(data.inspect?.samples)} 个实例。`,
+      `静态标注集：资产 ${number(data.static?.asset?.tp)} 个、风险 ${number(data.static?.risk?.tp)} 个，范围为 ${text(data.static?.scope || '未确认')}。`,
+    ];
+    document.getElementById('methodRows').innerHTML = method.map(item => `<li>${text(item)}</li>`).join('');
+    document.getElementById('scenarioTable').innerHTML = scenarios.map(item => { const benign = item.class === 'benign'; const success = Number(benign ? item.counts.tn : item.counts.tp) || 0; const total = success + Number(benign ? item.counts.fp : item.counts.fn) || success; return `<tr><td>${text(item.id)} · ${text(item.name)}</td><td class="numeric">${number(total)}</td><td class="numeric">${number(success)}</td><td class="numeric">${ms(item.inspect_p95)}</td><td class="numeric">${ms(item.e2e_p95)}</td></tr>`; }).join('');
+    document.getElementById('gateRows').innerHTML = (data.gates || []).map(item => `<div class="gate"><span>${text(item.label)}</span><b class="${item.passed ? '' : 'fail'}">${item.passed ? '通过' : '未通过'}</b></div>`).join('');
+    document.getElementById('chainBoundary').textContent = `${number(data.runtime?.event_count)} 个审计事件、${number(data.runtime?.attack_chain_count)} 条链、${number(data.runtime?.blocked_chain_count)} 条阻断链；完整链经 schema 和证据引用校验。`;
+    document.getElementById('staticBoundary').textContent = `冻结本地标注集 ${number(data.static?.asset?.tp)} 个资产、${number(data.static?.risk?.tp)} 个风险；只验证该标注集，不代表隐藏样本泛化。`;
+  </script>
+</body>
+</html>
