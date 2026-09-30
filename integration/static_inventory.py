@@ -16,7 +16,6 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RANGE_ROOT = PROJECT_ROOT / "task" / "AgentRange-player-full"
-DEFAULT_CONTRACTS_DIR = PROJECT_ROOT / "integration" / "agentrange_contracts"
 DEFAULT_TAXONOMY = PROJECT_ROOT / "integration" / "risk_taxonomy.yaml"
 DEFAULT_OUTPUT = PROJECT_ROOT / "integration" / "reports" / "static-scan.json"
 
@@ -258,6 +257,73 @@ def discover_assets(root: Path) -> dict[str, dict[str, str]]:
     return discovered
 
 
+def discover_asset_edges(root: Path, discovered: dict[str, dict[str, str]]) -> list[dict[str, str]]:
+    """Infer relationships from deployment references, without labeled assets."""
+    compose = load_yaml(root / "docker-compose.yml")
+    services = compose.get("services") or {}
+    service_assets = {
+        asset["service_name"]: asset["id"]
+        for asset in discovered.values() if asset.get("service_name")
+    }
+    model_services: dict[str, set[str]] = {}
+    for service_name, service in services.items():
+        if not isinstance(service, dict):
+            continue
+        env = _environment(service)
+        asset_id = service_assets.get(service_name, "")
+        if not asset_id.startswith("agent."):
+            continue
+        model = _default_model(root / discovered[asset_id]["source"], env)
+        host = _hostname(env.get("LLM_BASE", ""))
+        if host and model and f"model.{model}" in discovered:
+            model_services.setdefault(host, set()).add(f"model.{model}")
+
+    edges: set[tuple[str, str, str, str]] = set()
+
+    def add(source: str, relation: str, target: str, evidence: str) -> None:
+        if source in discovered and target in discovered and source != target:
+            edges.add((source, relation, target, evidence))
+
+    for service_name, service in services.items():
+        if not isinstance(service, dict):
+            continue
+        source = service_assets.get(service_name, "")
+        if not source:
+            continue
+        env = _environment(service)
+        for key, value in env.items():
+            if key in {"LLM_BASE", "OPENAI_API_BASE"}:
+                for target in model_services.get(_hostname(value), ()):
+                    add(source, "uses", target, f"docker-compose.yml:services.{service_name}.environment.{key}")
+            elif key.startswith("MCP_"):
+                target = service_assets.get(_hostname(value), "")
+                add(source, "calls", target, f"docker-compose.yml:services.{service_name}.environment.{key}")
+            elif key == "LANGFLOW_BASE":
+                target = service_assets.get(_hostname(value), "")
+                add(source, "calls", target, f"docker-compose.yml:services.{service_name}.environment.{key}")
+            elif key == "POSTGRES_HOST":
+                target = service_assets.get(value, "")
+                add(source, "uses", target, f"docker-compose.yml:services.{service_name}.environment.{key}")
+        for network in service.get("networks") or []:
+            network_id = f"network.{str(network).removesuffix('-net')}"
+            add(source, "connects", network_id, f"docker-compose.yml:services.{service_name}.networks")
+
+        if source.startswith("agent."):
+            build = service.get("build") or {}
+            dockerfile = build.get("dockerfile", "Dockerfile") if isinstance(build, dict) else "Dockerfile"
+            context = build.get("context", ".") if isinstance(build, dict) else build
+            recipe = root / str(context) / str(dockerfile)
+            if recipe.is_file() and re.search(r"(?im)^\s*COPY\s+skills(?:/|\s)", recipe.read_text(encoding="utf-8")):
+                for asset_id in discovered:
+                    if asset_id.startswith("skill."):
+                        add(source, "can_load", asset_id, recipe.relative_to(root).as_posix())
+
+    return [
+        {"from": source, "relation": relation, "to": target, "evidence": evidence}
+        for source, relation, target, evidence in sorted(edges)
+    ]
+
+
 def compose_service_lines(path: Path) -> dict[int, str]:
     """Map Compose source lines to service names using YAML node locations."""
     root = yaml.compose(path.read_text(encoding="utf-8"))
@@ -390,12 +456,9 @@ def asset_for_source(source: str, assets: list[dict], *, service: str = "", disc
 
 def scan(
     range_root: Path,
-    contracts_dir: Path = DEFAULT_CONTRACTS_DIR,
     taxonomy_path: Path = DEFAULT_TAXONOMY,
 ) -> dict:
-    contract = load_yaml(contracts_dir / "assets.yaml")
     taxonomy = load_yaml(taxonomy_path)
-    assets = contract["assets"]
     discovered = discover_assets(range_root)
     compose_lines = compose_service_lines(range_root / "docker-compose.yml")
     findings = []
@@ -448,69 +511,36 @@ def scan(
                     }
                 )
 
-    expected_ids = {asset["id"] for asset in assets}
-    unexpected_assets = [discovered[asset_id] for asset_id in sorted(set(discovered) - expected_ids)]
     existing_assets = [
         {**discovered[asset_id], "observed_source": discovered[asset_id]["source"]}
         for asset_id in sorted(discovered)
     ]
-    asset_observations = [
-        {
-            "asset_id": asset["id"],
-            "type": asset.get("type", ""),
-            "source": asset["source"],
-            "source_exists": (range_root / asset["source"]).exists(),
-            "observed_by_source_probe": asset["id"] in discovered,
-            "observed_source": discovered.get(asset["id"], {}).get("source"),
-        }
-        for asset in assets
-    ]
-    required = {tuple(item) for item in taxonomy["acceptance"]["required_rule_assets"]}
-    detected = {(item["rule_id"], item["asset_id"]) for item in findings}
-    benign = set(taxonomy["acceptance"]["benign_controls"])
-    high_risk_benign = [item for item in findings if item["asset_id"] in benign and item["severity"] in {"HIGH", "CRITICAL"}]
     return {
         "schema_version": 1,
         "generated_at": datetime.now(UTC).isoformat(),
         "range_root": str(range_root),
-        "contracts_dir": str(contracts_dir),
         "assets": existing_assets,
-        "asset_edges": contract["edges"],
+        "asset_edges": discover_asset_edges(range_root, discovered),
         "findings": findings,
         "metrics": {
-            "asset_expected": len(assets),
             "asset_found": len(discovered),
-            "asset_coverage": round(len(expected_ids & set(discovered)) / len(assets), 6) if assets else 1.0,
-            "contract_asset_coverage": round(len(expected_ids & set(discovered)) / len(assets), 6) if assets else 1.0,
-            "asset_precision": None,
-            "asset_recall": None,
-            "asset_metric_status": "requires_independent_asset_ground_truth",
-            "required_risks": len(required),
-            "required_risks_detected": len(required & detected),
-            "risk_recall": round(len(required & detected) / len(required), 6) if required else 1.0,
-            "risk_precision": None,
-            "risk_metric_status": "contract_rule_coverage_only",
-            "high_risk_benign_findings": len(high_risk_benign),
+            "risk_findings": len(findings),
+            "metric_status": "requires_offline_ground_truth",
         },
-        "asset_observations": asset_observations,
-        "unexpected_assets": unexpected_assets,
-        "missing_required_risks": sorted([list(item) for item in required - detected]),
-        "benign_control_violations": high_risk_benign,
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--range-root", type=Path, default=DEFAULT_RANGE_ROOT)
-    parser.add_argument("--contracts-dir", type=Path, default=DEFAULT_CONTRACTS_DIR)
     parser.add_argument("--taxonomy", type=Path, default=DEFAULT_TAXONOMY)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
-    report = scan(args.range_root.resolve(), args.contracts_dir.resolve(), args.taxonomy.resolve())
+    report = scan(args.range_root.resolve(), args.taxonomy.resolve())
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"output": str(args.output), **report["metrics"]}, ensure_ascii=False, indent=2))
-    return 0 if not report["missing_required_risks"] and not report["benign_control_violations"] else 2
+    return 0
 
 
 if __name__ == "__main__":

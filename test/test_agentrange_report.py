@@ -86,6 +86,11 @@ class AgentRangeReportTest(unittest.TestCase):
 
     def test_dashboard_uses_scoped_action_metrics(self):
         data = build_data({
+            "static": {
+                "metrics": {"asset_found": 999, "required_risks_detected": 999},
+                "evaluation": {"scope": "local_frozen_fixture",
+                               "asset": {"tp": 27, "fn": 0}, "risk": {"tp": 13, "fn": 0}},
+            },
             "benchmark_provenance": {"action_run": "bench/runs/paired/action"},
             "benchmark": {
                 "overall": {
@@ -100,6 +105,10 @@ class AgentRangeReportTest(unittest.TestCase):
             },
         })
         self.assertEqual(data["modes"]["action"]["counts"]["total"], 10)
+        self.assertEqual(data["snapshot"][:2], [
+            {"label": "资产识别", "value": "27/27"},
+            {"label": "风险识别", "value": "13/13"},
+        ])
         score = {row["name"]: row for row in data["scorecard"]}
         self.assertEqual(score["恶意实例 Recall"]["actual"], "100.0%")
         self.assertEqual(score["阻断响应 p95"]["actual"], "100ms")

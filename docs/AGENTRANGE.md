@@ -164,7 +164,7 @@ successful block.
 
 | 产物 | 含义 |
 | --- | --- |
-| `integration/reports/static-scan.json` | 合同资产覆盖、静态风险命中及良性对照结果 |
+| `integration/reports/static-scan.json` | 独立发现的资产、关系图和静态风险证据；指标由离线 `static-eval.json` 计算 |
 | `integration/reports/rule-contract.json` | 通用规则对合同内攻击/良性样例的匹配与耗时检查 |
 | `bench/runs/<run-id>/action/runtime-events.jsonl`、`attack-chains.json` | 按该轮时间窗和实例 ID 导出的 AgentRange 事件与顺序关联链 |
 | `bench/results/summary.json` | 运行时统计，以及已有 baseline/observe/action 报告的汇总 |

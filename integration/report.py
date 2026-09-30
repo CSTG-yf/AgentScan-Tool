@@ -148,9 +148,9 @@ def build_report(root: Path = ROOT, benchmark_run_dir: Path | None = None) -> di
             "metrics": static_metrics,
             "evaluation": static_evaluation,
             "finding_count": len(static.get("findings", [])),
+            "graph_edge_count": len(static.get("asset_edges", [])),
             "high_critical": sum(item.get("severity") in {"HIGH", "CRITICAL"} for item in static.get("findings", [])),
-            "missing_required_risks": static.get("missing_required_risks", []),
-            "benign_control_violations": static.get("benign_control_violations", []),
+            "missed_labeled_risks": (static_evaluation.get("risk") or {}).get("missed", []),
         },
         "rules": {
             "passed": rules.get("passed"),
@@ -188,8 +188,8 @@ def to_markdown(report: dict[str, Any]) -> str:
         "",
         "## Static Inventory",
         "",
-        f"- Asset coverage: {(static.get('metrics') or {}).get('asset_coverage', 'not-run')}",
-        f"- Required risk recall: {(static.get('metrics') or {}).get('risk_recall', 'not-run')}",
+        f"- Discovered assets: {(static.get('metrics') or {}).get('asset_found', 'not-run')}",
+        f"- Inferred asset edges: {static.get('graph_edge_count', 0)}",
         f"- Findings: {static['finding_count']} (HIGH/CRITICAL: {static['high_critical']})",
         "",
     ]

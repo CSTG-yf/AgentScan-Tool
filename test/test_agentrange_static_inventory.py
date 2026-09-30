@@ -9,7 +9,6 @@ import unittest
 import yaml
 
 from integration.static_inventory import (
-    DEFAULT_CONTRACTS_DIR,
     DEFAULT_RANGE_ROOT,
     DEFAULT_TAXONOMY,
     asset_for_source,
@@ -19,7 +18,7 @@ from integration.static_inventory import (
     python_ast_matches,
     scan,
 )
-from integration.static_eval import evaluate
+from integration.static_eval import DEFAULT_TRUTH, evaluate
 
 
 class AgentRangeStaticInventoryTest(unittest.TestCase):
@@ -69,12 +68,9 @@ FROM python:3.12-slim
 ENV LANGFLOW_SUPERUSER_PASSWORD=separatepass
 """.lstrip(), encoding="utf-8")
 
-            contract_dir = root / "scanner-contract"
-            contract_dir.mkdir()
-            (contract_dir / "assets.yaml").write_text("assets: []\nedges: []\n", encoding="utf-8")
             scan_path = root / "scan.json"
             scan_path.write_text(
-                json.dumps(scan(arena, contracts_dir=contract_dir, taxonomy_path=DEFAULT_TAXONOMY)),
+                json.dumps(scan(arena, taxonomy_path=DEFAULT_TAXONOMY)),
                 encoding="utf-8",
             )
             digest = hashlib.sha256()
@@ -165,10 +161,7 @@ services:
             nested_skill.mkdir(parents=True)
             (nested_skill / "SKILL.md").write_text("# Audit\n", encoding="utf-8")
 
-            contract_dir = root / "scanner-contract"
-            contract_dir.mkdir()
-            (contract_dir / "assets.yaml").write_text("assets: []\nedges: []\n", encoding="utf-8")
-            report = scan(arena, contracts_dir=contract_dir, taxonomy_path=DEFAULT_TAXONOMY)
+            report = scan(arena, taxonomy_path=DEFAULT_TAXONOMY)
             report_path = root / "scan.json"
             report_path.write_text(json.dumps(report), encoding="utf-8")
 
@@ -196,6 +189,9 @@ services:
             self.assertEqual(discover_assets(arena)["agent.assistant"]["source"], "services/assistant/api/app.py")
             self.assertEqual(discover_assets(arena)["model.nova-v2"]["source"], "services/model/app.py")
             self.assertIn(renamed_mcp / "entrypoint.py", set(iter_sources(arena, discover_assets(arena))))
+            edges = {(row["from"], row["relation"], row["to"]) for row in report["asset_edges"]}
+            self.assertIn(("agent.assistant", "uses", "model.nova-v2"), edges)
+            self.assertIn(("agent.assistant", "calls", "mcp.sync-worker"), edges)
             compose_path = arena / "docker-compose.yml"
             compose_path.write_text(
                 compose_path.read_text(encoding="utf-8").replace(
@@ -329,39 +325,41 @@ networks:
                 "database.orders",
             )
 
-            (root / "assets.yaml").write_text(yaml.safe_dump({
-                "assets": [{"id": "agent.solo-agent", "type": "agent", "source": "stale/agent.py"}],
-                "edges": [],
-            }), encoding="utf-8")
             taxonomy = root / "taxonomy.yaml"
             taxonomy.write_text(yaml.safe_dump({
                 "rules": [{
                     "id": "AR-STATIC-SHELL-TRUE", "title": "Shell execution", "category": "command_execution",
                     "severity": "CRITICAL", "confidence": 0.96, "patterns": ["shell=True"],
                 }],
-                "acceptance": {"required_rule_assets": [], "benign_controls": []},
             }), encoding="utf-8")
-            result = scan(root, contracts_dir=root, taxonomy_path=taxonomy)
+            result = scan(root, taxonomy_path=taxonomy)
             self.assertIn(
                 ("AR-STATIC-SHELL-TRUE", "agent.solo-agent"),
                 {(finding["rule_id"], finding["asset_id"]) for finding in result["findings"]},
             )
 
-    def test_risk_attribution_uses_discovered_source_with_stale_contract(self):
+    def test_scan_does_not_use_labeled_contract(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            contract = yaml.safe_load((DEFAULT_CONTRACTS_DIR / "assets.yaml").read_text(encoding="utf-8"))
-            for asset in contract["assets"]:
-                if asset["id"] == "mcp.notes-sync":
-                    asset["source"] = "stale/notes_sync.py"
-            (root / "assets.yaml").write_text(yaml.safe_dump(contract), encoding="utf-8")
-
-            result = scan(DEFAULT_RANGE_ROOT, contracts_dir=root)
+            taxonomy = yaml.safe_load(DEFAULT_TAXONOMY.read_text(encoding="utf-8"))
+            taxonomy["acceptance"] = {
+                "required_rule_assets": [["invented-rule", "invented-asset"]],
+                "benign_controls": ["mcp.notes-sync"],
+            }
+            taxonomy_path = root / "taxonomy.yaml"
+            taxonomy_path.write_text(yaml.safe_dump(taxonomy), encoding="utf-8")
+            result = scan(DEFAULT_RANGE_ROOT, taxonomy_path=taxonomy_path)
+            control = scan(DEFAULT_RANGE_ROOT)
+            self.assertEqual(result["assets"], control["assets"])
+            self.assertEqual(result["asset_edges"], control["asset_edges"])
+            self.assertEqual(result["findings"], control["findings"])
+            self.assertNotIn("missing_required_risks", result)
+            self.assertNotIn("asset_observations", result)
             scan_path = root / "scan.json"
             scan_path.write_text(json.dumps(result), encoding="utf-8")
             evaluation = evaluate(
                 scan_path,
-                DEFAULT_CONTRACTS_DIR / "static-ground-truth.yaml",
+                DEFAULT_TRUTH,
                 DEFAULT_RANGE_ROOT,
             )
             self.assertEqual(evaluation["arena_sha256"], "bcd51ef41b2bfd2871a06e03e6835d26c41e45436e86121c722981b06dcc5d5b")

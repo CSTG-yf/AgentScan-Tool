@@ -79,7 +79,6 @@ def status_label(status: str) -> str:
 
 def build_data(report: dict[str, Any]) -> dict[str, Any]:
     static = report.get("static") or {}
-    static_metrics = static.get("metrics") or {}
     static_evaluation = static.get("evaluation") or {}
     evaluated_asset = static_evaluation.get("asset") or {}
     evaluated_risk = static_evaluation.get("risk") or {}
@@ -187,8 +186,8 @@ def build_data(report: dict[str, Any]) -> dict[str, Any]:
     return {
         "generated_at": report.get("generated_at", "not generated"),
         "snapshot": [
-            {"label": "资产覆盖", "value": f"{static_metrics.get('asset_found', 0)}/{static_metrics.get('asset_expected', 0)}"},
-            {"label": "必要风险", "value": f"{static_metrics.get('required_risks_detected', 0)}/{static_metrics.get('required_risks', 0)}"},
+            {"label": "资产识别", "value": f"{evaluated_asset.get('tp', 0)}/{evaluated_asset.get('tp', 0) + evaluated_asset.get('fn', 0)}" if static_scope_verified else "待评估"},
+            {"label": "风险识别", "value": f"{evaluated_risk.get('tp', 0)}/{evaluated_risk.get('tp', 0) + evaluated_risk.get('fn', 0)}" if static_scope_verified else "待评估"},
             {"label": "运行时事件", "value": runtime.get("event_count", 0)},
             {"label": "攻击链", "value": runtime.get("attack_chain_count", 0)},
             {"label": "阻断链", "value": runtime.get("blocked_chain_count", 0)},

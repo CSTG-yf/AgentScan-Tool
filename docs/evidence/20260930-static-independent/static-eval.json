@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "scope": "local_frozen_fixture",
+  "arena_sha256": "bcd51ef41b2bfd2871a06e03e6835d26c41e45436e86121c722981b06dcc5d5b",
+  "asset": {
+    "tp": 27,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "miss_rate": 0.0,
+    "missed": [],
+    "unexpected": []
+  },
+  "risk": {
+    "tp": 13,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "miss_rate": 0.0,
+    "missed": [],
+    "unexpected": []
+  },
+  "acceptance": {
+    "asset_miss_rate_lt_0_05": true,
+    "asset_precision_gte_0_99": true,
+    "risk_recall_gte_0_95": true,
+    "risk_precision_gte_0_95": true,
+    "risk_miss_rate_lt_0_05": true
+  }
+}

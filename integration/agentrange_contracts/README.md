@@ -7,7 +7,8 @@ from `/admin/trajectories` as a feature.
 
 ## Files
 
-- `assets.yaml`: scored asset denominator and relationship graph.
+- `assets.yaml`: reference asset list and graph for the local fixture; the scanner does not read it.
+- `static-ground-truth.yaml`: frozen labels consumed only by the offline static evaluator.
 - `scenario-matrix.yaml`: scenario intent, first dangerous action, observable
   evidence, and success/block criteria.
 - `range-event.schema.json`: normalized runtime evidence event.

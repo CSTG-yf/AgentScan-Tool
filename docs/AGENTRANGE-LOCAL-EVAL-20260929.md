@@ -1,5 +1,12 @@
 # AgentRange local evaluation (updated 2026-09-30)
 
+The static scanner was subsequently separated from the labeled asset contract:
+it now infers 33 sourced graph edges from Compose and Dockerfile references,
+and an offline evaluator alone reads frozen labels. The independent rescan
+still scores 27/27 assets and 13/13 risk pairs with no false positives or misses.
+The scan and evaluation are in
+[`docs/evidence/20260930-static-independent/`](evidence/20260930-static-independent/README.md).
+
 This is a local evaluation against the public `AgentRange-player-full` arena,
 not an official hidden-set result. The arena SHA-256 manifest is
 `bcd51ef41b2bfd2871a06e03e6835d26c41e45436e86121c722981b06dcc5d5b`.
