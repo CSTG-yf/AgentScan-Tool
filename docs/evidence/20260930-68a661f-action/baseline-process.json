@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "run_id": "baseline",
+  "mode": "baseline",
+  "started_at": "2026-09-30T03:47:36.327507+00:00",
+  "docker_available": true,
+  "docker_version": "29.8.0",
+  "command": [
+    "C:\\Users\\33263\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+    "D:\\111work\\project-scan\\bench\\agentrange_replay.py",
+    "--mode",
+    "baseline",
+    "--seed",
+    "1337",
+    "--total",
+    "5200",
+    "--malicious-target",
+    "80",
+    "--run-dir",
+    "D:\\111work\\project-scan\\bench\\runs\\20260930-68a661f-v1\\full-pair\\baseline",
+    "--range-root",
+    "D:\\111work\\project-scan\\task\\AgentRange-player-full",
+    "--target-rate",
+    "1.5"
+  ],
+  "returncode": 0,
+  "finished_at": "2026-09-30T04:45:26.534883+00:00"
+}

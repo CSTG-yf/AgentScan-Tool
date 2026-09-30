@@ -1,6 +1,44 @@
 # AgentRange local evaluation (updated 2026-09-30)
 
-The static scanner was subsequently separated from the labeled asset contract:
+## Latest independent static scan and action replay
+
+Commit `68a661f` separates static asset discovery from the frozen labeled
+fixture. The scanner now derives 27 assets and 33 sourced relationships from
+Compose, Dockerfile, configuration, Skill files, and source. The offline
+fixture scores 27/27 assets and 13/13 risk pairs, with no false positives or
+misses. The public arena hash is unchanged.
+
+The new action replay is at
+`bench/runs/20260930-68a661f-v2/full-pair/action`. It uses the completed
+baseline window from `bench/runs/20260930-68a661f-v1/full-pair/baseline`,
+copied unchanged into the new pair directory. Both manifests have the same
+commit, arena, public-corpus and semantic-truth hashes, with seed 1337,
+5,200 unique instances, 80 attacks, 19 matched containers, and a target
+rate of 1.5 instances/second. The measured throughput ratio is 0.999.
+
+The Gateway ran current source with the competition `DEFENSECLAW_HOME`,
+`guardrail.mode=action`, and the same token as the four sidecars. A live
+authenticated inspect request confirmed `mode=action` and runtime status
+`recorded` before replay. The action replay exited 0 and scored 80/80
+confirmed pre-side-effect blocks, zero false positives, 5,120/5,120 normal
+successes, and zero unknown instances. Inspection and end-to-end p95 were
+121 ms and 548.939 ms, each covering all 5,200 instances. Per-container
+CPU p95 increased by at most 1.59 percentage points; Gateway and combined
+defense host CPU p95 were 3.253% and 3.721%. The scoped audit export has
+99,221 events in exactly 5,200 chains; all 80 blocked chains match
+observations where the dangerous side effect did not occur.
+
+One local gate failed: 21 inspections were unavailable across five
+instances, including two attacks and three benign instances. Other checks
+blocked all attacks, but the sidecars' fail-open setting remains an
+availability risk. The scorer passes 11/12 local gates. C2-C and C2-D
+per-scenario end-to-end p95 exceeded one second despite the overall p95
+passing. The current [delivery guide](AGENTRANGE-DELIVERY.md),
+[interactive showcase](AGENTRANGE-SHOWCASE.html), and
+[lightweight evidence](evidence/20260930-68a661f-action/README.md)
+reflect this result. It is not an official hidden-set score.
+
+The static scanner is separated from the labeled asset contract:
 it now infers 33 sourced graph edges from Compose and Dockerfile references,
 and an offline evaluator alone reads frozen labels. The independent rescan
 still scores 27/27 assets and 13/13 risk pairs with no false positives or misses.

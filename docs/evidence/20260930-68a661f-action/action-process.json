@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "run_id": "action",
+  "mode": "action",
+  "started_at": "2026-09-30T07:03:25.124929+00:00",
+  "docker_available": true,
+  "docker_version": "29.8.0",
+  "command": [
+    "D:\\111work\\project-scan\\.venv\\Scripts\\python.exe",
+    "D:\\111work\\project-scan\\bench\\agentrange_replay.py",
+    "--mode",
+    "action",
+    "--seed",
+    "1337",
+    "--total",
+    "5200",
+    "--malicious-target",
+    "80",
+    "--run-dir",
+    "D:\\111work\\project-scan\\bench\\runs\\20260930-68a661f-v2\\full-pair\\action",
+    "--range-root",
+    "D:\\111work\\project-scan\\task\\AgentRange-player-full",
+    "--target-rate",
+    "1.5"
+  ],
+  "returncode": 0,
+  "finished_at": "2026-09-30T08:01:18.203878+00:00"
+}

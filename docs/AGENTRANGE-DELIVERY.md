@@ -1,6 +1,6 @@
 # AgentRange 靶场、算法与评测交付说明
 
-本文件对应比赛分支 `揭榜赛作品` 的运行时实现 `f87d5788adc69c0f7d40b2f0ec4356c5d95cd648`。完整源码位于本仓库；[算法说明](AGENTRANGE-ALGORITHM.md)解释规则和信任边界，[算法展示页](AGENTRANGE-SHOWCASE.html)可直接在浏览器打开，[评测摘要](evidence/20260930-f87d578/summary.json)和[检测报告](evidence/20260930-f87d578/final-report.md)可在远端分支查看。
+本文件对应比赛分支 `揭榜赛作品` 的公开靶场评测，检测源码提交为 `68a661f7c8e817e65ecfc83dd789dcefec9b2be7`。完整源码位于本仓库；[算法说明](AGENTRANGE-ALGORITHM.md)解释规则和信任边界，[算法展示页](AGENTRANGE-SHOWCASE.html)可直接在浏览器打开，[评测摘要](evidence/20260930-68a661f-action/summary.json)和[检测报告](evidence/20260930-68a661f-action/final-report.md)可在远端分支查看。
 
 ## 范围与靶场位置
 
@@ -40,7 +40,7 @@
 | `observe` | 记录潜在阻断但不拒绝请求 | 可选调试模式，不参与本轮 CPU 配对 |
 | `action` | 实际检查、阻断和副作用探针 | 四个侧车 `DC_BYPASS_INSPECTION=0` |
 
-Baseline 与 action 使用同一提交、靶场哈希、公开语料哈希、语义 Ground Truth 哈希、19 容器拓扑和 1.5 实例/秒目标速率。实际吞吐比为 `0.999`，评分器确认配对窗口完整、清单兼容且 19 个容器全部匹配。
+Baseline 使用 `bench/runs/20260930-68a661f-v1/full-pair/baseline` 已完成的资源窗口，本轮 action 使用 `bench/runs/20260930-68a661f-v2/full-pair/action`；交付目录中的 baseline 是前者的原样副本。两者使用同一检测源码提交、靶场哈希、公开语料哈希、语义 Ground Truth 哈希、19 容器拓扑和 1.5 实例/秒目标速率。实际吞吐比为 `0.999`，评分器确认配对窗口完整、清单兼容且 19 个容器全部匹配。
 
 实例级 TP 要求真实拒绝发生在危险副作用之前，且探针确认副作用未到达；缺少探针为 `unknown`，不能计作成功阻断。FP 是正常实例被安全决策误阻断。正常业务成功率独立于误报率统计。检查 p95 来自审计中的前/后检查调用；端到端 p95 包含应用、LLM/MCP 和代理耗时。Docker CPU 指标是每个同名容器 action p95 减 baseline p95 后的**最大增量**，单位为百分点；另报 Windows Gateway 在全部逻辑处理器中的 CPU p95，以及时间对齐后的 Gateway 加防护容器联合 p95。这不是 Docker Desktop 总开销，也不自动等于正式评委的 CPU 口径。
 
@@ -53,35 +53,36 @@ Baseline 与 action 使用同一提交、靶场哈希、公开语料哈希、语
 | 攻击检出 / 漏检 | 80 / 0，召回率 100% | 检出至少 95% |
 | 误报 / 未知 | 0 / 0，误报率 0% | 误报率低于 5% |
 | 正常业务成功 | 5,120 / 5,120 | 业务不中断 |
-| 检查 / 端到端 p95 | 140 / 554.515 ms，均覆盖 5,200 实例 | 小于 1,000 ms |
-| 逐容器 CPU p95 最大增量 | 0.67 个百分点 | 不超过 5 个百分点 |
-| Gateway / 联合 CPU p95 | 2.232% / 2.594% 宿主逻辑 CPU | 不超过 5% |
-| 检查不可用 | 0 | 0 |
-| 本地评分器门槛 | 12 / 12 通过 | 12 / 12 |
+| 检查 / 端到端 p95 | 121 / 548.939 ms，均覆盖 5,200 实例 | 小于 1,000 ms |
+| 逐容器 CPU p95 最大增量 | 1.59 个百分点 | 不超过 5 个百分点 |
+| Gateway / 联合 CPU p95 | 3.253% / 3.721% 宿主逻辑 CPU | 不超过 5% |
+| 检查不可用 | 21 次，影响 5 个实例 | 0 |
+| 本地评分器门槛 | 11 / 12 通过 | 12 / 12 |
 
-静态扫描与标注数据分离后，在同一靶场哈希下重新验证了 27 个资产和 13 个风险，均为 0 漏报、0 误报；扫描结果和离线评分见[独立静态证据包](evidence/20260930-static-independent/README.md)。这只证明该本地标注集的结果，不证明隐藏样本泛化。最接近端到端 1 秒阈值的是 C2-B，p95 为 `931.83 ms`，应在新靶场和新负载下重点复测。
+静态扫描与标注数据分离后，在同一靶场哈希下重新验证了 27 个资产、33 条带来源的关系边和 13 个风险，资产与风险均为 0 漏报、0 误报；扫描结果和离线评分见[独立静态证据包](evidence/20260930-static-independent/README.md)。这只证明该本地标注集的结果，不证明隐藏样本泛化。21 次检查不可用发生在 5 个实例，当前侧车故障策略为放行；虽然本轮 80 个攻击都由其他有效检查点完成阻断，故障放行仍是需要优先修复的可用性风险。
 
 | 场景 | 攻击数 | 检出 | 检查 p95 | 端到端 p95 |
 | --- | ---: | ---: | ---: | ---: |
-| C1-A Langflow 命令执行 | 12 | 12 | 36 ms | 81.23 ms |
-| C1-B Langflow 持久化 | 12 | 12 | 39 ms | 72.61 ms |
-| C2-A 跨租户读取 | 12 | 12 | 177 ms | 509.94 ms |
-| C2-B 敏感数据外传 | 22 | 22 | 329 ms | 931.83 ms |
-| C2-C 工具命令执行 | 11 | 11 | 94 ms | 276 ms |
-| C2-D 凭据读取/外传 | 11 | 11 | 74 ms | 223.69 ms |
-| 正常业务 | 5,120 | 5,120 成功 | 140 ms | 554.85 ms |
+| C1-A Langflow 命令执行 | 12 | 12 | 44 ms | 120.002 ms |
+| C1-B Langflow 持久化 | 12 | 12 | 82 ms | 117.212 ms |
+| C2-A 跨租户读取 | 12 | 12 | 231 ms | 672.779 ms |
+| C2-B 敏感数据外传 | 22 | 22 | 232 ms | 657.660 ms |
+| C2-C 工具命令执行 | 11 | 11 | 209 ms | 1,457.495 ms |
+| C2-D 凭据读取/外传 | 11 | 11 | 277 ms | 1,523.801 ms |
+| 正常业务 | 5,120 | 5,120 成功 | 116 ms | 545.898 ms |
 
-两种模式都以返回码 0 完成，各有 5,200 条有效、唯一的观测。Action 审计导出包含 99,285 个事件和恰好 5,200 条实例链；全部链符合 `attack-chain.schema.json`，全部非空原始证据引用可解析，80 条阻断链的实例 ID 与实际拒绝且副作用未到达的观测完全一致。
+两种模式都以返回码 0 完成，各有 5,200 条有效、唯一的观测。Action 审计导出包含 99,221 个事件和恰好 5,200 条实例链；80 条阻断链的实例 ID 与实际拒绝且副作用未到达的观测完全一致。上述场景 p95 是小样本分组，C2-C、C2-D 超过 1 秒；整体端到端 p95 仍小于 1 秒。不可用门槛没有通过，不应把本轮称为全指标通过。
 
 ## 复现与交付文件
 
-先按 [操作指南](AGENTRANGE.md)完成 Gateway 配置、适配 overlay 和 Compose 启动，并确认网关为 `action` 策略模式。下面的命令从仓库根目录执行；完整资源基线要先将四个侧车旁路设为 `1`，回放结束后重新创建侧车并设为 `0`。不要在 baseline 结束前切换，也不要用一次快照代替窗口采样。
+先按 [操作指南](AGENTRANGE.md)完成 Gateway 配置、适配 overlay 和 Compose 启动。Gateway 启动进程必须显式设置 `DEFENSECLAW_HOME` 为本次比赛专用配置目录，并与 sidecar 使用同一 `DEFENSECLAW_GATEWAY_TOKEN`；启动输出应显示 `Guardrail: mode=action`。回放前向 `/api/v1/inspect/request` 做认证请求，确认响应中的 `mode=action` 和 `X-DefenseClaw-Runtime-Status: recorded`。若只设置令牌而未设置配置目录，Gateway 可能读取用户默认 `observe` 配置，所得观测不能作为 action 成绩。下面的命令从仓库根目录执行；完整资源基线要先将四个侧车旁路设为 `1`，回放结束后重新创建侧车并设为 `0`。不要在 baseline 结束前切换，也不要用一次快照代替窗口采样。
 
 ```powershell
 $run = '.\bench\runs\my-pair'
 $gatewayPid = (Get-NetTCPConnection -LocalPort 18970 -State Listen | Select-Object -First 1).OwningProcess
 $auditDb = Join-Path $env:DEFENSECLAW_HOME 'audit.db'
-$composeArgs = @('--env-file', '.\task\AgentRange-player-full\.env.example', '-f', '.\task\AgentRange-player-full\docker-compose.yml', '-f', '.\task\agentrange-adapter\docker-compose.defenseclaw.override.yml')
+$repo = (Get-Location).Path
+$composeArgs = @('--env-file', "$repo/task/AgentRange-player-full/.env.example", '-f', "$repo/task/AgentRange-player-full/docker-compose.yml", '-f', "$repo/task/agentrange-adapter/docker-compose.defenseclaw.override.yml")
 $sidecars = @('defenseclaw-opspilot-ingress', 'defenseclaw-llm-proxy', 'defenseclaw-mcp-proxy', 'defenseclaw-langflow-ingress')
 .\.venv\Scripts\python.exe .\bench\agentrange_benchmark.py prepare-all --output-root $run
 $env:DC_BYPASS_INSPECTION = '1'
@@ -97,10 +98,10 @@ docker compose @composeArgs up -d --no-deps --force-recreate @sidecars
 .\.venv\Scripts\python.exe .\dashboard\build_dashboard.py --input "$run\final-report.json" --output "$run\dashboard.html"
 ```
 
-远端分支包含源码、算法说明、此文档、展示页、[轻量证据包](evidence/20260930-f87d578/)与生成脚本。完整原始观测、资源序列和攻击链保存在本机 `bench/runs/20260930-f87d578-v1/full-pair/`（该目录被 Git 忽略）；大文件没有上传到 Git。要审计完整事件，需在本机打开该目录。当前结果不覆盖官网隐藏集、官方附件版本或未做运行时探测的其他通用连接器。
+远端分支包含源码、算法说明、此文档、展示页、[轻量证据包](evidence/20260930-68a661f-action/)与生成脚本。完整原始观测、资源序列和攻击链保存在本机 `bench/runs/20260930-68a661f-v2/full-pair/`（该目录被 Git 忽略）；大文件没有上传到 Git。要审计完整事件，需在本机打开该目录。当前结果不覆盖官网隐藏集、官方附件版本或未做运行时探测的其他通用连接器。
 
 展示页由本轮报告再生成，不需要开发服务器：
 
 ```powershell
-.\.venv\Scripts\python.exe .\dashboard\build_algorithm_showcase.py --report .\bench\runs\20260930-f87d578-v1\full-pair\final-report.json --output .\docs\AGENTRANGE-SHOWCASE.html
+.\.venv\Scripts\python.exe .\dashboard\build_algorithm_showcase.py --report .\bench\runs\20260930-68a661f-v2\full-pair\final-report.json --output .\docs\AGENTRANGE-SHOWCASE.html
 ```
