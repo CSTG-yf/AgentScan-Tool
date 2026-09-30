@@ -26,6 +26,7 @@ package detection
 
 import (
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"sync"
 	"time"
@@ -84,7 +85,7 @@ type EvidenceSpec struct {
 // policy engine: every recorded detection flows into the unified
 // decision → response → attack-chain pipeline.
 type Engine struct {
-	evaluateMu   sync.Mutex
+	evaluateMu   [64]sync.Mutex
 	store        *audit.Store
 	rules        []Rule
 	configMu     sync.Mutex
@@ -179,11 +180,11 @@ func (e *Engine) evaluateEvent(eventID int64, evaluationJobID string) error {
 	}
 	inspection := event.Attributes["inspection_status"] == "complete"
 	if inspection {
-		// Serialize inspection retries without changing concurrency of the
-		// existing OS/hook/proxy pipeline. Re-read the durable checkpoint
-		// after acquiring the lock because another retry may have finished.
-		e.evaluateMu.Lock()
-		defer e.evaluateMu.Unlock()
+		// Keep retries and correlated events in one session ordered without
+		// forcing unrelated AgentRange sessions through a global queue.
+		lock := e.inspectionLock(event)
+		lock.Lock()
+		defer lock.Unlock()
 		event, ok, err = e.store.GetRuntimeEvent(eventID)
 		if err != nil {
 			return err
@@ -225,6 +226,22 @@ func (e *Engine) evaluateEvent(eventID int64, evaluationJobID string) error {
 		return e.store.MarkRuntimeInspectionEvaluated(eventID)
 	}
 	return nil
+}
+
+func (e *Engine) inspectionLock(event audit.BehaviorEvent) *sync.Mutex {
+	key := event.SessionID
+	if key == "" {
+		key = event.TraceID
+	}
+	if key == "" {
+		key = event.CanonicalAgentID
+	}
+	if key == "" {
+		return &e.evaluateMu[uint64(event.ID)%uint64(len(e.evaluateMu))]
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	return &e.evaluateMu[h.Sum32()%uint32(len(e.evaluateMu))]
 }
 
 // loadMaliciousResources serves the static-fusion cache with a TTL so
