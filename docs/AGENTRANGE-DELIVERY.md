@@ -77,6 +77,12 @@ Baseline 使用 `bench/runs/20260930-68a661f-v1/full-pair/baseline` 已完成的
 
 两种模式都以返回码 0 完成，各有 5,200 条有效、唯一的观测。Action 审计导出包含 99,221 个事件和恰好 5,200 条实例链；80 条阻断链的实例 ID 与实际拒绝且副作用未到达的观测完全一致。上述场景 p95 是小样本分组，C2-C、C2-D 超过 1 秒；整体端到端 p95 仍小于 1 秒。不可用门槛没有通过，不应把本轮称为全指标通过。
 
+### 检查可用性的定向修复（2026-09-30）
+
+上述 11/12 是检测源码 `68a661f` 的完整回放结果，**没有因后续代码修改而改写**。原始事件显示 21 次 `urlopen error timed out` 集中在 5 个实例：`B-OPS-857` 7 次、`B-RD-896` 8 次、`B-SEC-910` 4 次、`C2-C-856` 和 `C2-D-895` 各 1 次。超时期间 Gateway 进程多次接近占满一个逻辑核心，相关检查在超时后才集中记入审计。运行时引擎原先用一把全局锁串行处理所有检查事件，是可确认的排队点；现有证据尚不能证明它是这些超时的唯一原因。
+
+提交 `b3af57f` 将该锁改为按会话分片：不同会话可并行评估；同一会话及同一事件重试仍串行，并重读持久化完成标记。只执行了定向测试 `go test ./internal/detection -run TestInspectionEvaluationUsesSessionScopedLocks -count=1`，结果通过；测试覆盖独立会话并行、并发重试不重复评估。详细记录见[定向验证说明](evidence/20260930-b3af57f-targeted/README.md)。本次**未运行新的 5,200 实例回放，也未测试其他指标是否回退**，因此“检查不可用为 0”仍未被实测证明，不能把本地评分改为 12/12。
+
 ## 复现与交付文件
 
 先按 [操作指南](AGENTRANGE.md)完成 Gateway 配置、适配 overlay 和 Compose 启动。Gateway 启动进程必须显式设置 `DEFENSECLAW_HOME` 为本次比赛专用配置目录，并与 sidecar 使用同一 `DEFENSECLAW_GATEWAY_TOKEN`；启动输出应显示 `Guardrail: mode=action`。回放前向 `/api/v1/inspect/request` 做认证请求，确认响应中的 `mode=action` 和 `X-DefenseClaw-Runtime-Status: recorded`。若只设置令牌而未设置配置目录，Gateway 可能读取用户默认 `observe` 配置，所得观测不能作为 action 成绩。下面的命令从仓库根目录执行；完整资源基线要先将四个侧车旁路设为 `1`，回放结束后重新创建侧车并设为 `0`。不要在 baseline 结束前切换，也不要用一次快照代替窗口采样。
