@@ -13,7 +13,7 @@
 
 1. 静态盘点先定位资产及调用关系。对 Python 工具定义、`shell=True`、调用者可控的文件路径等使用 AST 识别，避免把注释或普通字符串误当成可执行代码；配置与提示词规则保留原文件、行号和证据。静态输出按资产聚合风险，不代替运行时阻断。
 2. Sidecar 在请求转发前选择检查点：用户/应用输入走 request；MCP `tools/call` 走 tool；LLM 返回的工具调用在代理返回给应用前再次走 tool。Gateway 先检查主体授权边界，再检查显式工具策略和通用规则包，最后按连接器的运行模式给出 `action`、`raw_action`、严重度和规则证据。
-3. 授权检查针对结构化工具参数中的 `tenant`、`tenant_id`，并沿 `filter`、`filters`、`query`、`where`、`params`、`parameters` 查询容器检查嵌套目标。任一目标超出已认证主体租户即阻断；遍历上限为 256 个节点、4 层，无法完整验证时也阻断。普通文本与无关 metadata 不作为租户目标。
+3. 授权检查针对结构化工具参数中的 `tenant`、`tenant_id`、`tenantId`，并沿 `filter`、`filters`、`query`、`where`、`params`、`parameters` 查询容器检查嵌套目标。常见的 `field/value`、`key/value`、`column/value` 条件、数组以及 JSON 字符串查询会被解析；支持安全的等值和集合匹配，否定或未知操作符按无法验证处理并阻断。任一目标超出已认证主体租户即阻断；遍历上限为 256 个节点、4 层，无法完整验证时也阻断。普通文本与无关 metadata 不作为租户目标。
 4. Sidecar 收到 `block` 时在转发前返回 403，并记录检查、阻断和运行结果。允许的请求转发后还要检查工具响应或最终响应；响应阻断只禁止该响应送达调用者，不能声称已撤销上游此前产生的副作用。
 5. `observe` 保留 `raw_action` 和 `would_block` 供调试，但不执行拒绝；`action` 才执行阻断。检查服务异常由适配配置的 `DC_FAIL_MODE` 决定，当前公开靶场 overlay 为 `open`，因此评测单独统计检查不可用次数，不能把失败放行算作正常检测。
 

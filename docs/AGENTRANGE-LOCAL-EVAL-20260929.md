@@ -5,6 +5,15 @@ not an official hidden-set result. The arena SHA-256 manifest is
 `bcd51ef41b2bfd2871a06e03e6835d26c41e45436e86121c722981b06dcc5d5b`.
 Ground truth was used by the offline scorer, not the online detector.
 
+The post-pair authorization hardening is tracked separately from the paired
+`bbdb661` result below. Live adversarial checks after that pair found structured
+query forms outside the public corpus contract: field/value predicates,
+tenant arrays, `$in`, and JSON-string filters. The follow-up implementation
+adds bounded parsing for these forms and blocks unknown predicates. Its
+targeted Gateway test and live request matrix pass; a fresh full 5,200-event
+pair is required before attributing the benchmark numbers below to the newer
+implementation.
+
 ## Nested tenant-scope fix and paired replay
 
 The `bbdb661` Gateway extends authenticated tenant-scope checks into bounded

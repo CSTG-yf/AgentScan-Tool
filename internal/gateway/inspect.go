@@ -538,7 +538,7 @@ func inspectToolAuthorizationContext(req *ToolInspectRequest) []RuleFinding {
 	if !complete {
 		return []RuleFinding{{
 			RuleID:     "AUTH-TENANT-SCOPE-UNVERIFIED",
-			Title:      "Tool query exceeds tenant-scope inspection limit",
+			Title:      "Tool query tenant scope could not be verified",
 			Severity:   "CRITICAL",
 			Confidence: 1,
 			Evidence:   fmt.Sprintf("principal=%s allowed_tenant=%s", principal, allowedTenant),
@@ -580,25 +580,65 @@ func crossTenantToolArg(args map[string]interface{}, allowedTenant string) (stri
 		stack = stack[:len(stack)-1]
 		switch value := current.value.(type) {
 		case map[string]interface{}:
-			for _, key := range []string{"tenant", "tenant_id"} {
-				if tenant, ok := value[key].(string); ok {
-					tenant = strings.TrimSpace(tenant)
-					if tenant != "" && tenant != allowedTenant {
-						return tenant, true
+			for _, key := range []string{"tenant", "tenant_id", "tenantId"} {
+				if target, ok := value[key]; ok {
+					if tenant, complete := tenantValueOutsideScope(target, allowedTenant, 0); !complete || tenant != "" {
+						return tenant, complete
+					}
+				}
+			}
+			if current.depth > 0 {
+				for _, key := range []string{"field", "key", "column", "path"} {
+					field, ok := value[key].(string)
+					if !ok || !isTenantFieldName(field) {
+						continue
+					}
+					operator, _ := value["op"].(string)
+					if operator == "" {
+						operator, _ = value["operator"].(string)
+					}
+					operator = strings.ToLower(strings.TrimSpace(operator))
+					if operator != "" && operator != "eq" && operator != "=" && operator != "==" && operator != "in" {
+						return "", false
+					}
+					for _, operandKey := range []string{"value", "values", "operand"} {
+						if operand, exists := value[operandKey]; exists {
+							if operator == "in" {
+								if _, ok := operand.([]interface{}); !ok {
+									return "", false
+								}
+							}
+							if tenant, complete := tenantValueOutsideScope(operand, allowedTenant, 0); !complete || tenant != "" {
+								return tenant, complete
+							}
+							break
+						}
+						if operandKey == "operand" {
+							return "", false
+						}
 					}
 				}
 			}
 			if current.depth >= maxDepth {
 				for _, key := range queryKeys {
-					switch value[key].(type) {
-					case map[string]interface{}, []interface{}:
-						return "", false
+					if child, ok := value[key]; ok {
+						_, structured, complete := structuredQueryChild(child)
+						if !complete || structured {
+							return "", false
+						}
 					}
 				}
 				continue
 			}
 			for _, key := range queryKeys {
 				if child, ok := value[key]; ok {
+					child, structured, complete := structuredQueryChild(child)
+					if !complete {
+						return "", false
+					}
+					if !structured {
+						continue
+					}
 					if len(stack) < maxNodes {
 						stack = append(stack, node{value: child, depth: current.depth + 1})
 					} else {
@@ -623,6 +663,79 @@ func crossTenantToolArg(args map[string]interface{}, allowedTenant string) (stri
 		}
 	}
 	return "", !truncated && len(stack) == 0
+}
+
+func isTenantFieldName(field string) bool {
+	parts := strings.Split(strings.TrimSpace(field), ".")
+	switch parts[len(parts)-1] {
+	case "tenant", "tenant_id", "tenantId":
+		return true
+	}
+	return false
+}
+
+func tenantValueOutsideScope(value interface{}, allowedTenant string, depth int) (string, bool) {
+	if depth >= 4 {
+		return "", false
+	}
+	switch typed := value.(type) {
+	case string:
+		tenant := strings.TrimSpace(typed)
+		if tenant != "" && tenant != allowedTenant {
+			return tenant, true
+		}
+		return "", true
+	case []interface{}:
+		if len(typed) > 256 {
+			return "", false
+		}
+		for _, item := range typed {
+			if tenant, complete := tenantValueOutsideScope(item, allowedTenant, depth+1); !complete || tenant != "" {
+				return tenant, complete
+			}
+		}
+		return "", true
+	case map[string]interface{}:
+		if len(typed) != 1 {
+			return "", false
+		}
+		for operator, operand := range typed {
+			switch operator {
+			case "$eq", "eq", "id", "value":
+				return tenantValueOutsideScope(operand, allowedTenant, depth+1)
+			case "$in", "in":
+				if _, ok := operand.([]interface{}); ok {
+					return tenantValueOutsideScope(operand, allowedTenant, depth+1)
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+func structuredQueryChild(value interface{}) (interface{}, bool, bool) {
+	switch typed := value.(type) {
+	case map[string]interface{}, []interface{}:
+		return typed, true, true
+	case string:
+		encoded := strings.TrimSpace(typed)
+		if encoded == "" || (encoded[0] != '{' && encoded[0] != '[') {
+			return nil, false, true
+		}
+		if len(encoded) > 64<<10 {
+			return nil, false, false
+		}
+		var parsed interface{}
+		if err := json.Unmarshal([]byte(encoded), &parsed); err != nil {
+			return nil, false, false
+		}
+		switch parsed.(type) {
+		case map[string]interface{}, []interface{}:
+			return parsed, true, true
+		}
+		return nil, false, false
+	}
+	return nil, false, true
 }
 
 // unmarshalArgsObject decodes a tool-call args payload that may
