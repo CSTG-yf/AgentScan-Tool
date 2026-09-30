@@ -2,6 +2,12 @@
 
 Generated: 2026-09-30T08:05:57.562009+00:00
 
+## Defense Process
+
+![AI Agent tool-call defense flow](../../assets/agentrange-defense-flow.svg)
+
+The diagram shows the control flow, not a replayed attack chain. Authenticated scope enters the Gateway separately from untrusted content; action-mode blocks stop forwarding before a dangerous tool call. Post-response checks cannot undo an earlier side effect.
+
 ## Static Inventory
 
 - Discovered assets: 27

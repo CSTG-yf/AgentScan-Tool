@@ -18,6 +18,10 @@
 
 ## 运行拓扑与算法
 
+![AI Agent 工具调用防御过程](assets/agentrange-defense-flow.svg)
+
+这张动态图展示一次调用如何从 Agent 经 Sidecar 到 Gateway 决策，再分成阻断或放行路径。蓝色通道是经过验证的主体上下文；不可信提示词和工具参数不能修改该上下文。`action` 阻断发生在危险调用转发前；响应检查是补充证据，不能回滚已发生的副作用。完整优先级和边界条件见[算法说明](AGENTRANGE-ALGORITHM.md)。
+
 `docker-compose.yml` 启动原始 14 个服务，项目侧 overlay 加入 OpsPilot 入口、Langflow 入口、LLM 代理和 MCP 代理四个检查侧车，以及上下文 relay，总计 19 个容器。Windows 宿主机上的 Go Gateway 监听 `18970`；侧车通过 `host.docker.internal` 调用 `/api/v1/inspect/request`、`/api/v1/inspect/tool`、`/api/v1/inspect/tool-response` 和 `/api/v1/inspect/response`。
 
 决策主线为：

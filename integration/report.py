@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -174,7 +175,7 @@ def build_report(root: Path = ROOT, benchmark_run_dir: Path | None = None) -> di
     }
 
 
-def to_markdown(report: dict[str, Any]) -> str:
+def to_markdown(report: dict[str, Any], diagram_href: str | None = None) -> str:
     runtime = report["runtime"]
     static = report["static"]
     static_evaluation = static.get("evaluation") or {}
@@ -186,13 +187,27 @@ def to_markdown(report: dict[str, Any]) -> str:
         "",
         f"Generated: {report['generated_at']}",
         "",
+    ]
+    if diagram_href:
+        lines.extend([
+            "## Defense Process",
+            "",
+            f"![AI Agent tool-call defense flow]({diagram_href})",
+            "",
+            "The diagram shows the control flow, not a replayed attack chain. "
+            "Authenticated scope enters the Gateway separately from untrusted content; "
+            "action-mode blocks stop forwarding before a dangerous tool call. "
+            "Post-response checks cannot undo an earlier side effect.",
+            "",
+        ])
+    lines.extend([
         "## Static Inventory",
         "",
         f"- Discovered assets: {(static.get('metrics') or {}).get('asset_found', 'not-run')}",
         f"- Inferred asset edges: {static.get('graph_edge_count', 0)}",
         f"- Findings: {static['finding_count']} (HIGH/CRITICAL: {static['high_critical']})",
         "",
-    ]
+    ])
     if static_evaluation:
         asset = static_evaluation.get("asset") or {}
         risk = static_evaluation.get("risk") or {}
@@ -288,7 +303,9 @@ def main() -> int:
     json_output.parent.mkdir(parents=True, exist_ok=True)
     markdown_output.parent.mkdir(parents=True, exist_ok=True)
     json_output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    markdown_output.write_text(to_markdown(report), encoding="utf-8")
+    diagram = ROOT / "docs" / "assets" / "agentrange-defense-flow.svg"
+    diagram_href = Path(os.path.relpath(diagram, markdown_output.parent)).as_posix() if diagram.is_file() else None
+    markdown_output.write_text(to_markdown(report, diagram_href), encoding="utf-8")
     print(json.dumps({"json": str(json_output), "markdown": str(markdown_output)}, ensure_ascii=False))
     return 0
 

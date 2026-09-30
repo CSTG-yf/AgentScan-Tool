@@ -4,6 +4,10 @@
 
 可直接打开 [交互式算法展示页](AGENTRANGE-SHOWCASE.html) 查看阶段、场景与本轮 benchmark；靶场拓扑和复现命令见 [交付说明](AGENTRANGE-DELIVERY.md)。
 
+![AI Agent 工具调用防御过程](assets/agentrange-defense-flow.svg)
+
+图中上方蓝色通道是服务端验证的主体和租户范围；下方是可能含有不可信内容的 Agent 工具调用。Sidecar 在转发前请求 Gateway 检查，Gateway 依次核验授权边界、工具策略和行为规则。`action` 模式拒绝时，目标工具未收到危险调用；放行后仍可检查工具响应，但响应阻断不能撤销已产生的副作用。图中的分支表示可能的决策，不代表同一请求同时执行两条路径。
+
 ## 输入与信任边界
 
 - 静态输入是靶场的 Compose、配置、Skill 和 MCP 源文件。`integration/static_inventory.py` 从这些文件独立发现资产与关系边，再用 Python AST、配置字段及风险规则检查可执行行为。每条关系边保留来源。扫描器不读取资产标准答案、Ground Truth 或预期风险清单；`integration/risk_taxonomy.yaml` 只给出检测规则，冻结标签仅由 `integration/static_eval.py` 在离线评分时读取。

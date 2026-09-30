@@ -63,6 +63,9 @@
     .stage-button strong { display: block; margin-top: 11px; font-size: 13px; }
     .stage-button small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
     .stage-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .72fr); gap: 28px; margin-top: 14px; padding: 25px 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .flow-figure { margin: 0 0 23px; }
+    .flow-figure img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .flow-figure figcaption { margin-top: 7px; color: var(--muted); font-size: 12px; }
     .stage-detail p { margin: 10px 0 0; color: #526265; font-size: 13px; }
     .keyline { margin: 0 0 9px; color: var(--muted); font-size: 11px; font-weight: 700; }
     .detail-list { margin: 11px 0 0; padding: 0; list-style: none; }
@@ -185,6 +188,7 @@
     <main>
       <section id="view-flow" data-panel>
         <div class="page-heading"><div><p class="eyebrow">01 / DECISION ENGINE</p><h1>运行时决策</h1></div><p class="heading-note">在线检查只读取当前请求、工具参数、响应和已认证主体；离线标签只用于评分。</p></div>
+        <figure class="flow-figure"><img src="assets/agentrange-defense-flow.svg" alt="工具调用先经 Sidecar 前置拦截，再由 Gateway 依次进行租户授权、工具策略与行为规则判断；action 阻断时不转发到目标工具，放行后仍检查响应。"><figcaption>工具防御流程。动态图停止播放时，路径与决策仍可完整阅读。</figcaption></figure>
         <div class="pipeline" role="tablist" aria-label="算法阶段">
           <button class="stage-button" type="button" role="tab" aria-controls="stageDetail" data-stage="inventory" aria-selected="true"><span class="stage-no">01</span><strong>资产发现</strong><small>Compose / AST / 配置</small></button>
           <button class="stage-button" type="button" role="tab" aria-controls="stageDetail" data-stage="context" aria-selected="false"><span class="stage-no">02</span><strong>身份绑定</strong><small>JWT / 会话 / trace</small></button>
