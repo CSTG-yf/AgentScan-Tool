@@ -81,7 +81,7 @@ Baseline 使用 `bench/runs/20260930-68a661f-v1/full-pair/baseline` 已完成的
 
 上述 11/12 是检测源码 `68a661f` 的完整回放结果，**没有因后续代码修改而改写**。原始事件显示 21 次 `urlopen error timed out` 集中在 5 个实例：`B-OPS-857` 7 次、`B-RD-896` 8 次、`B-SEC-910` 4 次、`C2-C-856` 和 `C2-D-895` 各 1 次。超时期间 Gateway 进程多次接近占满一个逻辑核心，相关检查在超时后才集中记入审计。运行时引擎原先用一把全局锁串行处理所有检查事件，是可确认的排队点；现有证据尚不能证明它是这些超时的唯一原因。
 
-提交 `b3af57f` 将该锁改为按会话分片：不同会话可并行评估；同一会话及同一事件重试仍串行，并重读持久化完成标记。只执行了定向测试 `go test ./internal/detection -run TestInspectionEvaluationUsesSessionScopedLocks -count=1`，结果通过；测试覆盖独立会话并行、并发重试不重复评估。详细记录见[定向验证说明](evidence/20260930-b3af57f-targeted/README.md)。本次**未运行新的 5,200 实例回放，也未测试其他指标是否回退**，因此“检查不可用为 0”仍未被实测证明，不能把本地评分改为 12/12。
+提交 `b3af57f` 将该锁改为按会话分片：不同会话可并行评估；同一会话及同一事件重试仍串行，并重读持久化完成标记。定向测试 `go test ./internal/detection -run TestInspectionEvaluationUsesSessionScopedLocks -count=1` 通过，覆盖独立会话并行及并发重试幂等。随后在隔离的 action 模式 Gateway 上，以 8 并发、每次 1,200 ms 超时预算，对 request、response、tool、tool-response 各发起 16 次 HTTP 检查；**64/64 均返回 200、`recorded` 和 `action`，本次探针检查不可用为 0**。详细口径见[定向验证说明](evidence/20260930-b3af57f-targeted/README.md)。历史全量评分为 11/12；本轮按要求只执行定向测试，未做其他指标回归测试。
 
 ## 复现与交付文件
 

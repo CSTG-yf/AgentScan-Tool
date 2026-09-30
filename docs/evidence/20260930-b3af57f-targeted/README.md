@@ -14,6 +14,19 @@ The last complete action replay used detector source `68a661f`, not this change.
 go test ./internal/detection -run TestInspectionEvaluationUsesSessionScopedLocks -count=1 -v
 ```
 
-Result on 2026-09-30: `PASS`; the focused test took 0.29 seconds. It holds two independent evaluations open at once, starts a concurrent retry of one event, and checks that the event is evaluated only once after completion. No full replay, paired CPU sample, or other-metric regression check was run. `go test -race` was unavailable because this Windows Go environment has CGO disabled and no C compiler.
+Result on 2026-09-30: `PASS`; the focused test took 0.29 seconds. It holds two independent evaluations open at once, starts a concurrent retry of one event, and checks that the event is evaluated only once after completion. `go test -race` was unavailable because this Windows Go environment has CGO disabled and no C compiler.
 
-The historical 11/12 score remains the only full-run result. This focused test does not establish zero inspection failures under a production-length replay or an official hidden-set score.
+## Isolated HTTP probe
+
+A newly built Gateway ran with an isolated audit database and `gateway.api_port=18971`; the existing service on `18970` was left running. Its inspect responses reported `mode=action`. The probe sent 16 benign requests to each of `/api/v1/inspect/request`, `/response`, `/tool`, and `/tool-response`, with unique session/event IDs, eight concurrent HTTP workers, keep-alive connections and a 1,200 ms client timeout. All 64 responses were HTTP 200 with `X-DefenseClaw-Runtime-Status: recorded` and action mode. No timeout or unavailable response occurred in this sample.
+
+| Inspect endpoint | Requests | Recorded | Client p95 | Client max |
+| --- | ---: | ---: | ---: | ---: |
+| request | 16 | 16 | 109 ms | 109 ms |
+| response | 16 | 16 | 63 ms | 63 ms |
+| tool | 16 | 16 | 109 ms | 109 ms |
+| tool-response | 16 | 16 | 94 ms | 94 ms |
+
+Client latency includes local HTTP transport, Gateway inspection, and durable runtime recording. The isolated process was stopped after the probe and the original `18970` listener remained active.
+
+The historical full-run score remains 11/12. This follow-up records only the focused tests above; no paired CPU sample or other-metric regression check was run.
