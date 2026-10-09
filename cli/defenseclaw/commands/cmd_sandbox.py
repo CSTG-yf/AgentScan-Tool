@@ -19,7 +19,7 @@ def sandbox() -> None:
 
     \b
     init/setup retain the Linux OpenClaw lifecycle. status/exec use a
-    platform backend for a single managed command. Requires init first.
+    platform backend for a single managed command; they do not require init.
     """
 
 

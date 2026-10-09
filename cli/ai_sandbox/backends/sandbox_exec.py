@@ -62,6 +62,14 @@ def canonical_path(p: str) -> str:
     return os.path.join(os.path.realpath(os.path.dirname(p)), os.path.basename(p))
 
 
+def _sbpl_path(p: str) -> str:
+    """Reject path characters that could change the generated Seatbelt rule."""
+    path = canonical_path(p)
+    if any(char in path for char in ('"', "\\", "\n", "\r")):
+        raise ValueError("Sandbox path contains unsupported profile characters")
+    return path
+
+
 def build_sbpl_profile(workspace_dir: str,
                        writable_paths: list[str],
                        deny_paths: list[str],
@@ -85,9 +93,9 @@ def build_sbpl_profile(workspace_dir: str,
     lines.append('(allow file-write* (literal "/dev/null"))')
     # cd 前奏 2>/dev/null 必需（缺失 = 前奏整条中止，探针 Z9a）
     for p in writable_paths:
-        lines.append(f'(allow file-write* (subpath "{canonical_path(p)}"))')
+        lines.append(f'(allow file-write* (subpath "{_sbpl_path(p)}"))')
     for p in deny_paths:
-        lines.append(f'(deny file-write* (subpath "{canonical_path(p)}"))')
+        lines.append(f'(deny file-write* (subpath "{_sbpl_path(p)}"))')
     return chr(10).join(lines) + chr(10)
 
 

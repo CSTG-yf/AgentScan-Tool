@@ -8,7 +8,16 @@ import unittest
 import uuid
 from pathlib import Path
 
+from ai_sandbox.backends.sandbox_exec import build_sbpl_profile
 from ai_sandbox.registry import get_report, get_sandbox_backend
+
+
+class SandboxProfilePathTest(unittest.TestCase):
+    def test_rejects_profile_metacharacters_in_paths(self) -> None:
+        for char in ('"', "\\", "\n", "\r"):
+            with self.subTest(char=repr(char)):
+                with self.assertRaises(ValueError):
+                    build_sbpl_profile("/tmp/workspace", ["/tmp/name" + char + "x"], [])
 
 
 @unittest.skipUnless(sys.platform in {"darwin", "linux"}, "POSIX backend test")
