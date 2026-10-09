@@ -5,6 +5,9 @@
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png"],
     "resources": [
       "resources/defenseclaw-gateway",
+      "resources/tracebastion-sandbox",
+      "../../NOTICE",
+      "../../cli/ai_sandbox/PROVENANCE.md",
       "../../cli/defenseclaw/agentrange_sidecar.py",
       "../../task/agentrange-adapter/*",
       "linux/*",

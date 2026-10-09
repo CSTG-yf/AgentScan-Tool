@@ -33,6 +33,12 @@ workspace, backend, isolation level, and result without recording the command
 or its output. This is separate from runtime behavior events emitted by Agent
 connectors.
 
+Windows and Linux desktop installers also bundle a standalone
+`tracebastion-sandbox` executable with the same `status` and `exec` command
+shape. The desktop Settings page reports its detected backend. That executable
+does not write to the Python CLI audit database; use `defenseclaw sandbox exec`
+when unified CLI audit records are required.
+
 ## OpenShell for OpenClaw on Linux
 
 DefenseClaw can run OpenClaw inside an NVIDIA OpenShell sandbox with full governance enabled. The sandbox provides OS-level isolation while DefenseClaw adds scanning, policy enforcement, and audit logging on top.

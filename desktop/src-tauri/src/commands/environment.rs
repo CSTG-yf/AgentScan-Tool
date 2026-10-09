@@ -1,13 +1,62 @@
 use std::net::{SocketAddr, TcpStream};
+use std::path::PathBuf;
+use std::process::Command;
 use std::time::Duration;
 
 use chrono::Utc;
+use tauri::Manager;
 
 use crate::models::{EnvironmentComponent, EnvironmentSnapshot};
 
 fn tcp_ready(port: u16) -> bool {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
     TcpStream::connect_timeout(&address, Duration::from_millis(350)).is_ok()
+}
+
+fn sandbox_component(app: &tauri::AppHandle) -> EnvironmentComponent {
+    let binary_name = if cfg!(windows) {
+        "tracebastion-sandbox.exe"
+    } else {
+        "tracebastion-sandbox"
+    };
+    let mut candidates = Vec::new();
+    if let Ok(resources) = app.path().resource_dir() {
+        candidates.push(resources.join("resources").join(binary_name));
+        candidates.push(resources.join(binary_name));
+    }
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join(binary_name),
+    );
+    let binary = candidates.into_iter().find(|path| path.is_file());
+    let (state, detail, endpoint) = match binary {
+        None => ("missing", "本安装包未包含本地沙箱工具".to_owned(), None),
+        Some(path) => {
+            let status = Command::new(&path).arg("status").output();
+            let (state, detail) = match status {
+                Ok(output) if output.status.success() => {
+                    let report = String::from_utf8_lossy(&output.stdout);
+                    ("ready", report.lines().take(2).collect::<Vec<_>>().join(" · "))
+                }
+                Ok(output) => (
+                    "degraded",
+                    String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+                ),
+                Err(error) => ("degraded", format!("沙箱探测失败: {error}")),
+            };
+            (state, detail, Some(path.display().to_string()))
+        }
+    };
+    EnvironmentComponent {
+        id: "sandbox",
+        label: "本地命令沙箱",
+        state,
+        detail,
+        endpoint,
+        version: None,
+        requires_elevation: false,
+    }
 }
 
 #[tauri::command]
@@ -80,6 +129,7 @@ pub fn get_environment_snapshot(app: tauri::AppHandle) -> EnvironmentSnapshot {
                 version: None,
                 requires_elevation: true,
             },
+            sandbox_component(&app),
         ],
     }
 }

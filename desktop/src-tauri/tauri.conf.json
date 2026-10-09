@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "TraceBastion Desktop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "identifier": "dev.defenseclaw.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev:web",
@@ -31,6 +31,8 @@
     "targets": ["nsis"],
     "resources": [
       "resources/*",
+      "../../NOTICE",
+      "../../cli/ai_sandbox/PROVENANCE.md",
       "../../cli/defenseclaw/agentrange_sidecar.py",
       "../../task/agentrange-adapter/*"
     ],

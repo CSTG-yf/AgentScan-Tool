@@ -1020,6 +1020,7 @@ const browserEnvironment = (): EnvironmentSnapshot => ({
     { id: "gateway", label: "TraceBastion Gateway", state: "unknown", detail: "桌面宿主未连接" },
     { id: "agentrange", label: "AgentRange 靶场", state: "unknown", detail: "桌面宿主未连接" },
     { id: "processGuard", label: "Windows 进程守护", state: "unknown", detail: "桌面宿主未连接", requiresElevation: true },
+    { id: "sandbox", label: "本地命令沙箱", state: "unknown", detail: "桌面宿主未连接" },
   ],
 });
 

@@ -675,6 +675,7 @@ export default function App() {
           <SettingsPage
             gatewayComponent={environment?.components.find((component) => component.id === "gateway")}
             guardComponent={guardComponent}
+            sandboxComponent={environment?.components.find((component) => component.id === "sandbox")}
             defenseMode={defenseMode}
             gatewayStartup={gatewayStartup}
             keepGatewayRunning={keepGatewayRunning}

@@ -33,6 +33,7 @@ try {
     }
 
     Require-Command "cargo" "Install Rust stable with the MSVC toolchain."
+    Require-Command "python" "Install Python 3.12+ and PyInstaller 6.16.0."
 
     $iconFile = Join-Path $desktopRoot "src-tauri\icons\icon.ico"
     if (-not (Test-Path $iconFile)) {
@@ -46,6 +47,10 @@ try {
     $nonWindowsGateway = Join-Path $desktopRoot "src-tauri\resources\defenseclaw-gateway"
     if (Test-Path -LiteralPath $nonWindowsGateway -PathType Leaf) {
         Remove-Item -LiteralPath $nonWindowsGateway -Force
+    }
+    $nonWindowsSandbox = Join-Path $desktopRoot "src-tauri\resources\tracebastion-sandbox"
+    if (Test-Path -LiteralPath $nonWindowsSandbox -PathType Leaf) {
+        Remove-Item -LiteralPath $nonWindowsSandbox -Force
     }
     $goCommand = Get-Command "go" -ErrorAction SilentlyContinue
     if ($SkipGatewayBuild) {
@@ -64,6 +69,20 @@ try {
         }
         Write-Warning "Go is not installed; reusing the existing development gateway resource."
     }
+
+    $resourceDir = Join-Path $desktopRoot "src-tauri\resources"
+    $sandboxBinary = Join-Path $resourceDir "tracebastion-sandbox.exe"
+    & python -m PyInstaller --noconfirm --clean --onefile `
+        --name tracebastion-sandbox `
+        --paths (Join-Path $repoRoot "cli") `
+        --hidden-import ai_sandbox.backends.appcontainer `
+        --distpath $resourceDir `
+        --workpath (Join-Path $desktopRoot ".sandbox-build\work") `
+        --specpath (Join-Path $desktopRoot ".sandbox-build") `
+        (Join-Path $desktopRoot "scripts\sandbox_sidecar.py")
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $sandboxBinary)) { throw "sandbox sidecar build failed" }
+    & $sandboxBinary --help | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "bundled sandbox sidecar failed to launch" }
 
     pnpm tauri build --bundles nsis
     if ($LASTEXITCODE -ne 0) { throw "Tauri build failed with exit code $LASTEXITCODE" }

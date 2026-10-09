@@ -1,7 +1,7 @@
 export type ComponentState = "ready" | "degraded" | "stopped" | "missing" | "unknown";
 
 export interface EnvironmentComponent {
-  id: "gateway" | "agentrange" | "processGuard";
+  id: "gateway" | "agentrange" | "processGuard" | "sandbox";
   label: string;
   state: ComponentState;
   detail: string;

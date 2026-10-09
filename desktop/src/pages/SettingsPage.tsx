@@ -25,6 +25,7 @@ const sections: Array<{ key: SectionKey; label: string; description: string; ico
 interface SettingsPageProps {
   gatewayComponent?: EnvironmentComponent;
   guardComponent?: EnvironmentComponent;
+  sandboxComponent?: EnvironmentComponent;
   defenseMode: RangeMode;
   gatewayStartup: "auto" | "manual" | "disabled";
   /** True when closing the window keeps the gateway (and a tray icon) alive. */
@@ -38,7 +39,7 @@ interface SettingsPageProps {
   onGuardAction: (action: GuardAction) => void;
 }
 
-export function SettingsPage({ gatewayComponent, guardComponent, defenseMode, gatewayStartup, keepGatewayRunning, refreshedAt, busy, onRefresh, onGatewayAction, onGatewayStartupChange, onKeepGatewayRunningChange, onGuardAction }: SettingsPageProps) {
+export function SettingsPage({ gatewayComponent, guardComponent, sandboxComponent, defenseMode, gatewayStartup, keepGatewayRunning, refreshedAt, busy, onRefresh, onGatewayAction, onGatewayStartupChange, onKeepGatewayRunningChange, onGuardAction }: SettingsPageProps) {
   const [section, setSection] = useState<SectionKey>("services");
   const [query, setQuery] = useState("");
   const visible = useMemo(() => sections.filter(item => `${item.label} ${item.description}`.toLowerCase().includes(query.trim().toLowerCase())), [query]);
@@ -107,6 +108,11 @@ export function SettingsPage({ gatewayComponent, guardComponent, defenseMode, ga
               {guardReady && <Button loading={busy} onClick={() => onGuardAction("stop")}>停止服务</Button>}
               <Button disabled={!guardReady} loading={busy} onClick={() => onGuardAction("apply")}>应用最新策略</Button>
             </>}
+          />
+          <ServiceCard
+            icon={<SafetyCertificateOutlined />} title="本地命令沙箱" state={sandboxComponent?.state} detail={sandboxComponent?.detail}
+            facts={[["命令工具", sandboxComponent?.endpoint || "未打包"], ["生效范围", "由工具启动的命令及其子进程"]]}
+            actions={<Text type="secondary">在终端运行该工具的 status 或 exec 命令；不会自动隔离已启动的 Agent。</Text>}
           />
           <Card className="settings-danger-zone" title={<span><WarningOutlined /> 危险操作</span>}>
             <div><div><Text strong>卸载系统进程守护</Text><Text type="secondary">停止系统级防护并移除系统服务，审计数据仍会保留。</Text></div><Button danger disabled={guardMissing} onClick={uninstall}>卸载服务</Button></div>

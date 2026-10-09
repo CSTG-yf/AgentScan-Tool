@@ -143,10 +143,28 @@ Build the Windows desktop installer:
 ```
 
 The script is intentionally repeatable. After modifying the source, rerun it
-to rebuild the frontend, Go gateway, and Tauri NSIS installer. It fails when Go
+to rebuild the frontend, Go gateway, bundled sandbox tool, and Tauri NSIS installer. It fails when Go
 is unavailable so a stale or incomplete gateway cannot silently ship. For a
 local shell-only experiment, `-AllowMissingGateway` may reuse an existing
 development gateway resource.
+
+The Windows and Linux installers include `tracebastion-sandbox` in the app's
+resources. The Settings page probes its OS backend. Run the executable from a
+terminal to start a managed command, for example:
+
+```text
+tracebastion-sandbox status
+tracebastion-sandbox exec --workspace <existing-directory> --mode auto -- <program> [arguments]
+```
+
+`manual` is the default mode and asks before commands outside the read-only
+allowlist. A noninteractive approval request is denied. The tool refuses to
+execute when its OS sandbox backend is unavailable. On Linux, bubblewrap must
+be installed and usable. It governs only commands launched through this tool;
+already-running Agents are unaffected. The desktop tool is a separate entry
+point from the Python CLI and does not write to the CLI audit database. For
+audited execution, use `defenseclaw sandbox exec` instead. See
+[`docs/SANDBOX.md`](../docs/SANDBOX.md) for backend limits.
 
 The interactive NSIS installer includes a **Choose Install Location** page and
 defaults to `%ProgramFiles%\TraceBastion Desktop`. Browse to any suitable local
