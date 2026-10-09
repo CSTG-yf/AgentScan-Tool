@@ -76,6 +76,7 @@ where = ["cli"]
 exclude = ["tests", "tests.*"]
 
 [tool.setuptools.package-data]
+ai_sandbox = ["py.typed", "PROVENANCE.md"]
 defenseclaw = [
     "_data/policies/*.yaml",
     "_data/policies/rego/*.rego",

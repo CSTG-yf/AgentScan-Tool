@@ -1,4 +1,39 @@
-# OpenShell Sandbox
+# Sandbox modes
+
+## Local managed command execution
+
+`defenseclaw sandbox status` probes the local backend and reports its real
+isolation level. `defenseclaw sandbox exec` runs one noninteractive command
+and its child processes inside that backend:
+
+```bash
+defenseclaw sandbox status
+defenseclaw sandbox exec --workspace /path/to/workspace --mode auto -- /bin/echo hello
+```
+
+The default approval mode is `manual`: commands outside the read-only
+allowlist require an interactive one-time confirmation. In a noninteractive
+session they are denied. `--mode auto` allows commands that do not match the
+dangerous-command rules; those rules are advisory and OS isolation remains the
+security boundary. The command inherits the CLI's environment, including any
+credentials in it. Use a minimal environment when running untrusted commands.
+
+The local backend is bubblewrap on Linux, sandbox-exec on macOS, and
+AppContainer on Windows. A failed probe can select the kit's `null` backend,
+but this CLI refuses to run when that happens. The macOS and Windows backends
+report `weak` isolation; Linux bubblewrap reports `strong`. Network access is
+not blocked by default. An existing `.git` is read-only under bubblewrap and
+sandbox-exec; Windows execution rejects an existing `.git` workspace because
+the AppContainer adapter would change its host ACLs. The local command path
+does not attach to a separately started Agent or turn on its Hook integration.
+
+The managed command writes `managed-sandbox-start`, `managed-sandbox-exit`, or
+`managed-sandbox-denied` to the existing CLI audit database. It records the
+workspace, backend, isolation level, and result without recording the command
+or its output. This is separate from runtime behavior events emitted by Agent
+connectors.
+
+## OpenShell for OpenClaw on Linux
 
 DefenseClaw can run OpenClaw inside an NVIDIA OpenShell sandbox with full governance enabled. The sandbox provides OS-level isolation while DefenseClaw adds scanning, policy enforcement, and audit logging on top.
 

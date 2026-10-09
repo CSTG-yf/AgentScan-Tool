@@ -33,6 +33,7 @@ CodeGuard 提供代码静态检查；Skills 和 MCP 扫描还会调用外部扫�
 | OpenClaw / ZeptoClaw 代理连接器 | CLI + Gateway；OpenClaw 另需插件 | macOS / Linux；当前 Windows 使用 Hook 路径，不支持这两个代理连接器 |
 | AgentRange 场景验证 | 桌面“靶场控制”或 Compose overlay | Docker Compose 及原始靶场；回放另需 Python/uv |
 | OpenShell 隔离 | CLI 沙箱命令与安装脚本 | Linux；属于可选沙箱路径 |
+| 本地受控命令 | `defenseclaw sandbox status/exec` | Linux bubblewrap、macOS sandbox-exec、Windows AppContainer；后端不可用时拒绝执行 |
 
 仓库注册了 Codex、Claude Code、Hermes、Cursor、Windsurf、Gemini CLI、Copilot、OpenHands、Antigravity、OpenCode、Omnigent、OpenClaw 和 ZeptoClaw 连接器。**发现某个 Agent 不代表已接入全部防护面**：可阻断事件、原生审批、资源写入及失败处理能力以连接器合同和实际安装版本为准。参见 [连接器源码](internal/gateway/connector/) 与 [Hook 合同](cli/defenseclaw/inventory/hook_contracts.json)。
 
@@ -137,7 +138,10 @@ defenseclaw skill scan all
 defenseclaw mcp list
 defenseclaw plugin scan extensions/defenseclaw
 defenseclaw guardrail status
+defenseclaw sandbox status
 ```
+
+运行单条非交互命令时，可使用 `defenseclaw sandbox exec --workspace <目录> -- <命令及参数>`。它会显示实际后端、按命令审批策略判断，并把启动与退出写入审计库；只对该命令及其子进程生效，不会自动隔离已由其他方式启动的 Agent。完整说明见 [沙箱指南](docs/SANDBOX.md)。
 
 针对已接入 Agent 调整 Guardrail 模式：
 
