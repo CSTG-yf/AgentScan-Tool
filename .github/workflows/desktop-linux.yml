@@ -43,6 +43,8 @@ jobs:
           mkdir -p desktop/src-tauri/resources
           go build -buildvcs=false -trimpath -ldflags '-s -w' -o desktop/src-tauri/resources/defenseclaw-gateway ./cmd/defenseclaw
           chmod 0755 desktop/src-tauri/resources/defenseclaw-gateway
+      - name: Prepare bundled Linux sandbox resource
+        run: bash desktop/scripts/linux/prepare-sandbox.sh
       - name: Test desktop host
         working-directory: desktop/src-tauri
         run: cargo test --locked

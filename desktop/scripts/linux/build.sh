@@ -7,7 +7,7 @@ REPO_ROOT=$(CDPATH= cd -- "$DESKTOP_ROOT/.." && pwd)
 RESOURCE_DIR="$DESKTOP_ROOT/src-tauri/resources"
 ARTIFACT_DIR="$REPO_ROOT/dist/linux"
 
-for command in pnpm cargo go python3; do
+for command in pnpm cargo go; do
   command -v "$command" >/dev/null 2>&1 || { echo "$command is required" >&2; exit 1; }
 done
 
@@ -19,16 +19,7 @@ rm -f -- "$RESOURCE_DIR/defenseclaw-gateway.exe" "$RESOURCE_DIR/tracebastion-san
 cd "$REPO_ROOT"
 go build -buildvcs=false -trimpath -ldflags '-s -w' -o "$RESOURCE_DIR/defenseclaw-gateway" ./cmd/defenseclaw
 chmod 0755 "$RESOURCE_DIR/defenseclaw-gateway"
-python3 -m PyInstaller --noconfirm --clean --onefile \
-  --name tracebastion-sandbox \
-  --paths "$REPO_ROOT/cli" \
-  --hidden-import ai_sandbox.seccomp \
-  --distpath "$RESOURCE_DIR" \
-  --workpath "$DESKTOP_ROOT/.sandbox-build/work" \
-  --specpath "$DESKTOP_ROOT/.sandbox-build" \
-  "$DESKTOP_ROOT/scripts/sandbox_sidecar.py"
-chmod 0755 "$RESOURCE_DIR/tracebastion-sandbox"
-"$RESOURCE_DIR/tracebastion-sandbox" --help >/dev/null
+bash "$SCRIPT_DIR/prepare-sandbox.sh"
 
 cd "$DESKTOP_ROOT"
 if [ "${SKIP_INSTALL:-0}" != 1 ]; then
