@@ -46,6 +46,7 @@ LANGFLOW_SERVICE_CANDIDATES = ("langflow",)
 LLM_ENV_KEYS = ("LLM_BASE", "OPENAI_API_BASE", "OPENAI_BASE_URL")
 
 EVENT_MODEL_FIELDS = [
+    "instance_id",
     "session_id",
     "trace_id",
     "stage",
@@ -216,10 +217,17 @@ def build_adapter_bundle(
     out_dir = out_dir.expanduser().resolve()
     sidecar_source = Path(py_inspect.getfile(agentrange_sidecar)).resolve()
     sidecar_path = out_dir / "agentrange_sidecar.py"
+    adapter_sources = Path(__file__).resolve().parents[2] / "task" / "agentrange-adapter"
+    probe_path = adapter_sources / "opspilot_probe.py"
+    context_relay_path = adapter_sources / "context_relay.py"
     plan = _build_plan(discovery, sidecar_path, gateway_base, mode, fail_mode, inspect_timeout_ms)
+    plan["source"]["opspilot_probe_source"] = str(probe_path)
+    plan["source"]["context_relay_source"] = str(context_relay_path)
     plan["source"]["portable_range_root"] = _portable_path(Path(discovery.range_root), base_dir=out_dir)
     plan["source"]["portable_compose_path"] = _portable_path(Path(discovery.compose_path), base_dir=out_dir)
     plan["source"]["portable_sidecar_source"] = _portable_path(sidecar_path, base_dir=out_dir)
+    plan["source"]["portable_opspilot_probe_source"] = _portable_path(probe_path, base_dir=out_dir)
+    plan["source"]["portable_context_relay_source"] = _portable_path(context_relay_path, base_dir=out_dir)
     compose_text = _dump_compose(_compose_override(plan))
     public_plan = _public_plan(plan)
     readme_text = _render_readme(public_plan, out_dir)
@@ -549,12 +557,18 @@ def _compose_override(plan: dict[str, Any]) -> dict[str, Any]:
     sidecar_source = Path(plan["source"]["sidecar_source"])
     sidecar_mount = f"{_docker_host_path(sidecar_source, base_dir=source_compose_dir)}"
     sidecar_mount += ":/opt/defenseclaw/agentrange_sidecar.py:ro"
+    probe_mount = _docker_host_path(Path(plan["source"]["opspilot_probe_source"]), base_dir=source_compose_dir)
+    probe_mount += ":/opt/defenseclaw/sitecustomize.py:ro"
+    relay_mount = _docker_host_path(Path(plan["source"]["context_relay_source"]), base_dir=source_compose_dir)
+    relay_mount += ":/opt/defenseclaw/context_relay.py:ro"
     token_env_file = _portable_path(Path.cwd() / ".defenseclaw-home" / ".env", base_dir=source_compose_dir)
     common_env = {
         "PYTHONUNBUFFERED": "1",
         "DC_GATEWAY_BASE": plan["gateway"]["base_url"],
+        "DC_CONTEXT_RELAY_URL": "http://defenseclaw-context-relay:9101",
         "DC_FAIL_MODE": plan["gateway"]["fail_mode"],
         "DC_INSPECT_TIMEOUT_MS": str(plan["gateway"]["inspect_timeout_ms"]),
+        "DC_BYPASS_INSPECTION": "${DC_BYPASS_INSPECTION:-0}",
         "DC_CONNECTOR": "agentrange",
     }
     common_service = {
@@ -568,7 +582,8 @@ def _compose_override(plan: dict[str, Any]) -> dict[str, Any]:
 
     services: dict[str, Any] = {
         discovery["opspilot"]: {
-            "environment": rewrites["opspilot_environment"],
+            "environment": {**rewrites["opspilot_environment"], "PYTHONPATH": "/opt/defenseclaw"},
+            "volumes": [probe_mount],
             "ports": ComposeResetList(),
         },
         "defenseclaw-opspilot-ingress": {
@@ -581,6 +596,13 @@ def _compose_override(plan: dict[str, Any]) -> dict[str, Any]:
             },
             "depends_on": [discovery["opspilot"]],
             "ports": [_port_value(port) for port in plan["ingress"]["opspilot"]["ports"]],
+        },
+        "defenseclaw-context-relay": {
+            "image": "python:3.12-slim",
+            "command": "python /opt/defenseclaw/context_relay.py",
+            "volumes": [relay_mount],
+            "environment": {"PYTHONUNBUFFERED": "1", "DC_CONTEXT_TTL_SECONDS": "120"},
+            "networks": ["opspilot-net"],
         },
     }
 
@@ -674,7 +696,14 @@ def _portable_path(path: Path, *, base_dir: Path) -> str:
     try:
         return Path(os.path.relpath(path.resolve(), start=base_dir.resolve())).as_posix()
     except ValueError:
-        return str(path.resolve())
+        # A generated bundle may live on another Windows drive than the
+        # checkout. Keep repository-owned sources portable in the public plan;
+        # the compose renderer still uses the original absolute path.
+        repo_root = Path(__file__).resolve().parents[2]
+        try:
+            return path.resolve().relative_to(repo_root).as_posix()
+        except ValueError:
+            return str(path.resolve())
 
 
 def _public_plan(plan: dict[str, Any]) -> dict[str, Any]:
@@ -683,6 +712,12 @@ def _public_plan(plan: dict[str, Any]) -> dict[str, Any]:
     source["range_root"] = source.pop("portable_range_root", source.get("range_root", ""))
     source["compose_path"] = source.pop("portable_compose_path", source.get("compose_path", ""))
     source["sidecar_source"] = source.pop("portable_sidecar_source", source.get("sidecar_source", ""))
+    source["opspilot_probe_source"] = source.pop(
+        "portable_opspilot_probe_source", source.get("opspilot_probe_source", "")
+    )
+    source["context_relay_source"] = source.pop(
+        "portable_context_relay_source", source.get("context_relay_source", "")
+    )
     return public
 
 

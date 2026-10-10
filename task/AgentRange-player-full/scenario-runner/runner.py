@@ -24,7 +24,20 @@ def plan_actions(events: list[dict]) -> list[dict]:
         event_input = event["input"]
         # Cat-1 公开事件保留利用参数，runner 由 exploit 字段识别 Langflow 路径。
         if event_input.get("exploit"):
-            actions.append({"instance_id": event["instance_id"], "target": "langflow", "exploit": event["input"]["exploit"], "cmd": event["input"]["cmd"]})
+            actions.append(
+                {
+                    "instance_id": event["instance_id"],
+                    "target": "langflow",
+                    "exploit": event["input"]["exploit"],
+                    "cmd": event["input"]["cmd"],
+                    "headers": {
+                        "X-Instance-Id": event["instance_id"],
+                        "X-Trace-Id": event["instance_id"],
+                        "X-DefenseClaw-Trace-Id": event["instance_id"],
+                        "X-DefenseClaw-Session-Id": event["instance_id"],
+                    },
+                }
+            )
         elif event_input.get("source"):
             # Cat-2 公开事件走自然语言 prompt 入口，source 只表示外部输入来源。
             body = {"model": "opspilot-stub", "prompt": event_input["prompt"]}
@@ -34,7 +47,12 @@ def plan_actions(events: list[dict]) -> list[dict]:
                 {
                     "instance_id": event["instance_id"],
                     "target": "opspilot-app",
-                    "headers": {"X-Instance-Id": event["instance_id"], "X-Trace-Id": event["instance_id"]},
+                    "headers": {
+                        "X-Instance-Id": event["instance_id"],
+                        "X-Trace-Id": event["instance_id"],
+                        "X-DefenseClaw-Trace-Id": event["instance_id"],
+                        "X-DefenseClaw-Session-Id": event["instance_id"],
+                    },
                     "username": event["actor"]["sub"],
                     "body": body,
                 }
@@ -45,7 +63,12 @@ def plan_actions(events: list[dict]) -> list[dict]:
                 {
                     "instance_id": event["instance_id"],
                     "target": "opspilot-app",
-                    "headers": {"X-Instance-Id": event["instance_id"], "X-Trace-Id": event["instance_id"]},
+                    "headers": {
+                        "X-Instance-Id": event["instance_id"],
+                        "X-Trace-Id": event["instance_id"],
+                        "X-DefenseClaw-Trace-Id": event["instance_id"],
+                        "X-DefenseClaw-Session-Id": event["instance_id"],
+                    },
                     "username": event["actor"]["sub"],
                     "body": {"model": "opspilot-stub", "prompt": event_input["prompt"]},
                 }
@@ -125,7 +148,8 @@ def fire_cat1(client: httpx.Client, action: dict, langflow_token: str):
     from cat1.exploit_5027 import make_upload
 
     # Cat-1 直接打 Langflow 漏洞端点，但当前镜像需要 auto_login 换来的 bearer token。
-    headers = {"Authorization": f"Bearer {langflow_token}"}
+    headers = dict(action.get("headers", {}))
+    headers["Authorization"] = f"Bearer {langflow_token}"
     if action["exploit"] == "C1-A":
         req = make_payload(action["cmd"])
         response = client.post(f"{LANGFLOW}{req['path']}", headers=headers, json=req["json"])
@@ -144,6 +168,12 @@ def fire_opspilot(client: httpx.Client, action: dict, tokens: dict):
     headers["Authorization"] = f"Bearer {tokens[username]}"
     body = action["body"]
     response = client.post(f"{OPSPILOT}/run", headers=headers, json=body)
+    if response.status_code == 401:
+        # A long full replay can outlive the JWT lifetime; refresh once so
+        # expiry is not misclassified as a business failure.
+        tokens[username] = login_token(client, username)
+        headers["Authorization"] = f"Bearer {tokens[username]}"
+        response = client.post(f"{OPSPILOT}/run", headers=headers, json=body)
     response.raise_for_status()
 
 

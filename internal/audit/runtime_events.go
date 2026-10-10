@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"strings"
 	"time"
 
@@ -136,6 +137,12 @@ type RuntimeEventInput struct {
 
 const runtimeEventRawMaxBytes = 16 * 1024
 
+func logSlowRuntimeEventStage(stage string, started time.Time) {
+	if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+		log.Printf("[runtime-event] slow stage=%s elapsed=%s", stage, elapsed)
+	}
+}
+
 // RecordRuntimeEvent normalizes one runtime event, ensures the Agent
 // Inventory binding and the runtime session row exist, and appends the
 // unified event to behavior_events. It returns the inserted
@@ -143,6 +150,17 @@ const runtimeEventRawMaxBytes = 16 * 1024
 // evidence. It is intentionally forgiving: pipeline callers must never
 // fail a request because observability persistence hiccupped.
 func (s *Store) RecordRuntimeEvent(in RuntimeEventInput) (int64, error) {
+	return s.recordRuntimeEvent(in, false)
+}
+
+// RecordAgentRangeRuntimeEvent is reserved for authenticated AgentRange
+// inspection handlers. It skips repeated identity/session writes only after
+// their first durable write succeeds; every event still goes to SQLite.
+func (s *Store) RecordAgentRangeRuntimeEvent(in RuntimeEventInput) (int64, error) {
+	return s.recordRuntimeEvent(in, true)
+}
+
+func (s *Store) recordRuntimeEvent(in RuntimeEventInput, agentRangeFastPath bool) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, nil
 	}
@@ -166,13 +184,25 @@ func (s *Store) RecordRuntimeEvent(in RuntimeEventInput) (int64, error) {
 		in.SpanID = uuid.NewString()
 	}
 
-	agent, err := s.EnsureAgent(AgentIdentityInput{
+	started := time.Now()
+	identity := AgentIdentityInput{
 		AgentID:    in.CanonicalAgentID,
 		AgentName:  firstNonEmpty(in.AgentName, in.AgentExecutable),
 		Source:     "runtime_events:" + in.EventSource,
 		Status:     "running",
 		ObservedAt: in.Timestamp,
-	})
+	}
+	useCache := agentRangeFastPath && in.AgentName == "AgentRange / OpsPilot" &&
+		(in.CanonicalAgentID == "" || in.CanonicalAgentID == "agentrange-opspilot") &&
+		(in.EventSource == RuntimeSourceGuardrail || in.EventSource == RuntimeSourceProxy)
+	var agent CanonicalAgent
+	var err error
+	if useCache {
+		agent, err = s.ensureAgentRangeAgent(identity)
+	} else {
+		agent, err = s.EnsureAgent(identity)
+	}
+	logSlowRuntimeEventStage("ensure-agent", started)
 	if err != nil {
 		return 0, err
 	}
@@ -186,13 +216,22 @@ func (s *Store) RecordRuntimeEvent(in RuntimeEventInput) (int64, error) {
 	// A runtime event that carries a session id implies the session is
 	// (or was) live for this agent. Upsert keeps started_at stable.
 	if in.SessionID != "" && in.CanonicalAgentID != "" {
-		if err := s.EnsureRuntimeSession(EnsureRuntimeSessionInput{
+		started = time.Now()
+		session := EnsureRuntimeSessionInput{
 			SessionID:        in.SessionID,
 			CanonicalAgentID: in.CanonicalAgentID,
 			StartedAt:        in.Timestamp,
-		}); err != nil {
+		}
+		if useCache {
+			err = s.ensureAgentRangeSession(session)
+		} else {
+			err = s.EnsureRuntimeSession(session)
+		}
+		if err != nil {
+			logSlowRuntimeEventStage("ensure-session", started)
 			return 0, err
 		}
+		logSlowRuntimeEventStage("ensure-session", started)
 	}
 
 	attrsJSON := ""
@@ -266,14 +305,18 @@ ON CONFLICT(ingest_key) DO NOTHING`
 		query = strings.Replace(query, "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?", "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?", 1)
 		args = append(args[:8], args[9:]...)
 	}
+	started = time.Now()
 	result, err := s.execDB(context.Background(), "runtime_event_insert", query, args...)
+	logSlowRuntimeEventStage("insert", started)
 
 	if err != nil {
 		return 0, err
 	}
 	if in.IngestKey != "" {
 		var id int64
+		started = time.Now()
 		err := s.db.QueryRowContext(context.Background(), `SELECT id FROM behavior_events WHERE ingest_key = ?`, in.IngestKey).Scan(&id)
+		logSlowRuntimeEventStage("lookup", started)
 		return id, err
 	}
 	id, _ := result.LastInsertId()
@@ -384,76 +427,51 @@ func (s *Store) EnsureRuntimeSession(in EnsureRuntimeSessionInput) error {
 		in.Status = "active"
 	}
 
-	var (
-		status    string
-		startedAt string
-		ended     sql.NullString
-		wd        sql.NullString
-		user      sql.NullString
-		rootPID   int64
-	)
-	err := s.db.QueryRowContext(context.Background(), `
-SELECT status, started_at, ended_at, working_directory, user, root_pid
-FROM agent_runtime_sessions WHERE session_id = ?`, in.SessionID,
-	).Scan(&status, &startedAt, &ended, &wd, &user, &rootPID)
-	if err == nil {
-		newStatus := status
-		if in.Status == "ended" {
-			newStatus = "ended"
-		} else if status != "active" {
-			newStatus = "active"
-		}
-		newWD := strings.TrimSpace(wd.String)
-		if newWD == "" {
-			newWD = in.WorkingDirectory
-		}
-		newUser := strings.TrimSpace(user.String)
-		if newUser == "" {
-			newUser = in.User
-		}
-		newPID := rootPID
-		if in.RootPID != 0 {
-			newPID = int64(in.RootPID)
-		}
-		endedExpr := "ended_at"
-		endedArg := ""
-		if in.Status == "ended" {
-			endedExpr = "?"
-			endedArg = in.StartedAt.UTC().Format(time.RFC3339Nano)
-		}
-		_, err := s.execDB(context.Background(), "runtime_session_refresh", `
-UPDATE agent_runtime_sessions
-SET status = ?, working_directory = ?, user = ?, root_pid = ?,
-    ended_at = `+endedExpr+`
-WHERE session_id = ?`,
-			newStatus, nullStr(newWD), nullStr(newUser), newPID, endedArg, in.SessionID,
-		)
-		return err
-	}
-	if err != sql.ErrNoRows {
-		return err
-	}
-
 	metaJSON := ""
 	if len(in.Metadata) > 0 {
 		if b, err := json.Marshal(in.Metadata); err == nil {
 			metaJSON = string(b)
 		}
 	}
-	_, err = s.execDB(context.Background(), "runtime_session_insert", `
+	var endedAt any
+	if in.Status == "ended" {
+		endedAt = in.StartedAt.UTC().Format(time.RFC3339Nano)
+	}
+	_, err := s.execDB(context.Background(), "runtime_session_upsert", `
 INSERT INTO agent_runtime_sessions (
   session_id, agent_id, root_pid, started_at, ended_at,
   working_directory, user, status, metadata_json
-) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(session_id) DO UPDATE SET
+  status = CASE
+    WHEN excluded.status = 'ended' THEN 'ended'
+    WHEN agent_runtime_sessions.status <> 'active' THEN 'active'
+    ELSE agent_runtime_sessions.status END,
+  working_directory = CASE
+    WHEN TRIM(COALESCE(agent_runtime_sessions.working_directory, '')) = ''
+    THEN excluded.working_directory ELSE agent_runtime_sessions.working_directory END,
+  user = CASE
+    WHEN TRIM(COALESCE(agent_runtime_sessions.user, '')) = ''
+    THEN excluded.user ELSE agent_runtime_sessions.user END,
+  root_pid = CASE
+    WHEN excluded.root_pid <> 0 THEN excluded.root_pid
+    ELSE agent_runtime_sessions.root_pid END,
+  ended_at = CASE
+    WHEN excluded.status = 'ended' THEN excluded.ended_at
+    ELSE agent_runtime_sessions.ended_at END`,
 		in.SessionID,
 		in.CanonicalAgentID,
 		in.RootPID,
 		in.StartedAt.UTC().Format(time.RFC3339Nano),
+		endedAt,
 		nullStr(in.WorkingDirectory),
 		nullStr(in.User),
 		in.Status,
 		nullStr(metaJSON),
 	)
+	if err == nil && in.Status == "ended" {
+		s.invalidateAgentRangeSession(in.SessionID)
+	}
 	return err
 }
 

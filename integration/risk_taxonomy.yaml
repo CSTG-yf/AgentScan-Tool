@@ -54,15 +54,3 @@ rules:
     confidence: 0.95
     category: authentication_bypass
     patterns: ['LANGFLOW_AUTO_LOGIN: "true"', 'LANGFLOW_SKIP_AUTH_AUTO_LOGIN: "true"']
-acceptance:
-  required_rule_assets:
-    - [AR-STATIC-HIDDEN-INSTRUCTION, skill.meeting-summary]
-    - [AR-STATIC-HIDDEN-INSTRUCTION, mcp.notes-sync]
-    - [AR-STATIC-HIDDEN-TOOL, mcp.notes-sync]
-    - [AR-STATIC-STARTUP-BEACON, mcp.notes-sync]
-    - [AR-STATIC-SHELL-TRUE, mcp.notes-sync]
-    - [AR-STATIC-SHELL-TRUE, mcp.shell-runner]
-    - [AR-STATIC-ARBITRARY-FILE, mcp.shell-runner]
-  benign_controls:
-    - skill.password-policy-check
-    - mcp.threat-intel

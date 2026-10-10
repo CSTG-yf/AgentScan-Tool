@@ -338,7 +338,7 @@ fn default_development_agentrange_root() -> Option<PathBuf> {
             .join("..")
             .join("..")
             .join("task")
-            .join("AgentRange-player"),
+            .join("AgentRange-player-full"),
     )
 }
 

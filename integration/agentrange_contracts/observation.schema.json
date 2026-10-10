@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agentrange:observation:v1",
+  "title": "RangeObservation",
+  "type": "object",
+  "required": ["instance_id", "decision", "valid", "timeout", "business_success", "side_effect_reached", "e2e_latency_ms"],
+  "properties": {
+    "instance_id": {"type": "string", "minLength": 1},
+    "mode": {"enum": ["baseline", "observe", "action"]},
+    "request_id": {"type": "string"},
+    "trace_id": {"type": "string"},
+    "decision": {"enum": ["allow", "alert", "confirm", "block", "unknown"]},
+    "valid": {"type": "boolean"},
+    "timeout": {"type": "boolean"},
+    "status": {"type": ["integer", "null"]},
+    "business_success": {"type": ["boolean", "null"]},
+    "side_effect_reached": {"type": ["boolean", "null"]},
+    "side_effect_probe_status": {"enum": ["complete", "unknown"]},
+    "side_effect_probe_refs": {"type": "array"},
+    "block_timestamp": {"type": ["number", "null"]},
+    "first_dangerous_timestamp": {"type": ["number", "null"]},
+    "inspect_latency_ms": {"type": ["number", "null"], "minimum": 0},
+    "e2e_latency_ms": {"type": ["number", "null"], "minimum": 0},
+    "error": {"type": ["string", "null"]}
+  },
+  "additionalProperties": true
+}

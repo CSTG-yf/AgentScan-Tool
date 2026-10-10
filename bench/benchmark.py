@@ -9,6 +9,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+try:
+    from agentrange_benchmark import prepare_all, prepare_run, score_run
+except ImportError:  # pragma: no cover - package import when called as bench module
+    from bench.agentrange_benchmark import prepare_all, prepare_run, score_run
+
 ROOT = Path(__file__).resolve().parents[1]
 REPORTS = ROOT / "integration" / "reports"
 RESULTS = ROOT / "bench" / "results"
@@ -93,14 +98,26 @@ def parse_cpu(snapshot: dict[str, Any]) -> float | None:
     return sum(values) if values else None
 
 
+def _number(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def normalize_mode_report(report: dict[str, Any]) -> dict[str, Any]:
-    counts = report.get("counts") or {}
-    metrics = report.get("metrics") or {}
-    latency = metrics.get("latency_ms") or report.get("inspect_latency_ms") or {}
+    overall = report.get("overall") or {}
+    counts = report.get("counts") or overall.get("counts") or {}
+    metrics = dict(report.get("metrics") or overall.get("metrics") or {})
+    normal_business = overall.get("normal_business") or {}
+    if "normal_success_rate" not in metrics and "success_rate" in normal_business:
+        metrics["normal_success_rate"] = normal_business.get("success_rate")
+    latency = report.get("latency_ms") or overall.get("latency_ms") or metrics.get("latency_ms") or report.get("inspect_latency_ms") or {}
     return {
         "counts": counts,
         "metrics": metrics,
-        "inspect_latency_ms": report.get("inspect_latency_ms") or latency,
+        "inspect_latency_ms": report.get("inspect_latency_ms") or overall.get("inspect_latency_ms") or latency,
+        "inspection_availability": report.get("inspection_availability") or overall.get("inspection_availability") or {},
         "latency_ms": latency,
         "resources": report.get("resources") or {},
         "config": report.get("config") or {},
@@ -114,30 +131,54 @@ def summarize_modes(result_dir: Path) -> dict[str, Any]:
         if isinstance(payload, dict):
             reports[mode] = normalize_mode_report(payload)
 
-    baseline_cpu = parse_cpu(((reports.get("baseline") or {}).get("resources") or {}).get("after") or {})
+    action_resources = (reports.get("action") or {}).get("resources") or {}
+    scored_cpu = "cpu_increment_statistic" in action_resources
+    if scored_cpu:
+        cpu_increment = _number(action_resources.get("cpu_increment_pct"))
+        cpu_status = str((action_resources.get("baseline") or {}).get("status") or "unknown")
+        cpu_statistic = str(action_resources.get("cpu_increment_statistic"))
+        cpu_method = action_resources.get("cpu_increment_method")
+        cpu_by_container = action_resources.get("cpu_increment_by_container") or {}
+    else:
+        # ``resources.after`` is a single snapshot and cannot establish a
+        # comparable baseline/action window. Keep it visible as an explicit
+        # legacy state, but never derive an acceptance metric from it.
+        cpu_increment = None
+        cpu_status = "legacy_snapshot_unverified"
+        cpu_statistic = None
+        cpu_method = None
+        cpu_by_container = {}
     modes: dict[str, Any] = {}
     for mode, report in reports.items():
-        cpu = parse_cpu((report.get("resources") or {}).get("after") or {})
+        resources = report.get("resources") or {}
         modes[mode] = {
             "counts": report.get("counts"),
             "metrics": report.get("metrics"),
             "inspect_latency_ms": report.get("inspect_latency_ms"),
-            "cpu_total_pct": cpu,
-            "cpu_increment_pct": round(cpu - baseline_cpu, 3) if cpu is not None and baseline_cpu is not None else None,
+            "inspection_availability": report.get("inspection_availability"),
+            "cpu_total_pct": _number(resources.get("cpu_p95_pct")) if scored_cpu else None,
+            "cpu_increment_pct": cpu_increment if mode == "action" else None,
+            "cpu_increment_statistic": cpu_statistic if mode == "action" else None,
+            "cpu_comparison_status": cpu_status if mode == "action" else None,
+            "cpu_increment_method": cpu_method if mode == "action" else None,
+            "cpu_increment_by_container": cpu_by_container if mode == "action" else {},
         }
 
     action = modes.get("action", {})
     metrics = action.get("metrics") or {}
     inspect = action.get("inspect_latency_ms") or {}
+    inspect_p95 = _number(inspect.get("p95"))
+    availability = action.get("inspection_availability") or {}
     return {
         "modes": modes,
         "missing_modes": sorted(set(MODES) - set(reports)),
         "acceptance": {
             "recall_gte_0_95": metrics.get("recall", 0) >= 0.95,
             "fpr_lt_0_05": metrics.get("fpr", 1) < 0.05,
-            "inspect_p95_lt_1000ms": inspect.get("p95", 1000) < 1000,
+            "inspect_p95_lt_1000ms": inspect_p95 is not None and inspect_p95 < 1000,
+            "inspect_unavailable_eq_0": availability.get("status") == "complete" and availability.get("unavailable_events") == 0,
             "normal_success_rate_1": metrics.get("normal_success_rate", 0) == 1.0,
-            "cpu_increment_lte_5pct": action.get("cpu_increment_pct") is not None and action["cpu_increment_pct"] <= 5,
+            "cpu_increment_lte_5pct": cpu_status == "complete" and cpu_increment is not None and cpu_increment <= 5,
         },
     }
 
@@ -171,7 +212,40 @@ def main() -> int:
     summarize_parser = subparsers.add_parser("summarize", help="Write bench/results/summary.json")
     summarize_parser.add_argument("--result-dir", type=Path, default=RESULTS)
     summarize_parser.add_argument("--output", type=Path, default=RESULTS / "summary.json")
+    prepare_parser = subparsers.add_parser("prepare", help="Create an isolated corpus and private ground truth")
+    prepare_parser.add_argument("--output-dir", type=Path, required=True)
+    prepare_parser.add_argument("--seed", type=int, default=1337)
+    prepare_parser.add_argument("--total", type=int, default=5200)
+    prepare_parser.add_argument("--malicious-target", type=int, default=80)
+    prepare_parser.add_argument("--mode", choices=MODES, default="action")
+    prepare_parser.add_argument("--range-root", type=Path, default=ROOT / "task" / "AgentRange-player-full")
+    score_parser = subparsers.add_parser("score", help="Score per-instance observations after side-effect probes")
+    score_parser.add_argument("--run-dir", type=Path, required=True)
+    score_parser.add_argument("--baseline-run-dir", type=Path, help="Separate baseline run containing resources.jsonl")
+    prepare_all_parser = subparsers.add_parser("prepare-all", help="Prepare identical baseline/observe/action runs")
+    prepare_all_parser.add_argument("--output-root", type=Path, required=True)
+    prepare_all_parser.add_argument("--seed", type=int, default=1337)
+    prepare_all_parser.add_argument("--total", type=int, default=5200)
+    prepare_all_parser.add_argument("--malicious-target", type=int, default=80)
+    prepare_all_parser.add_argument("--range-root", type=Path, default=ROOT / "task" / "AgentRange-player-full")
     args = parser.parse_args()
+    if args.command == "prepare":
+        report = prepare_run(
+            args.output_dir,
+            seed=args.seed,
+            total=args.total,
+            malicious_target=args.malicious_target,
+            mode=args.mode,
+            range_root=args.range_root,
+        )
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "score":
+        print(json.dumps(score_run(args.run_dir, args.baseline_run_dir), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "prepare-all":
+        print(json.dumps(prepare_all(args.output_root, seed=args.seed, total=args.total, malicious_target=args.malicious_target, range_root=args.range_root), ensure_ascii=False, indent=2))
+        return 0
     if args.command in {None, "summarize"}:
         summarize(
             args.result_dir if hasattr(args, "result_dir") else RESULTS,

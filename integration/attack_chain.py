@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 from collections import defaultdict
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -55,32 +56,77 @@ def decision_from(row: sqlite3.Row, structured: dict[str, Any]) -> str:
     return "unknown"
 
 
-def load_audit_events(audit_db: Path) -> list[dict[str, Any]]:
+def load_run_scope(run_dir: Path) -> tuple[tuple[datetime, datetime], set[str]]:
+    process = json.loads((run_dir / "replay-process.json").read_text(encoding="utf-8"))
+    manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    if process.get("returncode") != 0 or process.get("mode") != "action" or manifest.get("mode") != "action":
+        raise ValueError("a completed action replay is required for scoped evidence")
+    start = datetime.fromisoformat(process["started_at"].replace("Z", "+00:00")).astimezone(UTC)
+    end = datetime.fromisoformat(process["finished_at"].replace("Z", "+00:00")).astimezone(UTC)
+    if end <= start:
+        raise ValueError("invalid replay window")
+    observations = [
+        json.loads(line)
+        for line in (run_dir / "observations.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    ids = {str(row.get("instance_id") or "") for row in observations}
+    if (not isinstance(manifest.get("total"), int) or manifest["total"] <= 0
+            or len(observations) != manifest["total"] or len(ids) != manifest["total"]
+            or "" in ids or any(row.get("mode") != "action" for row in observations)):
+        raise ValueError("replay observations must contain one action row per manifest instance")
+    return (start, end), ids
+
+
+def load_audit_events(
+    audit_db: Path,
+    *,
+    window: tuple[datetime, datetime] | None = None,
+    instance_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
     if not audit_db.exists():
         return []
     con = sqlite3.connect(audit_db)
     con.row_factory = sqlite3.Row
+    window_clause = "AND timestamp >= ? AND timestamp < ?" if window else ""
+    params = (
+        (window[0] - timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%S"),
+        (window[1] + timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%S"),
+    ) if window else ()
     rows = con.execute(
-        """
+        f"""
         SELECT id, timestamp, action, target, actor, details, structured_json,
                severity, connector, trace_id, session_id, destination_app,
                tool_name
         FROM audit_events
-        WHERE action LIKE 'agentrange-runtime-%'
+        WHERE (action LIKE 'agentrange-runtime-%'
            OR connector = 'agentrange'
-           OR actor = 'defenseclaw-agentrange-sidecar'
+           OR actor = 'defenseclaw-agentrange-sidecar')
+        {window_clause}
         ORDER BY timestamp, id
-        """
+        """,
+        params,
     ).fetchall()
     con.close()
     events: list[dict[str, Any]] = []
     for row in rows:
         structured = parse_json(row["structured_json"])
+        timestamp = str(row["timestamp"] or "")
+        if window:
+            try:
+                observed_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(UTC)
+            except ValueError:
+                continue
+            if not window[0] <= observed_at <= window[1]:
+                continue
+        instance_id = str(structured.get("instance_id") or row["session_id"] or structured.get("session_id") or "")
+        if instance_ids is not None and instance_id not in instance_ids:
+            continue
         action = str(row["action"] or "")
         stage = str(structured.get("stage") or action.removeprefix("agentrange-runtime-") or "unknown")
         event = {
             "event_id": row["id"],
-            "timestamp": row["timestamp"],
+            "timestamp": timestamp,
             "action": action,
             "stage": stage,
             "target": row["target"] or "",
@@ -90,12 +136,15 @@ def load_audit_events(audit_db: Path) -> list[dict[str, Any]]:
             "connector": row["connector"] or structured.get("connector") or "agentrange",
             "trace_id": row["trace_id"] or structured.get("trace_id") or "",
             "session_id": row["session_id"] or structured.get("session_id") or "",
+            "instance_id": instance_id,
             "destination_app": row["destination_app"] or structured.get("destination") or "",
             "tool_name": row["tool_name"] or structured.get("tool_name") or "",
             "mcp_server": structured.get("mcp_server") or "",
             "proxy_kind": structured.get("proxy_kind") or "",
             "http_method": structured.get("http_method") or "",
             "http_path": structured.get("http_path") or "",
+            "app_frames": structured.get("app_frames") if isinstance(structured.get("app_frames"), list) else [],
+            "app_frames_source": structured.get("app_frames_source") or "",
             "decision": decision_from(row, structured),
             "reason": structured.get("reason") or "",
             "latency_ms": structured.get("latency_ms"),
@@ -174,7 +223,7 @@ def event_summary(event: dict[str, Any]) -> str:
 def build_chains(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for event in events:
-        key = str(event.get("session_id") or event.get("trace_id") or event.get("event_id"))
+        key = str(event.get("instance_id") or event.get("session_id") or event.get("trace_id") or event.get("event_id"))
         grouped[key].append(event)
     chains: list[dict[str, Any]] = []
     for key in sorted(grouped):
@@ -185,8 +234,6 @@ def build_chains(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         sequence_type = classify_sequence(rows)
         for index, event in enumerate(rows, 1):
             node_id = f"n{index}"
-            if event.get("decision") == "block" and block_node_id is None:
-                block_node_id = node_id
             nodes.append(
                 {
                     "id": node_id,
@@ -194,19 +241,38 @@ def build_chains(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "stage": event.get("stage"),
                     "asset_id": event.get("destination_app") or event.get("proxy_kind") or "agentrange",
                     "summary": event_summary(event),
+                    "evidence_level": "direct" if event.get("raw_ref") else "time_window_inference",
                     "decision": event.get("decision"),
                     "severity": event.get("severity"),
-                    "raw_ref": event.get("raw_ref"),
+                    "raw_ref": str(event.get("raw_ref") or ""),
                     "tool_name": event.get("tool_name"),
                     "reason": event.get("reason"),
+                    "prompt_excerpt": str(event.get("prompt") or "")[:500],
+                    "request_excerpt": str(event.get("request_body") or "")[:500],
+                    "http_method": event.get("http_method") or "",
+                    "http_path": event.get("http_path") or "",
+                    "app_frames": event.get("app_frames") or [],
+                    "app_frames_source": event.get("app_frames_source") or "",
                 }
             )
             if index > 1:
-                edges.append({"from": f"n{index - 1}", "to": node_id, "relation": "observed_before"})
+                edges.append({
+                    "from": f"n{index - 1}", "to": node_id,
+                    "relation": "observed_before", "evidence_level": "time_window_inference",
+                })
+        block_nodes = [node for node in nodes if node["decision"] == "block"]
+        if block_nodes:
+            block_node_id = max(block_nodes, key=lambda node: (
+                node["stage"] == "block",
+                bool(node["http_path"] or node["tool_name"]),
+                bool(node["request_excerpt"] or node["prompt_excerpt"]),
+                bool(node["app_frames"]),
+            ))["id"]
         chains.append(
             {
                 "chain_id": f"chain:{key}",
-                "session_id": key,
+                "instance_id": key,
+                "session_id": rows[0].get("session_id") or key,
                 "trace_id": rows[0].get("trace_id") or key,
                 "blocked": block_node_id is not None,
                 "block_node_id": block_node_id,
@@ -224,13 +290,20 @@ def build_chains(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--audit-db", type=Path, default=None)
-    parser.add_argument("--events-output", type=Path, default=DEFAULT_REPORTS / "runtime-events.jsonl")
-    parser.add_argument("--output", type=Path, default=DEFAULT_REPORTS / "attack-chains.json")
+    parser.add_argument("--run-dir", type=Path, help="Limit evidence to a completed action replay")
+    parser.add_argument("--events-output", type=Path)
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
     audit_db = args.audit_db or defenseclaw_home() / "audit.db"
-    events = load_audit_events(audit_db)
-    write_jsonl(args.events_output, events)
+    run_dir = args.run_dir.resolve() if args.run_dir else None
+    if run_dir and not audit_db.is_file():
+        raise FileNotFoundError(audit_db)
+    window, instance_ids = load_run_scope(run_dir) if run_dir else (None, None)
+    events_output = args.events_output or (run_dir / "runtime-events.jsonl" if run_dir else DEFAULT_REPORTS / "runtime-events.jsonl")
+    output = args.output or (run_dir / "attack-chains.json" if run_dir else DEFAULT_REPORTS / "attack-chains.json")
+    events = load_audit_events(audit_db, window=window, instance_ids=instance_ids)
+    write_jsonl(events_output, events)
     chains = build_chains(events)
     result = {
         "schema_version": 1,
@@ -238,9 +311,9 @@ def main() -> int:
         "event_count": len(events),
         "chains": chains,
     }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"output": str(args.output), "events": len(events), "chains": len(chains)}, ensure_ascii=False))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps({"output": str(output), "events": len(events), "chains": len(chains)}, ensure_ascii=False))
     return 0
 
 

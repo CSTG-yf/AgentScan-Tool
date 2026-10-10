@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "run_id": "action",
+  "created_at": "2026-10-09T03:23:55.027703+00:00",
+  "mode": "action",
+  "seed": 1337,
+  "total": 5200,
+  "malicious_target": 80,
+  "git_commit": "11d6a7fb7a91684b2b1b0f661b8643541445cc56",
+  "arena_root": "/Users/Zhuanz/Documents/ChatGPT/work/AgentScan-Tool-揭榜赛作品/task/AgentRange-player-full",
+  "arena_sha256": "9414b66e8ba7deef52f0ff1461ad7e1ed816f1fe22300fdef32843f62b242f35",
+  "public_corpus_sha256": "7c48a410b1d503d4e8c00e70c4642eaee3876675980b8caf145d15d0ea416b25",
+  "ground_truth_sha256": "3a691bea87c5e006698af767d9b6aa72f5370cd8adca9c5e87dc7e1cce13b6a7",
+  "ground_truth_semantic_sha256": "1d22511608be32ad2070a58b939b12d1e45e890f0f7e4ab5a0ee088531bcc69e",
+  "forbidden_detector_inputs": [
+    "/admin/trajectories",
+    "scenario_id",
+    "label",
+    "gt.jsonl"
+  ],
+  "detection_input_contract": "public-corpus.jsonl plus application/system observations only"
+}

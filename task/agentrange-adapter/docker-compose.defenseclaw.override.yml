@@ -13,6 +13,9 @@ services:
       MCP_SANDBOX_EXEC: http://defenseclaw-mcp-proxy:8000/mcp-sandbox-exec/mcp
       MCP_SHELL_RUNNER: http://defenseclaw-mcp-proxy:8000/mcp-shell-runner/mcp
       MCP_THREAT_INTEL: http://defenseclaw-mcp-proxy:8000/mcp-threat-intel/mcp
+      PYTHONPATH: /opt/defenseclaw
+    volumes:
+    - ../agentrange-adapter/opspilot_probe.py:/opt/defenseclaw/sitecustomize.py:ro
     ports: !reset []
   defenseclaw-opspilot-ingress:
     image: python:3.12-slim
@@ -29,8 +32,10 @@ services:
     environment:
       PYTHONUNBUFFERED: '1'
       DC_GATEWAY_BASE: http://host.docker.internal:18970
+      DC_CONTEXT_RELAY_URL: http://defenseclaw-context-relay:9101
       DC_FAIL_MODE: open
-      DC_INSPECT_TIMEOUT_MS: '250'
+      DC_INSPECT_TIMEOUT_MS: '1200'
+      DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: opspilot
       DC_TARGET_BASE: http://opspilot-app:8000
@@ -39,6 +44,16 @@ services:
     - opspilot-app
     ports:
     - 8100:8000
+  defenseclaw-context-relay:
+    image: python:3.12-slim
+    command: python /opt/defenseclaw/context_relay.py
+    volumes:
+    - ../agentrange-adapter/context_relay.py:/opt/defenseclaw/context_relay.py:ro
+    environment:
+      PYTHONUNBUFFERED: '1'
+      DC_CONTEXT_TTL_SECONDS: '120'
+    networks:
+    - opspilot-net
   defenseclaw-llm-proxy:
     image: python:3.12-slim
     command: python /opt/defenseclaw/agentrange_sidecar.py
@@ -54,8 +69,10 @@ services:
     environment:
       PYTHONUNBUFFERED: '1'
       DC_GATEWAY_BASE: http://host.docker.internal:18970
+      DC_CONTEXT_RELAY_URL: http://defenseclaw-context-relay:9101
       DC_FAIL_MODE: open
-      DC_INSPECT_TIMEOUT_MS: '250'
+      DC_INSPECT_TIMEOUT_MS: '1200'
+      DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: llm
       DC_TARGET_BASE: http://llm-stub:8000
@@ -77,8 +94,10 @@ services:
     environment:
       PYTHONUNBUFFERED: '1'
       DC_GATEWAY_BASE: http://host.docker.internal:18970
+      DC_CONTEXT_RELAY_URL: http://defenseclaw-context-relay:9101
       DC_FAIL_MODE: open
-      DC_INSPECT_TIMEOUT_MS: '250'
+      DC_INSPECT_TIMEOUT_MS: '1200'
+      DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: mcp
       DC_MCP_TARGETS: '{"mcp-customer-db": "http://mcp-customer-db:8000", "mcp-gitlab":
@@ -115,8 +134,10 @@ services:
     environment:
       PYTHONUNBUFFERED: '1'
       DC_GATEWAY_BASE: http://host.docker.internal:18970
+      DC_CONTEXT_RELAY_URL: http://defenseclaw-context-relay:9101
       DC_FAIL_MODE: open
-      DC_INSPECT_TIMEOUT_MS: '250'
+      DC_INSPECT_TIMEOUT_MS: '1200'
+      DC_BYPASS_INSPECTION: ${DC_BYPASS_INSPECTION:-0}
       DC_CONNECTOR: agentrange
       DC_PROXY_KIND: langflow
       DC_TARGET_BASE: http://langflow:7860
@@ -127,7 +148,7 @@ services:
     - 7860:7860
 x-defenseclaw-agentrange:
   non_invasive: true
-  source_compose: ../AgentRange-player/docker-compose.yml
+  source_compose: ../AgentRange-player-full/docker-compose.yml
   gateway_base: http://host.docker.internal:18970
   routes:
   - kind: app
@@ -191,6 +212,7 @@ x-defenseclaw-agentrange:
     via: defenseclaw-langflow-ingress
     to: langflow
   event_model:
+  - instance_id
   - session_id
   - trace_id
   - stage

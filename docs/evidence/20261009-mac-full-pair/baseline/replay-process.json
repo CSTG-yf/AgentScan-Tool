@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "run_id": "baseline",
+  "mode": "baseline",
+  "started_at": "2026-10-09T02:24:08.510418+00:00",
+  "docker_available": true,
+  "docker_version": "29.2.0",
+  "command": [
+    "/Users/Zhuanz/Documents/ChatGPT/work/AgentScan-Tool-揭榜赛作品/.venv/bin/python",
+    "/Users/Zhuanz/Documents/ChatGPT/work/AgentScan-Tool-揭榜赛作品/bench/agentrange_replay.py",
+    "--mode",
+    "baseline",
+    "--seed",
+    "1337",
+    "--total",
+    "5200",
+    "--malicious-target",
+    "80",
+    "--run-dir",
+    "/Users/Zhuanz/Documents/ChatGPT/work/AgentScan-Tool-揭榜赛作品/bench/runs/20261009-mac-full-pair/baseline",
+    "--range-root",
+    "/Users/Zhuanz/Documents/ChatGPT/work/AgentScan-Tool-揭榜赛作品/task/AgentRange-player-full",
+    "--target-rate",
+    "1.5"
+  ],
+  "returncode": 0,
+  "finished_at": "2026-10-09T03:21:55.780597+00:00"
+}

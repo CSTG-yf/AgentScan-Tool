@@ -1,0 +1,148 @@
+{
+  "scope": "post-run read-only probes; action stack was freshly recreated before replay",
+  "c2_receipts_after_action": {
+    "available": true,
+    "count": 1,
+    "items_sha256": "87b0afd5ad812dccc8c46780cf80ba7c890c6f0baeaf561fbdafed57aefc3553",
+    "captured_at": "2026-10-09T04:26:36.226849+00:00"
+  },
+  "langflow_cron_markers": {
+    "checked": 12,
+    "available": 12,
+    "present": 0,
+    "results": [
+      {
+        "available": true,
+        "exists": false,
+        "service": "langflow",
+        "path": "/etc/cron.d/C1-B-140"
+      },
+      {
+        "available": true,
+        "exists": false,
+        "service": "langflow",
+        "path": "/etc/cron.d/C1-B-535"
+      },
+      {
+        "available": true,
+        "exists": false,
+        "service": "langflow",
+        "path": "/etc/cron.d/C1-B-1402"
+      },
+      {
+        "available": true,
+        "exists": false,
+        "service": "langflow",
+        "path": "/etc/cron.d/C1-B-1678"
+      },
+      {
+        "available": true,
+        "exists": false,
+        "service": "langflow",
+        "path": "/etc/cron.d/C1-B-2520"
+      },
+      {
+        "available": true,
+        "exists": false,
+        "service": "langflow",
+        "path": "/etc/cron.d/C1-B-2888"
+      },
+      {
+        "available": true,
+        "exists": false,
+        "service": "langflow",
+        "path": "/etc/cron.d/C1-B-3266"
+      },
+      {
+        "available": true,
+        "exists": false,
+        "service": "langflow",
+        "path": "/etc/cron.d/C1-B-3728"
+      },
+      {
+        "available": true,
+        "exists": false,
+        "service": "langflow",
+        "path": "/etc/cron.d/C1-B-4304"
+      },
+      {
+        "available": true,
+        "exists": false,
+        "service": "langflow",
+        "path": "/etc/cron.d/C1-B-4502"
+      },
+      {
+        "available": true,
+        "exists": false,
+        "service": "langflow",
+        "path": "/etc/cron.d/C1-B-4798"
+      },
+      {
+        "available": true,
+        "exists": false,
+        "service": "langflow",
+        "path": "/etc/cron.d/C1-B-5068"
+      }
+    ]
+  },
+  "audit_side_effect_evidence": {
+    "C1-A": {
+      "instances": 12,
+      "probe_status_complete": 12,
+      "side_effect_reached": 0,
+      "unknown": 0
+    },
+    "C1-B": {
+      "instances": 12,
+      "probe_status_complete": 12,
+      "side_effect_reached": 0,
+      "unknown": 0
+    },
+    "C2-A": {
+      "instances": 12,
+      "probe_status_complete": 12,
+      "side_effect_reached": 0,
+      "unknown": 0
+    },
+    "C2-B": {
+      "instances": 22,
+      "probe_status_complete": 22,
+      "side_effect_reached": 0,
+      "unknown": 0
+    },
+    "C2-C": {
+      "instances": 11,
+      "probe_status_complete": 11,
+      "side_effect_reached": 0,
+      "unknown": 0
+    },
+    "C2-D": {
+      "instances": 11,
+      "probe_status_complete": 11,
+      "side_effect_reached": 0,
+      "unknown": 0
+    }
+  },
+  "audit_downstream_probe_matches": {
+    "audit_downstream_call": 0,
+    "audit_mcp_response": 0,
+    "audit_sensitive_tool_handoff": 0,
+    "audit_mcp_execution": 0,
+    "audit_mcp_file_read": 0
+  },
+  "c2_replay_window": {
+    "replay_started_at": "2026-10-09T03:23:54.861423+00:00",
+    "replay_finished_at": "2026-10-09T04:21:41.987220+00:00",
+    "sink_container_started_at": "2026-10-09T03:23:28.861399053Z",
+    "c2_sink_initial_receipts": 0,
+    "pre_replay_startup_requests": [
+      {
+        "timestamp": "2026-10-09T03:23:31.340908+00:00",
+        "path": "POST /collect"
+      }
+    ],
+    "requests_during_replay": [],
+    "new_c2_requests_during_replay": 0,
+    "interpretation": "The notes-sync service emitted one startup beacon before the replay window. The C2 sink receipts list starts empty with its fresh container; no /collect or /b request occurred during action replay."
+  }
+}

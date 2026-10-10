@@ -3304,7 +3304,7 @@ func pageInferAgent(target, resourceType string) pageAgentDescriptor {
 	lower := strings.ToLower(target)
 	switch {
 	case strings.Contains(lower, "agentrange-player") || strings.Contains(lower, "agentrange") || strings.Contains(lower, "ops-pilot") || strings.Contains(lower, "opspilot"):
-		return pageAgentDescriptor{ID: "agentrange-opspilot", Product: "AgentRange / OpsPilot", Vendor: "TraceBastion Lab", Kind: "agent-platform", Runtime: "AgentRange", Source: "task/AgentRange-player", Description: "AgentRange static resources discovered by the gateway."}
+		return pageAgentDescriptor{ID: "agentrange-opspilot", Product: "AgentRange / OpsPilot", Vendor: "TraceBastion Lab", Kind: "agent-platform", Runtime: "AgentRange", Source: "task/AgentRange-player-full", Description: "AgentRange static resources discovered by the gateway."}
 	case strings.Contains(lower, "openclaw"):
 		return pageAgentDescriptor{ID: "openclaw", Product: "OpenClaw", Vendor: "DefenseClaw", Kind: "agent-platform", Runtime: "OpenClaw", Source: "%USERPROFILE%/.openclaw"}
 	case strings.Contains(lower, ".claude") || strings.Contains(lower, "claude"):

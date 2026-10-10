@@ -108,6 +108,14 @@ rules:
     severity: CRITICAL
     confidence: 0.90
     tags: [credential]
+  - id: PATH-CRON-PERSIST
+    # Path traversal or direct access to cron directories can turn an upload
+    # primitive into persistence and code execution.
+    pattern: '(?i)(?:\.\.[/\\]){2,}[^\s"'']*(?:[/\\])etc[/\\](?:cron\.d|cron\.(?:daily|hourly|weekly|monthly))(?:[/\\]|\b)|(?:^|[\s"''])/etc/(?:cron\.d|cron\.(?:daily|hourly|weekly|monthly))(?:/|\b)'
+    title: "Cron persistence path access"
+    severity: CRITICAL
+    confidence: 0.95
+    tags: [persistence, path-traversal, system-file]
   - id: PATH-HISTORY
     pattern: '(?:~|\$HOME|\$\{HOME\}|/home/\w+|/root|/Users/\w+)/\.(?:bash_history|zsh_history|python_history)'
     title: "Shell history file"

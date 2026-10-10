@@ -16,7 +16,7 @@ rules:
     tags: [pii, regulated]
 
   - id: ENT-CC-VISA
-    pattern: '\b4\d{3}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b'
+    pattern: '(?:^|[^A-Za-z0-9_-])4\d{3}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}(?:$|[^A-Za-z0-9_-])'
     title: "Visa credit card number"
     severity: CRITICAL
     confidence: 0.80
@@ -60,7 +60,10 @@ rules:
   - id: ENT-EMAIL-BULK
     pattern: '(?i)\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b'
     title: "Email address"
-    severity: MEDIUM
+    # A single customer email is expected output for ordinary support
+    # lookups. Keep the finding visible for audit/redaction, but reserve
+    # action blocking for regulated or bulk PII rules.
+    severity: LOW
     confidence: 0.40
     tags: [pii]
 

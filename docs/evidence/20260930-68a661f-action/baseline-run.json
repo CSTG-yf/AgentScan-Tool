@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "run_id": "baseline",
+  "created_at": "2026-09-30T03:47:36.868994+00:00",
+  "mode": "baseline",
+  "seed": 1337,
+  "total": 5200,
+  "malicious_target": 80,
+  "git_commit": "68a661f7c8e817e65ecfc83dd789dcefec9b2be7",
+  "arena_root": "D:\\111work\\project-scan\\task\\AgentRange-player-full",
+  "arena_sha256": "bcd51ef41b2bfd2871a06e03e6835d26c41e45436e86121c722981b06dcc5d5b",
+  "public_corpus_sha256": "7c48a410b1d503d4e8c00e70c4642eaee3876675980b8caf145d15d0ea416b25",
+  "ground_truth_sha256": "b38f72bb35264e3d64ffed507ec9fbf29784317441f8face0f1477034d210a0f",
+  "ground_truth_semantic_sha256": "1d22511608be32ad2070a58b939b12d1e45e890f0f7e4ab5a0ee088531bcc69e",
+  "forbidden_detector_inputs": [
+    "/admin/trajectories",
+    "scenario_id",
+    "label",
+    "gt.jsonl"
+  ],
+  "detection_input_contract": "public-corpus.jsonl plus application/system observations only"
+}

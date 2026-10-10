@@ -2,16 +2,18 @@
   "adapter": "agentrange",
   "non_invasive": true,
   "source": {
-    "range_root": "../AgentRange-player",
-    "compose_path": "../AgentRange-player/docker-compose.yml",
-    "sidecar_source": "../../cli/defenseclaw/agentrange_sidecar.py"
+    "range_root": "../AgentRange-player-full",
+    "compose_path": "../AgentRange-player-full/docker-compose.yml",
+    "sidecar_source": "../../cli/defenseclaw/agentrange_sidecar.py",
+    "opspilot_probe_source": "opspilot_probe.py",
+    "context_relay_source": "context_relay.py"
   },
   "gateway": {
     "base_url": "http://host.docker.internal:18970",
     "token_env": "DEFENSECLAW_GATEWAY_TOKEN",
-    "mode": "observe",
+    "mode": "action",
     "fail_mode": "open",
-    "inspect_timeout_ms": 250
+    "inspect_timeout_ms": 1200
   },
   "services": {
     "opspilot": "opspilot-app",
@@ -165,6 +167,7 @@
     }
   ],
   "event_model": [
+    "instance_id",
     "session_id",
     "trace_id",
     "stage",

@@ -18,6 +18,7 @@ package gateway
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -504,6 +505,22 @@ var knownReadTools = map[string]bool{
 	"read_file": true, "cat_file": true, "open_file": true, "view_file": true,
 }
 
+// isReadToolName recognizes namespaced read-file aliases emitted by MCP and
+// agent adapters (for example shell_runner_read_file and
+// mcp__filesystem__read_file) while keeping arbitrary tools out of the
+// file-read policy path. The suffix is intentionally semantic rather than
+// tied to one framework or one scenario.
+func isReadToolName(tool string) bool {
+	lower := strings.ToLower(strings.TrimSpace(tool))
+	if knownReadTools[lower] {
+		return true
+	}
+	return strings.HasSuffix(lower, "_read_file") ||
+		strings.HasSuffix(lower, ".read_file") ||
+		strings.HasSuffix(lower, "-read-file") ||
+		strings.HasSuffix(lower, "_readfile")
+}
+
 var knownWriteTools = map[string]bool{
 	"write_file": true, "edit_file": true, "delete_file": true, "move_file": true,
 	"create_file": true, "append_file": true,
@@ -669,7 +686,16 @@ var shellVarPattern = regexp.MustCompile(`\$\{?\w+\}?`)
 var shellGlobPattern = regexp.MustCompile(`\?`)
 
 func normalizeShell(s string) string {
-	n := shellNormalizeReplacer.Replace(s)
+	// HTTP form bodies and MCP arguments may carry paths in percent-encoded
+	// form (for example, ../../%2e%2e/%65tc/%63ron.d). Decode one URL layer
+	// before the existing shell normalization so path and command rules see
+	// the effective value without recursively decoding attacker-controlled
+	// input.
+	n := s
+	if decoded, err := url.PathUnescape(n); err == nil {
+		n = decoded
+	}
+	n = shellNormalizeReplacer.Replace(n)
 	// Expand globs: replace ? with each common character so /etc/shad?w → /etc/shadow
 	n = shellGlobPattern.ReplaceAllString(n, "o")
 	// Strip variable references: ${P}/shadow → /shadow, $HOME/.ssh → /.ssh

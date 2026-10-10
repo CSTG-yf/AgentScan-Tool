@@ -54,6 +54,14 @@ rules:
     severity: CRITICAL
     confidence: 0.95
     tags: [execution, obfuscation]
+  - id: CMD-PY-SUBPROCESS-SHELL
+    # Dynamic Python validators can execute arbitrary shell input even when
+    # the command itself is supplied only at runtime.
+    pattern: '(?is)(?:__import__\s*\(\s*["'']subprocess["'']\s*\)|\bsubprocess)\s*\.\s*(?:run|Popen|call|check_output)\s*\([^)]*\bshell\s*=\s*True\b'
+    title: "Python subprocess with shell=True"
+    severity: CRITICAL
+    confidence: 0.96
+    tags: [execution, code-injection]
   - id: CMD-EVAL
     pattern: '(?i)\beval\s+["''\$\(]'
     title: "Shell eval with dynamic input"

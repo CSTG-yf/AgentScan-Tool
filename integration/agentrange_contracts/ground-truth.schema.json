@@ -3,13 +3,18 @@
   "$id": "urn:agentrange:ground-truth:v1",
   "title": "RangeGroundTruth",
   "type": "object",
-  "required": ["instance_id", "scenario_id", "label", "first_dangerous_action"],
+  "required": ["run_id", "mode", "instance_id", "scenario_id", "label", "asset_id", "first_dangerous_action", "expected_side_effects", "input_sha256"],
   "properties": {
+    "run_id": {"type": "string", "minLength": 1},
+    "mode": {"enum": ["baseline", "observe", "action"]},
     "instance_id": {"type": "string", "minLength": 1},
     "scenario_id": {"enum": ["C1-A", "C1-B", "C2-A", "C2-B", "C2-C", "C2-D", "normal"]},
     "label": {"enum": ["malicious", "benign"]},
+    "asset_id": {"type": "string", "minLength": 1},
     "first_dangerous_action": {"type": ["string", "null"]},
-    "expected_target": {"type": "string"}
+    "expected_target": {"type": "string"},
+    "expected_side_effects": {"type": "array", "items": {"type": "string"}},
+    "input_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
   },
   "additionalProperties": false
 }

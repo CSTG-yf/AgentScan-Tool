@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -78,32 +79,65 @@ def status_label(status: str) -> str:
 
 def build_data(report: dict[str, Any]) -> dict[str, Any]:
     static = report.get("static") or {}
-    static_metrics = static.get("metrics") or {}
+    static_evaluation = static.get("evaluation") or {}
+    evaluated_asset = static_evaluation.get("asset") or {}
+    evaluated_risk = static_evaluation.get("risk") or {}
+    static_scope_verified = static_evaluation.get("scope") == "local_frozen_fixture"
     runtime = report.get("runtime") or {}
     rules = report.get("rules") or {}
     benchmark = report.get("benchmark") or {}
     modes = benchmark.get("modes") or {}
+    if not modes and benchmark.get("overall"):
+        overall = benchmark["overall"]
+        counts = overall.get("counts") or {}
+        metrics = dict(overall.get("metrics") or {})
+        metrics["normal_success_rate"] = (overall.get("normal_business") or {}).get("success_rate")
+        resources = benchmark.get("resources") or {}
+        baseline = resources.get("baseline") or {}
+        modes = {"action": {
+            "counts": {"total": sum(counts.get(key, 0) for key in ("tp", "fp", "tn", "fn", "unknown"))},
+            "metrics": metrics,
+            "inspect_latency_ms": overall.get("inspect_latency_ms") or {},
+            "cpu_increment_pct": resources.get("cpu_increment_pct"),
+            "cpu_comparison_status": baseline.get("status") if baseline.get("manifest_compatibility") == "verified" else None,
+            "config": {"run": report.get("benchmark_provenance", {}).get("action_run")},
+        }}
     action = modes.get("action") or {}
     action_metrics = action.get("metrics") or {}
     action_latency = action.get("inspect_latency_ms") or action_metrics.get("latency_ms") or {}
+    action_latency_p95 = action_latency.get("p95")
     cpu_increment = action.get("cpu_increment_pct")
+    cpu_status = action.get("cpu_comparison_status")
     traceability = report.get("plan_traceability") or {}
     trace_counts = traceability.get("counts") or {}
-
     scorecard = [
         {
             "name": "资产盘点准确率",
             "target": "目标 ≥99%",
-            "actual": pct(static_metrics.get("asset_coverage")),
-            "detail": f"{static_metrics.get('asset_found', 0)}/{static_metrics.get('asset_expected', 0)}",
-            "status": "pass" if static_metrics.get("asset_coverage", 0) >= 0.99 else "wait",
+            "actual": pct(evaluated_asset.get("precision")),
+            "detail": "本地标注集 / Precision",
+            "status": "pass" if static_scope_verified and (evaluated_asset.get("precision") or 0) >= 0.99 else "wait",
+        },
+        {
+            "name": "资产漏报率",
+            "target": "目标 <5%",
+            "actual": pct(evaluated_asset.get("miss_rate")),
+            "detail": "本地标注集 / FN",
+            "status": "pass" if static_scope_verified and evaluated_asset.get("miss_rate") is not None and evaluated_asset["miss_rate"] < 0.05 else "wait",
         },
         {
             "name": "风险识别准确率",
             "target": "目标 ≥95%",
-            "actual": pct(static_metrics.get("risk_recall")),
-            "detail": f"{static_metrics.get('required_risks_detected', 0)}/{static_metrics.get('required_risks', 0)}",
-            "status": "pass" if static_metrics.get("risk_recall", 0) >= 0.95 else "wait",
+            "actual": pct(evaluated_risk.get("precision")),
+            "detail": "本地标注集 / Precision",
+            "status": "pass" if static_scope_verified and (evaluated_risk.get("precision") or 0) >= 0.95 else "wait",
+        },
+        {
+            "name": "风险漏报率",
+            "target": "目标 <5%",
+            "actual": pct(evaluated_risk.get("miss_rate")),
+            "detail": "本地标注集 / FN",
+            "status": "pass" if static_scope_verified and evaluated_risk.get("miss_rate") is not None and evaluated_risk["miss_rate"] < 0.05 else "wait",
         },
         {
             "name": "规则合同",
@@ -129,16 +163,16 @@ def build_data(report: dict[str, Any]) -> dict[str, Any]:
         {
             "name": "阻断响应 p95",
             "target": "目标 <1000ms",
-            "actual": ms(action_latency.get("p95")),
+            "actual": ms(action_latency_p95),
             "detail": "Inspect latency",
-            "status": "pass" if action_latency.get("p95", 1000) < 1000 else ("fail" if action_latency else "wait"),
+            "status": "pass" if action_latency_p95 is not None and action_latency_p95 < 1000 else ("fail" if action_latency_p95 is not None else "wait"),
         },
         {
             "name": "DefenseClaw 增量 CPU",
             "target": "目标 ≤5%",
             "actual": pct_points(cpu_increment),
             "detail": "Action vs baseline",
-            "status": "pass" if cpu_increment is not None and cpu_increment <= 5 else ("fail" if action else "wait"),
+            "status": "pass" if cpu_status == "complete" and cpu_increment is not None and cpu_increment <= 5 else ("fail" if cpu_status == "complete" and action else "wait"),
         },
         {
             "name": "正常业务成功率",
@@ -152,12 +186,12 @@ def build_data(report: dict[str, Any]) -> dict[str, Any]:
     return {
         "generated_at": report.get("generated_at", "not generated"),
         "snapshot": [
-            {"label": "资产覆盖", "value": f"{static_metrics.get('asset_found', 0)}/{static_metrics.get('asset_expected', 0)}"},
-            {"label": "必要风险", "value": f"{static_metrics.get('required_risks_detected', 0)}/{static_metrics.get('required_risks', 0)}"},
+            {"label": "资产识别", "value": f"{evaluated_asset.get('tp', 0)}/{evaluated_asset.get('tp', 0) + evaluated_asset.get('fn', 0)}" if static_scope_verified else "待评估"},
+            {"label": "风险识别", "value": f"{evaluated_risk.get('tp', 0)}/{evaluated_risk.get('tp', 0) + evaluated_risk.get('fn', 0)}" if static_scope_verified else "待评估"},
             {"label": "运行时事件", "value": runtime.get("event_count", 0)},
             {"label": "攻击链", "value": runtime.get("attack_chain_count", 0)},
             {"label": "阻断链", "value": runtime.get("blocked_chain_count", 0)},
-            {"label": "需求就绪", "value": trace_counts.get("evidence-ready", 0)},
+            {"label": "需求路径", "value": trace_counts.get("evidence-ready", 0)},
         ],
         "scorecard": scorecard,
         "scenarios": read_scenarios(),
@@ -544,7 +578,7 @@ def build_html(report: dict[str, Any]) -> str:
     </section>
     <section class="section shell" aria-labelledby="modeTitle">
       <div class="section-heading">
-        <div><p class="section-kicker">THREE-MODE BENCHMARK</p><h2 id="modeTitle">三模式对照</h2></div>
+        <div><p class="section-kicker">BENCHMARK MODES</p><h2 id="modeTitle">模式评测</h2></div>
         <div class="mode-switch" role="tablist" aria-label="验证模式">
           <button type="button" role="tab" aria-selected="true" data-mode="baseline">Baseline</button>
           <button type="button" role="tab" aria-selected="false" data-mode="observe">Observe</button>
@@ -640,7 +674,12 @@ def build_html(report: dict[str, Any]) -> str:
       document.querySelectorAll("[data-mode]").forEach(item => item.setAttribute("aria-selected", String(item === button)));
       renderMode(button.dataset.mode);
     }));
-    renderMode("baseline");
+    const initialMode = (data.modes || {}).action ? "action" : "baseline";
+    document.querySelectorAll("[data-mode]").forEach(button => {
+      if (Object.keys(data.modes || {}).length) button.style.display = data.modes[button.dataset.mode] ? "" : "none";
+      button.setAttribute("aria-selected", String(button.dataset.mode === initialMode));
+    });
+    renderMode(initialMode);
     document.getElementById("scenarioRows").innerHTML = (data.scenarios || []).map(item => `
       <article class="scenario-card">
         <div class="scenario-top"><span class="scenario-code">${text(item.id)}</span>${pill(item.class === "attack" ? "attack" : "benign")}</div>
@@ -655,7 +694,10 @@ def build_html(report: dict[str, Any]) -> str:
       <div class="chain">
         <div class="chain-title"><strong>${text(chain.chain_id)}</strong>${pill(chain.blocked ? "block" : "allow")}</div>
         <p class="chain-summary">${text(chain.sequence_type || "")} · ${text(chain.evidence_summary || "")}</p>
-        ${(chain.nodes || []).slice(0, 4).map(node => `<div class="node"><strong>${text(node.stage)}</strong> ${pill(node.decision || "unknown")}<div>${text(node.summary || node.raw_ref || "")}</div></div>`).join("")}
+        ${(chain.block_node_id
+          ? (chain.nodes || []).filter((node, index) => index < 2 || node.id === chain.block_node_id)
+          : (chain.nodes || []).slice(0, 4)
+        ).map(node => `<div class="node"><strong>${text(node.stage)}</strong> ${pill(node.decision || "unknown")}<div>${text(node.http_path || node.tool_name || node.summary || "")}</div><div>${text(node.raw_ref || "")}</div></div>`).join("")}
       </div>
     `).join("") : `<div class="empty">No AgentRange runtime chains found yet.</div>`;
     const eventRows = (data.events || []).slice().reverse().map(event => `<tr><td>${text(event.timestamp)}</td><td>${text(event.stage)}</td><td>${text(event.destination_app || event.proxy_kind)}</td><td>${text(event.tool_name || event.mcp_server)}</td><td>${pill(event.decision || "unknown")}</td></tr>`).join("");
@@ -679,7 +721,14 @@ def main() -> int:
     parser.add_argument("--input", type=Path, default=REPORT)
     parser.add_argument("--output", type=Path, default=OUTPUT)
     args = parser.parse_args()
+    if args.input != REPORT and not args.input.is_file():
+        raise FileNotFoundError(args.input)
     report = read_json(args.input)
+    if report.get("evidence_index"):
+        report["evidence_index"] = [
+            Path(os.path.relpath(ROOT / path, args.output.resolve().parent)).as_posix()
+            for path in report["evidence_index"]
+        ]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(build_html(report), encoding="utf-8")
     print(json.dumps({"output": str(args.output)}, ensure_ascii=False))

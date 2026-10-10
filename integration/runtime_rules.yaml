@@ -38,7 +38,7 @@ rules:
       - 'check whether environment variables are documented'
       - 'validate password length and complexity policy'
   - id: AUTH-TENANT-SCOPE
-    severity: HIGH
+    severity: CRITICAL
     confidence: 0.99
     kind: tenant_scope
     attack: {principal_tenant: acme, requested_tenant: globex}

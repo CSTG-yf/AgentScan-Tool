@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agentrange:resource:v1",
+  "title": "RangeResourceSample",
+  "type": "object",
+  "required": ["timestamp", "mode", "container", "cpu_pct"],
+  "properties": {
+    "timestamp": {"type": "string", "format": "date-time"},
+    "mode": {"enum": ["baseline", "observe", "action"]},
+    "container": {"type": "string", "minLength": 1},
+    "cpu_pct": {"type": ["number", "null"], "minimum": 0},
+    "baseline_cpu_pct": {"type": ["number", "null"], "minimum": 0},
+    "memory_usage": {"type": ["string", "null"]},
+    "memory_pct": {"type": ["number", "null"], "minimum": 0}
+  },
+  "additionalProperties": true
+}

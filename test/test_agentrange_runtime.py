@@ -3,7 +3,11 @@ import importlib.util
 import io
 import json
 import os
+import base64
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -27,6 +31,96 @@ class Response:
 
 
 class AgentRangeRuntimeTests(unittest.TestCase):
+    def test_app_frames_are_bounded_and_not_forwarded(self):
+        frames = [{"module": "api.app", "function": "run_agent", "line": 42}]
+        encoded = base64.urlsafe_b64encode(json.dumps(frames).encode()).decode()
+        self.assertEqual(sidecar.extract_app_frames({sidecar.APP_FRAMES_HEADER: encoded}), frames)
+        for invalid in (
+            "not-base64!",
+            base64.urlsafe_b64encode(json.dumps([{"module": "os", "function": "system", "line": 1}]).encode()).decode(),
+            base64.urlsafe_b64encode(json.dumps(frames * 13).encode()).decode(),
+            "A" * 2049,
+        ):
+            self.assertEqual(sidecar.extract_app_frames({sidecar.APP_FRAMES_HEADER: invalid}), [])
+
+        handler = object.__new__(sidecar.AgentRangeProxyHandler)
+        handler.command = "POST"
+        handler.headers = {sidecar.APP_FRAMES_HEADER: encoded}
+        handler._trace_id = "trace-1"
+        response = Response({})
+        response.status = 200
+        response.headers = {}
+        captured = []
+        with patch.object(sidecar, "urlopen", side_effect=lambda req, **kw: captured.append(req) or response):
+            handler._forward("http://service/endpoint", b"{}")
+        self.assertIsNone(captured[0].get_header(sidecar.APP_FRAMES_HEADER))
+
+    def test_gateway_requests_reuse_one_connection(self):
+        class Server(ThreadingHTTPServer):
+            connections = 0
+            auth_headers = None
+
+            def get_request(self):
+                self.connections += 1
+                return super().get_request()
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"ok")
+
+            def do_POST(self):
+                self.server.auth_headers = (self.headers.get("Authorization"), self.headers.get("X-DefenseClaw-Connector"))
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *args):
+                pass
+
+        server = Server(("127.0.0.1", 0), Handler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{server.server_port}/health"
+        try:
+            with patch.dict(os.environ, {"DC_GATEWAY_BASE": f"http://127.0.0.1:{server.server_port}"}):
+                for _ in range(2):
+                    with sidecar.urlopen(sidecar.Request(url), timeout=0.25) as response:
+                        self.assertEqual(response.read(), b"ok")
+                with patch.dict(os.environ, {"DEFENSECLAW_GATEWAY_TOKEN": "test-token"}):
+                    request = sidecar.authed_request(url, {"check": True}, timeout=0.25)
+                    with sidecar.urlopen(request, timeout=0.25) as response:
+                        self.assertEqual(response.read(), b"{}")
+            self.assertEqual(server.connections, 1)
+            self.assertEqual(server.auth_headers, ("Bearer test-token", "agentrange"))
+        finally:
+            pool, _ = sidecar._gateway_pool(url)
+            while not pool.empty():
+                pool.get_nowait().close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_auth_token_response_is_redacted_for_inspection(self):
+        token = "eyJ" + "a" * 20 + ".eyJ" + "b" * 20 + ".signature"
+        original = json.dumps({"access_token": token, "token_type": "bearer", "message": "normal"}).encode()
+        inspected = sidecar.inspection_response_body(
+            "langflow", "/api/v1/auto_login", 200, original
+        )
+        self.assertNotIn(token.encode(), inspected)
+        self.assertEqual(json.loads(inspected)["access_token"], "[issued credential]")
+        self.assertEqual(json.loads(inspected)["message"], "normal")
+        self.assertEqual(
+            sidecar.inspection_response_body("langflow", "/api/v1/validate/code", 200, original),
+            original,
+        )
+
     def state(self):
         return {
             "context": {"connector": "agentrange", "session_id": "session-1",
@@ -56,7 +150,7 @@ class AgentRangeRuntimeTests(unittest.TestCase):
                     os.environ, {'DEFENSECLAW_GATEWAY_TOKEN': 'test-token'}):
                 verdict, error = sidecar.inspect_request('safe content', 'session-1')
                 self.assertIsNone(error)
-                sidecar.emit_runtime_result('response_received', 200)
+                sidecar.emit_runtime_result('response_received', 200).result(timeout=2)
             context = calls[0][1]['runtime_context']
             self.assertEqual(context['call_id'], state['context']['call_id'])
             self.assertEqual(context['session_id'], 'session-1')
@@ -82,12 +176,39 @@ class AgentRangeRuntimeTests(unittest.TestCase):
         try:
             with patch.object(sidecar, 'urlopen', side_effect=urlopen):
                 sidecar.inspect_request('safe content', 'session-1')
-                sidecar.emit_runtime_result('forward_failed', 502)
+                sidecar.emit_runtime_result('forward_failed', 502).result(timeout=2)
             checks = [body for url, body in calls if url.endswith('/api/v1/inspect/request')]
             self.assertEqual(len(checks), 2)
             self.assertEqual(checks[0], checks[1])
             self.assertEqual(len(state['inspection_ids']), 1)
             self.assertEqual(state['pending_checks'], [])
+        finally:
+            sidecar._runtime_request.reset(token)
+
+    def test_inspection_timeout_retries_within_budget_and_same_event(self):
+        state = self.state()
+        token = sidecar._runtime_request.set(state)
+        calls = []
+
+        def urlopen(request, **kwargs):
+            calls.append((json.loads(request.data), kwargs["timeout"]))
+            if len(calls) == 1:
+                time.sleep(kwargs["timeout"])
+                raise TimeoutError("timed out")
+            return Response({"action": "allow"}, {"X-DefenseClaw-Runtime-Status": "recorded"})
+
+        try:
+            with patch.object(sidecar, "urlopen", side_effect=urlopen), patch.dict(
+                    os.environ, {"DC_INSPECT_TIMEOUT_MS": "400"}):
+                verdict, error = sidecar.inspect_request("safe content", "session-1")
+            self.assertIsNone(error)
+            self.assertEqual(verdict["action"], "allow")
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[0][0], calls[1][0])
+            self.assertLessEqual(calls[0][1], 0.25)
+            self.assertLessEqual(calls[1][1], 0.16)
+            self.assertEqual(len(state["inspection_ids"]), 1)
+            self.assertEqual(state["pending_checks"], [])
         finally:
             sidecar._runtime_request.reset(token)
 
@@ -117,6 +238,74 @@ class AgentRangeRuntimeTests(unittest.TestCase):
             self.assertEqual(req.get_header('X-defenseclaw-trace-id'), 'trace-1')
         finally:
             sidecar._runtime_request.reset(token)
+
+    def test_authorization_context_is_normalized_from_adapter_headers(self):
+        headers = {
+            'X-Acting-User': 'lwang',
+            'X-Acting-Role': 'support-agent',
+            'X-Acting-Scope': json.dumps({'tenant': 'acme'}),
+        }
+        self.assertEqual(
+            sidecar.extract_authorization_context(headers),
+            {'principal': {
+                'sub': 'lwang',
+                'role': 'support-agent',
+                'scope': {'tenant': 'acme'},
+            }},
+        )
+
+    def test_tool_inspection_carries_authorization_context(self):
+        state = self.state()
+        state['authorization_context'] = {
+            'principal': {'sub': 'lwang', 'scope': {'tenant': 'acme'}},
+        }
+        token = sidecar._runtime_request.set(state)
+        captured = []
+        try:
+            with patch.object(sidecar, 'urlopen', side_effect=lambda req, **kw:
+                              captured.append(json.loads(req.data)) or Response({'action': 'allow'})):
+                verdict, error = sidecar.inspect_tool(
+                    'customer_db_query', {'tenant': 'globex'}, 'session-1',
+                    mcp_server='customer-db',
+                )
+            self.assertIsNone(error)
+            self.assertEqual(verdict['action'], 'allow')
+            self.assertEqual(captured[0]['context'], state['authorization_context'])
+            self.assertEqual(captured[0]['mcp_server_name'], 'customer-db')
+        finally:
+            sidecar._runtime_request.reset(token)
+
+    def test_jwt_claims_are_normalized_for_downstream_context(self):
+        def segment(value):
+            return base64.urlsafe_b64encode(json.dumps(value, separators=(",", ":")).encode()).decode().rstrip("=")
+
+        token = ".".join([
+            segment({"alg": "HS256"}),
+            segment({"sub": "lwang", "role": "support-agent", "scope": {"tenant": "acme"}}),
+            "signature",
+        ])
+        self.assertEqual(
+            sidecar.extract_jwt_authorization_context({"Authorization": f"Bearer {token}"}),
+            {"principal": {"sub": "lwang", "role": "support-agent", "scope": {"tenant": "acme"}}},
+        )
+
+    def test_context_relay_registers_and_retrieves_by_session_and_trace(self):
+        calls = []
+
+        def urlopen(request, **kwargs):
+            calls.append((request.get_method(), request.full_url, json.loads(request.data) if request.data else None))
+            if request.get_method() == "GET":
+                return Response({"context": {"principal": {"scope": {"tenant": "acme"}}}})
+            return Response({})
+
+        with patch.object(sidecar, "urlopen", side_effect=urlopen), patch.dict(
+                os.environ, {"DC_CONTEXT_RELAY_URL": "http://relay:9101"}):
+            context = {"principal": {"scope": {"tenant": "acme"}}}
+            self.assertEqual(sidecar.relay_authorization_context("s-1", "t-1", context), context)
+            self.assertEqual(sidecar.relay_authorization_context("s-1", "t-1", None), {"principal": {"scope": {"tenant": "acme"}}})
+        self.assertEqual([item[0] for item in calls], ["PUT", "GET"])
+        self.assertIn("session_id=s-1", calls[1][1])
+        self.assertIn("trace_id=", calls[1][1])
 
 
 if __name__ == '__main__':

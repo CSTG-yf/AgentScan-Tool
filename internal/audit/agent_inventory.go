@@ -279,12 +279,12 @@ func (s *Store) EnsureAgent(in AgentIdentityInput) (CanonicalAgent, error) {
 		return CanonicalAgent{}, nil
 	}
 
-	if existing, err := s.lookupAgentIDByAliases(in); err == nil && existing != "" {
-		if canonicalAgentIDFromExplicitIdentity(in) == "" && knownAgentIDFromHints(in.Target) == "" {
+	if canonicalAgentIDFromExplicitIdentity(in) == "" && knownAgentIDFromHints(in.Target) == "" {
+		if existing, err := s.lookupAgentIDByAliases(in); err == nil && existing != "" {
 			in.AgentID = existing
+		} else if err != nil {
+			return CanonicalAgent{}, err
 		}
-	} else if err != nil {
-		return CanonicalAgent{}, err
 	}
 
 	agent := CanonicalizeAgentIdentity(in)
@@ -292,7 +292,13 @@ func (s *Store) EnsureAgent(in AgentIdentityInput) (CanonicalAgent, error) {
 		return CanonicalAgent{}, nil
 	}
 
-	if _, err := s.execDB(context.Background(), "agent_inventory_upsert", `
+	err := retryBusy(context.Background(), "agent_inventory_upsert", func() error {
+		tx, err := s.db.BeginTx(context.Background(), nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback() //nolint:errcheck
+		if _, err := tx.ExecContext(context.Background(), `
 INSERT INTO agents (
   id, agent_type_id, matched_rule_id, display_name, vendor, kind, runtime, source, status,
   runtime_status, pids_json, confidence, first_seen_at, last_seen_at, last_static_scan_at, metadata_json
@@ -324,28 +330,28 @@ ON CONFLICT(id) DO UPDATE SET
   last_seen_at = excluded.last_seen_at,
   last_static_scan_at = COALESCE(excluded.last_static_scan_at, agents.last_static_scan_at),
   metadata_json = CASE WHEN excluded.metadata_json <> '{}' THEN excluded.metadata_json ELSE agents.metadata_json END`,
-		agent.ID,
-		nullInt64Value(agent.AgentTypeID),
-		nullInt64Value(agent.MatchedRuleID),
-		agent.DisplayName,
-		agent.Vendor,
-		agent.Kind,
-		agent.Runtime,
-		agent.Source,
-		agent.Status,
-		agent.RuntimeStatus,
-		agentPIDsJSON(agent.PIDs),
-		agent.Confidence,
-		agent.FirstSeenAt,
-		agent.LastSeenAt,
-		anyString(agent.LastStaticScanAt),
-		agent.MetadataJSON,
-	); err != nil {
-		return CanonicalAgent{}, fmt.Errorf("audit: upsert agent %q: %w", agent.ID, err)
-	}
+			agent.ID,
+			nullInt64Value(agent.AgentTypeID),
+			nullInt64Value(agent.MatchedRuleID),
+			agent.DisplayName,
+			agent.Vendor,
+			agent.Kind,
+			agent.Runtime,
+			agent.Source,
+			agent.Status,
+			agent.RuntimeStatus,
+			agentPIDsJSON(agent.PIDs),
+			agent.Confidence,
+			agent.FirstSeenAt,
+			agent.LastSeenAt,
+			anyString(agent.LastStaticScanAt),
+			agent.MetadataJSON,
+		); err != nil {
+			return fmt.Errorf("audit: upsert agent %q: %w", agent.ID, err)
+		}
 
-	for _, alias := range canonicalAgentAliases(agent.ID, in) {
-		if _, err := s.execDB(context.Background(), "agent_alias_upsert", `
+		for _, alias := range canonicalAgentAliases(agent.ID, in) {
+			if _, err := tx.ExecContext(context.Background(), `
 INSERT INTO agent_aliases (alias, agent_id, raw_alias, alias_type, source, created_at, last_seen_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(alias) DO UPDATE SET
@@ -354,16 +360,21 @@ ON CONFLICT(alias) DO UPDATE SET
   alias_type = excluded.alias_type,
   source = excluded.source,
   last_seen_at = excluded.last_seen_at`,
-			alias.key,
-			agent.ID,
-			alias.raw,
-			alias.kind,
-			firstNonEmpty(in.Source, in.Scanner, in.Connector, "gateway"),
-			agent.LastSeenAt,
-			agent.LastSeenAt,
-		); err != nil {
-			return CanonicalAgent{}, fmt.Errorf("audit: upsert agent alias %q: %w", alias.key, err)
+				alias.key,
+				agent.ID,
+				alias.raw,
+				alias.kind,
+				firstNonEmpty(in.Source, in.Scanner, in.Connector, "gateway"),
+				agent.LastSeenAt,
+				agent.LastSeenAt,
+			); err != nil {
+				return fmt.Errorf("audit: upsert agent alias %q: %w", alias.key, err)
+			}
 		}
+		return tx.Commit()
+	})
+	if err != nil {
+		return CanonicalAgent{}, err
 	}
 
 	return agent, nil
@@ -680,10 +691,10 @@ SELECT id,
        COALESCE(target, ''),
        COALESCE(canonical_agent_id, '')
 FROM audit_events
-WHERE COALESCE(agent_id, '') <> ''
-   OR COALESCE(agent_name, '') <> ''
-   OR COALESCE(connector, '') <> ''
-   OR COALESCE(canonical_agent_id, '') <> ''`)
+WHERE COALESCE(canonical_agent_id, '') = ''
+  AND (COALESCE(agent_id, '') <> ''
+    OR COALESCE(agent_name, '') <> ''
+    OR COALESCE(connector, '') <> '')`)
 	if err != nil {
 		return fmt.Errorf("audit: select audit event agents for backfill: %w", err)
 	}

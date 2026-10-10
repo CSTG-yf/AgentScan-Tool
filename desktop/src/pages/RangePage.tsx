@@ -4,8 +4,12 @@ import { Button, Card, Input, Progress, Space, Tag, Typography } from "antd";
 import { defenseModeColors, defenseModeLabels } from "../app/display";
 import { rangeAttackEvents } from "../data/range";
 import type { RangeMode, RangeReplayStatus, RangeStatus } from "../types";
+import latestArenaResult from "../../../docs/evidence/20261009-mac-full-pair/action/summary.json";
+import previousArenaResult from "../../../docs/evidence/20260930-68a661f-action/summary.json";
 
 const { Text, Title } = Typography;
+const passedChecks = (result: { acceptance: Record<string, boolean> }) =>
+  Object.values(result.acceptance).filter(Boolean).length;
 
 function displayFolderPath(path: string) {
   if (path.startsWith("\\\\?\\UNC\\")) return "\\\\" + path.slice(8);
@@ -68,7 +72,7 @@ export function RangePage({
           <div className="range-control-title">
             <div className="range-status-icon"><ExperimentOutlined /></div>
             <div className="range-status-copy">
-              <Title level={4}>AgentRange-player</Title>
+              <Title level={4}>AgentRange-player-full</Title>
               <Text type="secondary">{rangeStatus?.detail ?? "正在检测靶场环境"}</Text>
             </div>
           </div>
@@ -76,7 +80,7 @@ export function RangePage({
         </div>
         <label htmlFor="range-root" className="range-root-label">靶场文件夹</label>
         <div className="range-root-toolbar">
-          <Input id="range-root" size="large" value={root} disabled={rootBusy || rangeStatus?.state === "running"} onChange={(event) => setRoot(displayFolderPath(event.target.value))} placeholder={'输入靶场文件夹地址，例如 C:\\AgentRange-player'} />
+          <Input id="range-root" size="large" value={root} disabled={rootBusy || rangeStatus?.state === "running"} onChange={(event) => setRoot(displayFolderPath(event.target.value))} placeholder={'输入靶场文件夹地址，例如 C:\\AgentRange-player-full'} />
           <Button size="large" type="primary" icon={<CaretRightOutlined />} disabled={!canConfigure} loading={loading} onClick={() => root.trim() === displayFolderPath(rangeStatus?.root ?? "") && rangeStatus?.configured ? onChangeRangeState(true) : onConfigureRange(root, true)}>启动靶场</Button>
           <Button className="range-stop-button" size="large" danger icon={<StopOutlined />} disabled={loading || rangeStatus?.state !== "running"} onClick={() => onChangeRangeState(false)}>停止靶场</Button>
         </div>
@@ -86,6 +90,17 @@ export function RangePage({
         <div className="service-list">
           {rangeStatus?.runningServices.length ? rangeStatus.runningServices.map((service) => <Tag key={service} color="cyan">{service}</Tag>) : <Text type="secondary">当前没有运行中的 Compose 服务</Text>}
         </div>
+      </Card>
+      <Card bordered={false} title="历史公开靶场检测结果" extra={<Tag color="blue">非当前运行数据</Tag>}>
+        <Text strong>2026-10-09 · 本机配对回放</Text>
+        <div className="range-progress-grid">
+          <div><Text type="secondary">攻击阻断</Text><strong>{latestArenaResult.overall.counts.tp} / 80</strong></div>
+          <div><Text type="secondary">正常业务成功</Text><strong>{latestArenaResult.overall.normal_business.success} / {latestArenaResult.overall.normal_business.total}</strong></div>
+          <div><Text type="secondary">检查不可用</Text><strong>{latestArenaResult.overall.inspection_availability.unavailable_events}</strong></div>
+          <div><Text type="secondary">本地运行时门槛</Text><strong>{passedChecks(latestArenaResult)} / {Object.keys(latestArenaResult.acceptance).length}</strong></div>
+        </div>
+        <Text type="secondary">检查 / 端到端 p95：{latestArenaResult.overall.inspect_latency_ms.p95} / {latestArenaResult.overall.latency_ms.p95} ms。冻结静态标注与本轮靶场哈希不同，静态准确率未评分。</Text>
+        <div><Text type="secondary">2026-09-30 历史配对回放：{previousArenaResult.overall.counts.tp}/80 阻断，检查不可用 {previousArenaResult.overall.inspection_availability.unavailable_events} 次，本地门槛 {passedChecks(previousArenaResult)}/{Object.keys(previousArenaResult.acceptance).length}。完整证据见仓库 docs/evidence/。</Text></div>
       </Card>
       <Card bordered={false} className="range-attack-card" title="攻击事件快捷执行">
         <div className="range-attack-grid">
@@ -109,7 +124,7 @@ export function RangePage({
       </Card>
       <Card bordered={false} className="range-replay-card" title="攻击回放命令">
         <div className="range-replay-toolbar">
-          <Input.TextArea value={replayCommand} rows={3} onChange={(event) => onReplayCommandChange(event.target.value)} placeholder={'uv run --with httpx python ".\\task\\AgentRange-player\\scenario-runner\\runner.py" C2-A'} />
+          <Input.TextArea value={replayCommand} rows={3} onChange={(event) => onReplayCommandChange(event.target.value)} placeholder={'uv run --with httpx python ".\\task\\AgentRange-player-full\\scenario-runner\\runner.py" C2-A'} />
           <Space direction="vertical" className="range-replay-actions">
             <Button type="primary" size="large" disabled={rangeStatus?.state !== "running" || replayStatus?.running} loading={replayBusy} onClick={() => onStartReplay()}>运行攻击命令</Button>
             <Button danger size="large" disabled={!replayStatus?.running} loading={replayBusy} onClick={onStopReplay}>停止回放</Button>

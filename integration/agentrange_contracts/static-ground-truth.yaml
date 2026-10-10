@@ -1,0 +1,45 @@
+version: 1
+description: Manually adjudicated local AgentRange full arena fixture, separate from scanner discovery.
+arena_sha256: bcd51ef41b2bfd2871a06e03e6835d26c41e45436e86121c722981b06dcc5d5b
+asset_ids:
+  - agent.opspilot
+  - model.opspilot-stub
+  - framework.langflow
+  - database.customer
+  - mcp.customer-db
+  - mcp.shell-runner
+  - mcp.notes-sync
+  - mcp.threat-intel
+  - mcp.gitlab
+  - mcp.monitoring
+  - mcp.knowledge
+  - mcp.sandbox-exec
+  - skill.code-review
+  - skill.incident-runbook
+  - skill.meeting-summary
+  - skill.password-policy-check
+  - skill.pdf-export
+  - skill.pii-redaction
+  - skill.sql-report
+  - network.opspilot
+  - network.egress
+  - port.opspilot
+  - port.langflow
+  - port.llm-stub
+  - port.postgres
+  - port.c2-sink
+  - port.mock-internet
+risk_pairs:
+  - [AR-STATIC-HIDDEN-INSTRUCTION, skill.meeting-summary]
+  - [AR-STATIC-HIDDEN-INSTRUCTION, mcp.notes-sync]
+  - [AR-STATIC-HIDDEN-TOOL, mcp.notes-sync]
+  - [AR-STATIC-STARTUP-BEACON, mcp.notes-sync]
+  - [AR-STATIC-SHELL-TRUE, mcp.notes-sync]
+  - [AR-STATIC-SHELL-TRUE, mcp.shell-runner]
+  - [AR-STATIC-ARBITRARY-FILE, mcp.shell-runner]
+  - [AR-CONFIG-WEAK-JWT, agent.opspilot]
+  - [AR-CONFIG-WEAK-JWT, mcp.notes-sync]
+  - [AR-CONFIG-SERVICE-ACCOUNT, agent.opspilot]
+  - [AR-CONFIG-PLAINTEXT-PASSWORD, agent.opspilot]
+  - [AR-CONFIG-PLAINTEXT-PASSWORD, framework.langflow]
+  - [AR-CONFIG-LANGFLOW-AUTOLOGIN, framework.langflow]
