@@ -74,3 +74,7 @@ python -m integration.evaluation_export \
 - TypeScript 检查和 Vite 生产构建通过。浏览器核对两项能力状态、场景分解、场景筛选及 C1-A-102 的原始执行回执和 SHA-256。
 - 真实历史报告经 HTTP 导入成功：5,200 个运行时实例和 40 个静态实例。2026-10-09 运行时为 TP=80、TN=5,120、FP=FN=unknown=0。旧静态真值与本轮目标哈希不一致时保持未知；旧批次缺少配置与镜像元数据时不进行 CPU 增量比较。
 - 完整 Gateway 回归中，既有 `TestFileReadGuardHTTPChain`、`TestFileReadGuardConnectorOutputs`、`TestFileReadGuardShellReturnsZeroBytes`、`TestFileReadGuardRejectsNonemptySubstitute` 在本机失败，原因为缓存中的替代文件不是空普通文件。相关代码和测试未在编号 1 中修改；这些测试不调用新评测模块。全仓库测试与门禁属于编号 4。
+
+## 当前靶场静态能力实测
+
+2026-10-12 已按当前靶场冻结独立真值并执行静态扫描：[证据与导入文件](evidence/20261012-static-current/README.md)。资产发现 27/37，漏报 10 个独立 MCP 工具，资产准确率 100%、漏报率 27.03%；13 项标注风险全部识别。插件没有样本，保持未评测。看板显示资产风险识别能力未达标。可用 `integration.static_run` 复现扫描、评分、版本与哈希记录以及看板文件导出。

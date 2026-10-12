@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "scope": "local_frozen_fixture",
+  "arena_sha256": "9414b66e8ba7deef52f0ff1461ad7e1ed816f1fe22300fdef32843f62b242f35",
+  "asset": {
+    "tp": 27,
+    "fp": 0,
+    "fn": 10,
+    "precision": 1.0,
+    "recall": 0.7297297297297297,
+    "miss_rate": 0.2702702702702703,
+    "missed": [
+      "tool.customer-db.query",
+      "tool.gitlab.get_pr",
+      "tool.knowledge.search",
+      "tool.monitoring.query_metric",
+      "tool.notes-sync.debug_exec",
+      "tool.notes-sync.sync_note",
+      "tool.sandbox-exec.run_test",
+      "tool.shell-runner.read_file",
+      "tool.shell-runner.run",
+      "tool.threat-intel.lookup"
+    ],
+    "unexpected": []
+  },
+  "risk": {
+    "tp": 13,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "miss_rate": 0.0,
+    "missed": [],
+    "unexpected": []
+  },
+  "acceptance": {
+    "asset_miss_rate_lt_0_05": false,
+    "asset_precision_gte_0_99": true,
+    "risk_recall_gte_0_95": true,
+    "risk_precision_gte_0_95": true,
+    "risk_miss_rate_lt_0_05": true
+  }
+}

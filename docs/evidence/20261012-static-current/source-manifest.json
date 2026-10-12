@@ -1,0 +1,277 @@
+{
+  "arena_sha256": "9414b66e8ba7deef52f0ff1461ad7e1ed816f1fe22300fdef32843f62b242f35",
+  "files": [
+    {
+      "path": ".env.example",
+      "sha256": "af0cc1b9d8c3aa2ac3d4f94bc5355196184039f2ee1d821de97e738ff977c35b"
+    },
+    {
+      "path": "Makefile",
+      "sha256": "53ae048e2370c5cabf91572a7c4149dcda64f8ea72c10ae83ae869023fde97cc"
+    },
+    {
+      "path": "attack/c2_sink/Dockerfile",
+      "sha256": "2da1c6f83866182238e55fcf48bde621452609bd46dd7cab770c11b43a803535"
+    },
+    {
+      "path": "attack/c2_sink/app.py",
+      "sha256": "164aab3758fd19ea50884a6c683532d0486ae993d4d92b6f439f14361578cc2c"
+    },
+    {
+      "path": "attack/cat1/exploit_0770.py",
+      "sha256": "21439c1bf55b934e495fffe823c9e0572c6098600f790dc8e7d097eefe6b173b"
+    },
+    {
+      "path": "attack/cat1/exploit_5027.py",
+      "sha256": "675920e4ce7d74b13f3f4673e58c98d7d6a26ae909425fc4049487e3d12be829"
+    },
+    {
+      "path": "attack/cat2/injections.py",
+      "sha256": "0c90259af2e99837c7addd8a6290735edc5a9cfca071b321930a31545b66549c"
+    },
+    {
+      "path": "attack/cat2/trajectories.py",
+      "sha256": "ab1a6ae8af39467a3f4a906239b7a144f668fa5a6371593081037b72ad458934"
+    },
+    {
+      "path": "attack/conftest.py",
+      "sha256": "445af242a00ee82679eebb9a6ac3d72a723d2bb4ce319e3b30cd1ff4584f4208"
+    },
+    {
+      "path": "attack/mock_internet/Dockerfile",
+      "sha256": "660eab0fc5a093ec2ae8c47d6085ca4a4d45fe4876b4742bee5839564ba932b6"
+    },
+    {
+      "path": "attack/mock_internet/app.py",
+      "sha256": "4f4e6fedc6212143c0bf21109886b6e92b5b573c208cc8cd47d19927959b3933"
+    },
+    {
+      "path": "attack/mock_internet/pages/poisoned_cve.html",
+      "sha256": "31fa3d28e38acb67eac5c8dc45972f0ceb7fe9782aafa86952f5ebdfcba0959e"
+    },
+    {
+      "path": "backends/customer-db/conftest.py",
+      "sha256": "8f1e200aa5a305bb3c2430d4e8c4cb0d2051846500c3c5bcbcae93851df52cd1"
+    },
+    {
+      "path": "backends/customer-db/schema.sql",
+      "sha256": "3b849c6f5fa1d9a38b5cecd56760a81e2a1c2078758c6f9123158faa61120f53"
+    },
+    {
+      "path": "backends/customer-db/seed.py",
+      "sha256": "9099f3c3e211d301976df2ed1095337f7283b8d6c77fd0ca0afb89bf40b0c90e"
+    },
+    {
+      "path": "backends/secrets/secrets.env.example",
+      "sha256": "615ff34739e142bfbf18f4eda3577d92f7e37a3b8dfdb3748adc7b229ed1005f"
+    },
+    {
+      "path": "corpus-generator/conftest.py",
+      "sha256": "fcb0172dc93ca6503dc1676f856b91a174ddeab1b3da8ae968975d7da7dd2bb5"
+    },
+    {
+      "path": "corpus-generator/events.py",
+      "sha256": "96e4abbacfb3112c7a58fefabd99ac0a48466a79eeb75f49e4fc6904cf3a7709"
+    },
+    {
+      "path": "corpus-generator/generate.py",
+      "sha256": "f4cf97dac2175ffcac3c1a9411d4784ef11430308ad918156da89801c4878c9b"
+    },
+    {
+      "path": "corpus-generator/templates.py",
+      "sha256": "d6ec566246e49401447aec61ccd98fe5825d13708a8cf8d237d6d89135b422a6"
+    },
+    {
+      "path": "docker-compose.yml",
+      "sha256": "f7e351a73daf55d415fd4a6c0452e09ca0b3ed69e11cf05e999b20b5953af262"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "fb616a86e3bbc337a7bd8bc6dea931d22e263474b4d5a02cba118f098855ccf6"
+    },
+    {
+      "path": "langflow/Dockerfile",
+      "sha256": "bb421f4e813c21c934c7157933f11e17909fd9eb9a954b7b7ca93fd19f3120ff"
+    },
+    {
+      "path": "langflow/flows/opspilot_support.json",
+      "sha256": "26005b00548a6a61adee5419a2f571f44db732f5f9fd03ead19500edc43e64dc"
+    },
+    {
+      "path": "langflow/import_flows.py",
+      "sha256": "df0debe01ab4db9698a2728cf6966a9d78aeaae7ba164bd7bee862ee9997f352"
+    },
+    {
+      "path": "llm-stub/Dockerfile",
+      "sha256": "93684da714cad33373f05b38e97a028ea31007d3edf5b0cb61fb7b15abbd8ca5"
+    },
+    {
+      "path": "llm-stub/conftest.py",
+      "sha256": "b438b9d930f9bb7a54325efd6ab4e48c1f98b64737fc328cda3645fc6a4b86f2"
+    },
+    {
+      "path": "llm-stub/llm_stub/__init__.py",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "path": "llm-stub/llm_stub/app.py",
+      "sha256": "d1f0d2a6a0c1805602906560c77aba25e8883257e1bb863c7e1ee85ec4e31f3d"
+    },
+    {
+      "path": "llm-stub/llm_stub/trajectories.py",
+      "sha256": "4f62645466dce7d2bd59e35558df7e629fa5e2902ea4f26ef4437ca7eb20de1f"
+    },
+    {
+      "path": "llm-stub/requirements.txt",
+      "sha256": "37fca0c234f36411c7eb188f04d165c91e2cc3f06ca35a9771e6bc7d2878be56"
+    },
+    {
+      "path": "mcp/Dockerfile",
+      "sha256": "c3053dddd47029975373be9b9ca41bf2eeb6076f245ddd8599f6c805b7eba892"
+    },
+    {
+      "path": "mcp/_base/conftest.py",
+      "sha256": "8da8ffb7add44106c7a41cba942a76a32da948b3c5360d8323987b1a0cb7e46b"
+    },
+    {
+      "path": "mcp/_base/mcp_base/__init__.py",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "path": "mcp/_base/mcp_base/mcp_http.py",
+      "sha256": "01c22e7d170eaf091eded181b15031213e3e1ad901bf75341414b7e9c30b18c8"
+    },
+    {
+      "path": "mcp/conftest.py",
+      "sha256": "c3482553b4c1c9296679b008bcd84ccda9777048cc244a45e059516198cd616d"
+    },
+    {
+      "path": "mcp/customer_db/server.py",
+      "sha256": "09ab3f167be307c11a6beb8fb29b3d2ae15624453d060900af587fde9ad2944e"
+    },
+    {
+      "path": "mcp/gitlab/server.py",
+      "sha256": "2d92231405fc5765fa0d0069d888b73fa1bc5b834be2ae2369f8a4c7e4d2bb2a"
+    },
+    {
+      "path": "mcp/knowledge/server.py",
+      "sha256": "046ec6947de8c0a782ac4ffa4c117153d162e0e80a669b0c2c328e123a001744"
+    },
+    {
+      "path": "mcp/managed-host.env",
+      "sha256": "d5ac6b54b2f07fa17caeacea82a3963d627eb0fc75f8599bd41ffa4af9684b1d"
+    },
+    {
+      "path": "mcp/monitoring/server.py",
+      "sha256": "7e8350d96f53c5c48e2109af78b6af904c8a4f08fcaff7e1c6b04d986a1a455d"
+    },
+    {
+      "path": "mcp/notes_sync/server.py",
+      "sha256": "44a1c5d2efbd5311f9f9da47f9879f29145137c18c05f6e46fa0079ee4fa5adb"
+    },
+    {
+      "path": "mcp/sandbox_exec/server.py",
+      "sha256": "ec646329d706bad2a2d28c353f07f72c4c8665e0a616f05f80b05a2d6b2800e7"
+    },
+    {
+      "path": "mcp/shell_runner/server.py",
+      "sha256": "ffd864b5a698bd15e6c0bb30cf57d89ef4a89c68611e46189d804682ed4e1751"
+    },
+    {
+      "path": "mcp/threat_intel/server.py",
+      "sha256": "1c76acf00f41fc1f352fd1e69c09d5a002cfc234f9187e873333367b1bebdde9"
+    },
+    {
+      "path": "opspilot-app/Dockerfile",
+      "sha256": "7e9292ab10896d89803ff0af71ba2adee940baaceddc945ea0a8d2c4ef8feb1a"
+    },
+    {
+      "path": "opspilot-app/api/__init__.py",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "path": "opspilot-app/api/app.py",
+      "sha256": "284cf3b92fc530e1d4267795eae46100e80561350352dbe672cbe9797c7374fa"
+    },
+    {
+      "path": "opspilot-app/auth/__init__.py",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "path": "opspilot-app/auth/jwt_auth.py",
+      "sha256": "11b178579e75b5fe0755ce31ac3ecf98d8711a5a54f5a52e74df8942ca83f150"
+    },
+    {
+      "path": "opspilot-app/auth/roles.py",
+      "sha256": "ee9938a85ece3733d8dd8cb79243c99ad225ed98f88573b188e8205d37ab2d8b"
+    },
+    {
+      "path": "opspilot-app/conftest.py",
+      "sha256": "d36e2a2eed4c51ca28eb013d49b2156ac66f2e1cb999e52053b23c3ca0b77a4c"
+    },
+    {
+      "path": "opspilot-app/policy/__init__.py",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "path": "opspilot-app/policy/propagation.py",
+      "sha256": "ddd47af0ebeb5437b45caef75509b0ac2ca1a5aed3dab64954650cfa2169c32d"
+    },
+    {
+      "path": "opspilot-app/requirements.txt",
+      "sha256": "471b33cba7f0211da993cad90e3d74f89faef01b768739e0988acb12c53ba00c"
+    },
+    {
+      "path": "requirements-dev.txt",
+      "sha256": "3678e60bf983ce217c79d507a67acc5043f75b164ea1483e92e387fd1cbc34bc"
+    },
+    {
+      "path": "scenario-runner/conftest.py",
+      "sha256": "e1f1265c184608f141afbca62e0da93be9df587ffe0390573ac7914732123ce8"
+    },
+    {
+      "path": "scenario-runner/runner.py",
+      "sha256": "605a3f840eaf18b8ddb09260a1735c837ece8724a9025408294494b46a2c476b"
+    },
+    {
+      "path": "skills/code-review/SKILL.md",
+      "sha256": "47b20504dea3bec1b8e3c64049fd1756af8effc794e6ff12377834b6c8a56cbe"
+    },
+    {
+      "path": "skills/conftest.py",
+      "sha256": "961f2ade7805ccfc4b5cd18500de1a000b46ee1a64177bd10f5dfa8509470a88"
+    },
+    {
+      "path": "skills/incident-runbook/SKILL.md",
+      "sha256": "574d5d87d4cab409ad5bc1da2dd7af10a4add85d0e592c57b4caf95732fbd9be"
+    },
+    {
+      "path": "skills/loader.py",
+      "sha256": "d08e6d2053b081c8bcb3c6b27e2b7466d0dc3bf097c872a1de4ef128da49e11a"
+    },
+    {
+      "path": "skills/meeting-summary/SKILL.md",
+      "sha256": "3ae962d4d02c5f2496d921ea68ee36f678988a70aa80471753f53cd4d0b595ed"
+    },
+    {
+      "path": "skills/password-policy-check/SKILL.md",
+      "sha256": "b618f309f1b68479191aabc5fb6220139fd1a179a7abb45fbace5a542c28affc"
+    },
+    {
+      "path": "skills/pdf-export/SKILL.md",
+      "sha256": "c27ac787f352510895a303156d87f3f288d978d8696f467e15170b8192c820a1"
+    },
+    {
+      "path": "skills/pdf-export/scripts/export.py",
+      "sha256": "f8920cec23be173798a33e9b6747d08b4aeccd5d8fa77e3456bcfdfa19a3564b"
+    },
+    {
+      "path": "skills/pii-redaction/SKILL.md",
+      "sha256": "c5ac62ff878b542121d0953e29387ab7e0a882ffd98d3f837e4fd0cc42c67c2f"
+    },
+    {
+      "path": "skills/sql-report/SKILL.md",
+      "sha256": "24234ac6a4674ecdbcbf612c205514cc9a8c3f4b01bc064bf1246b5393ebf2d5"
+    }
+  ]
+}
