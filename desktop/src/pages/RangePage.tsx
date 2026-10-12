@@ -4,12 +4,7 @@ import { Button, Card, Input, Progress, Space, Tag, Typography } from "antd";
 import { defenseModeColors, defenseModeLabels } from "../app/display";
 import { rangeAttackEvents } from "../data/range";
 import type { RangeMode, RangeReplayStatus, RangeStatus } from "../types";
-import latestArenaResult from "../../../docs/evidence/20261009-mac-full-pair/action/summary.json";
-import previousArenaResult from "../../../docs/evidence/20260930-68a661f-action/summary.json";
-
 const { Text, Title } = Typography;
-const passedChecks = (result: { acceptance: Record<string, boolean> }) =>
-  Object.values(result.acceptance).filter(Boolean).length;
 
 function displayFolderPath(path: string) {
   if (path.startsWith("\\\\?\\UNC\\")) return "\\\\" + path.slice(8);
@@ -90,17 +85,6 @@ export function RangePage({
         <div className="service-list">
           {rangeStatus?.runningServices.length ? rangeStatus.runningServices.map((service) => <Tag key={service} color="cyan">{service}</Tag>) : <Text type="secondary">当前没有运行中的 Compose 服务</Text>}
         </div>
-      </Card>
-      <Card bordered={false} title="历史公开靶场检测结果" extra={<Tag color="blue">非当前运行数据</Tag>}>
-        <Text strong>2026-10-09 · 本机配对回放</Text>
-        <div className="range-progress-grid">
-          <div><Text type="secondary">攻击阻断</Text><strong>{latestArenaResult.overall.counts.tp} / 80</strong></div>
-          <div><Text type="secondary">正常业务成功</Text><strong>{latestArenaResult.overall.normal_business.success} / {latestArenaResult.overall.normal_business.total}</strong></div>
-          <div><Text type="secondary">检查不可用</Text><strong>{latestArenaResult.overall.inspection_availability.unavailable_events}</strong></div>
-          <div><Text type="secondary">本地运行时门槛</Text><strong>{passedChecks(latestArenaResult)} / {Object.keys(latestArenaResult.acceptance).length}</strong></div>
-        </div>
-        <Text type="secondary">检查 / 端到端 p95：{latestArenaResult.overall.inspect_latency_ms.p95} / {latestArenaResult.overall.latency_ms.p95} ms。冻结静态标注与本轮靶场哈希不同，静态准确率未评分。</Text>
-        <div><Text type="secondary">2026-09-30 历史配对回放：{previousArenaResult.overall.counts.tp}/80 阻断，检查不可用 {previousArenaResult.overall.inspection_availability.unavailable_events} 次，本地门槛 {passedChecks(previousArenaResult)}/{Object.keys(previousArenaResult.acceptance).length}。完整证据见仓库 docs/evidence/。</Text></div>
       </Card>
       <Card bordered={false} className="range-attack-card" title="攻击事件快捷执行">
         <div className="range-attack-grid">

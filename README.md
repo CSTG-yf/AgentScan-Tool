@@ -91,7 +91,7 @@ pnpm dev
 .\desktop\scripts\build.ps1 -WebOnly
 ```
 
-桌面界面包含安全总览、Agent 治理、Agent 检测、静态资源、事件检测、攻击链、行为追踪、策略、告警、报告与靶场控制。进入后先确认网关状态，再配置扫描范围或 AgentRange 根目录；进程和文件守护需单独安装服务、启用规则并应用策略。详细说明见 [desktop/README.md](desktop/README.md)。
+桌面界面包含安全总览、[能力评测](docs/capability-evaluations.md)、Agent 治理、Agent 检测、静态资源、事件检测、攻击链、行为追踪、策略、告警、报告与靶场控制。进入后先确认网关状态，再配置扫描范围或 AgentRange 根目录；进程和文件守护需单独安装服务、启用规则并应用策略。详细说明见 [desktop/README.md](desktop/README.md)。
 
 ### Python CLI 与 Go Gateway
 

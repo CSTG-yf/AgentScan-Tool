@@ -3,6 +3,7 @@ pub(crate) mod agents;
 pub(crate) mod attack_chains;
 pub(crate) mod audit;
 pub(crate) mod environment;
+pub(crate) mod evaluations;
 pub(crate) mod events;
 pub(crate) mod gateway_api;
 pub(crate) mod gateway_settings;

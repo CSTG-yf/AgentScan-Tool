@@ -56,6 +56,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::evaluations::evaluation_request,
             commands::environment::get_environment_snapshot,
             commands::agents::get_agents,
             commands::agents::get_connector_profiles,

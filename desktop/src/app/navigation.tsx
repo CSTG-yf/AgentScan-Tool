@@ -14,6 +14,7 @@ import {
 export type PageKey =
   | "overview"
   | "range"
+  | "evaluations"
   | "agents"
   | "governance"
   | "trace"
@@ -28,6 +29,7 @@ export type PageKey =
 
 export const navigation: Array<{ key: PageKey; icon: React.ReactNode; label: string }> = [
   { key: "overview", icon: <DashboardOutlined />, label: "安全总览" },
+  { key: "evaluations", icon: <DashboardOutlined />, label: "能力评测" },
   { key: "range", icon: <ExperimentOutlined />, label: "靶场控制" },
   { key: "governance", icon: <SafetyCertificateOutlined />, label: "Agent 治理中心" },
   { key: "agents", icon: <RadarChartOutlined />, label: "Agent 检测" },

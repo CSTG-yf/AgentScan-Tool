@@ -1986,3 +1986,23 @@ body { min-height: 100vh; background: #f5f8fc; }
 .chain-page-workbench .standard-filter-bar :is(.ant-select-selection-placeholder,.ant-select-placeholder,.ant-select-arrow,.ant-picker-suffix,.ant-picker-separator) {
   color: #6b7280;
 }
+
+.evaluation-page { display: grid; gap: 18px; min-width: 0; }
+.evaluation-page .ant-card { background: #fff; min-width: 0; }
+.evaluation-page .ant-table { background: #fff; color: #14213a; }
+.evaluation-page .ant-table-thead > tr > th { background: #f8fafc; color: #475467; }
+.evaluation-page .ant-table-tbody > tr > td { background: #fff; }
+.evaluation-page .ant-table-tbody > tr:hover > td { background: #f0f6ff !important; }
+.evaluation-page .ant-typography, .evaluation-page .ant-descriptions-item-content { overflow-wrap: anywhere; }
+.evaluation-page .ant-table-cell { overflow-wrap: anywhere; }
+.evaluation-filters { margin-bottom: 12px; }
+.evaluation-raw { white-space: pre-wrap; overflow-wrap: anywhere; background: #f8fafc; color: #14213a; padding: 14px; border-radius: 10px; max-height: 65vh; overflow: auto; }
+
+.evaluation-page .ant-tag { background: #f3f6fb !important; color: #475467 !important; border: 1px solid #dce4ef !important; }
+.evaluation-page .ant-tag-success { background: #edf9f1 !important; color: #16834a !important; border-color: #bfe6cd !important; }
+.evaluation-page .ant-tag-warning { background: #fff8e7 !important; color: #9a6700 !important; border-color: #f5dfa3 !important; }
+.evaluation-page .ant-tag-error { background: #fff1f0 !important; color: #c3342f !important; border-color: #f3c6c3 !important; }
+
+.evaluation-metrics .ant-btn-link { white-space: normal; height: auto; text-align: left; padding: 0; }
+.evaluation-metrics .ant-table-cell { padding: 8px !important; }
+.evaluation-metrics .ant-table-cell:first-child { width: 27%; }

@@ -48,6 +48,7 @@ import { EventsPage } from "./pages/EventsPage";
 import { EvidencePage } from "./pages/EvidencePage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { PoliciesPage } from "./pages/PoliciesPage";
+import { EvaluationsPage } from "./pages/EvaluationsPage";
 import { RangePage } from "./pages/RangePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { StaticAssetsPage } from "./pages/StaticAssetsPage";
@@ -317,6 +318,7 @@ export default function App() {
     if (!refreshConfig?.enabled) return;
     const baseDelay = Math.max(3, refreshConfig.intervalSec) * 1000;
     const pageDomains: Record<PageKey, string[]> = {
+      evaluations: [],
       overview: ["agents", "static_resources", "scan_findings", "behavior_events", "runtime_detections", "runtime_decisions", "runtime_response_actions", "runtime_attack_chains", "runtime_attack_chain_events", "scan_jobs"],
       agents: ["agents"],
       staticAssets: ["static_resources", "scan_findings"],
@@ -608,6 +610,8 @@ export default function App() {
       );
     }
     switch (active) {
+      case "evaluations":
+        return <EvaluationsPage />;
       case "range":
         return (
           <RangePage

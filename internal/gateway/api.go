@@ -818,6 +818,8 @@ func (a *APIServer) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/v1/agents/discovery", a.handleAgentDiscovery)
 	mux.HandleFunc("/api/v1/agents", a.handleAgentsAPI)
 	mux.HandleFunc("/api/v1/agents/", a.handleAgentsAPI)
+	mux.HandleFunc(evaluationPrefix, a.handleEvaluationsAPI)
+	mux.HandleFunc(evaluationPrefix+"/", a.handleEvaluationsAPI)
 	mux.HandleFunc("/api/v1/jobs", a.handleJobsAPI)
 	mux.HandleFunc("/api/v1/jobs/", a.handleJobsAPI)
 	mux.HandleFunc("/api/v1/changes", a.handleChangesAPI)
@@ -3390,7 +3392,11 @@ func (a *APIServer) apiCSRFProtect(next http.Handler) http.Handler {
 func maxBodyMiddleware(next http.Handler, maxBytes int64) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
-			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			limit := maxBytes
+			if r.Method == http.MethodPost && r.URL.Path == evaluationPrefix {
+				limit = 32 << 20
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 		}
 		next.ServeHTTP(w, r)
 	})

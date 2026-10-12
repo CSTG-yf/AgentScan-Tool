@@ -2748,6 +2748,7 @@ WHERE id = ?`,
 			return err
 		},
 	},
+	{description: "durable evaluation runs, instances, metrics and artifacts", apply: migrateEvaluations},
 }
 
 type agentDiscoverySeed struct {
