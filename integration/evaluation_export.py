@@ -176,17 +176,26 @@ def export_static(scan_path: Path, truth_path: Path) -> dict:
     labels = {"asset": {key: True for key in truth["asset_ids"]}, "risk": {f"{rule}:{asset}": True for rule, asset in truth["risk_pairs"]}}
     truth_id = out.artifact("static-truth", "ground_truth", labels, str(truth_path.resolve()))
     scan_id = out.artifact("static-scan", "scan", scan, str(scan_path.resolve()))
+    manifest_path = scan_path.with_name("static-run.json")
+    manifest = read_json(manifest_path)
+    scan_refs = [scan_id]
+    if manifest:
+        if manifest.get("scan_sha256") != sha256(scan_path.read_bytes()).hexdigest() or manifest.get("truth_sha256") != sha256(truth_path.read_bytes()).hexdigest():
+            raise ValueError("static scan or truth differs from execution manifest")
+        if manifest.get("evaluation_sha256") != sha256(scan_path.with_name("static-eval.json").read_bytes()).hexdigest():
+            raise ValueError("static evaluation differs from execution manifest")
+        scan_refs.append(out.artifact("static-run", "manifest", manifest, str(manifest_path.resolve())))
     assets = {row["id"]: row for row in scan["assets"]}
     findings = defaultdict(list)
     for row in scan["findings"]:
         findings[f"{row['rule_id']}:{row['asset_id']}"].append(row)
     instances = []
     for key in sorted(set(labels["asset"]) | set(assets)):
-        instances.append(dict(id=key, domain="asset", asset_type=assets.get(key, {}).get("type", key.split(".")[0]), predicted=key in assets, evidence={"scan": [scan_id]}))
+        instances.append(dict(id=key, domain="asset", asset_type=assets.get(key, {}).get("type", key.split(".")[0]), predicted=key in assets, evidence={"scan": list(scan_refs)}))
     for key in sorted(set(labels["risk"]) | set(findings)):
         asset_id = key.split(":", 1)[1]
         kind = "dangerous_config" if key.startswith("AR-CONFIG-") else "malicious_skill" if asset_id.startswith("skill.") else "malicious_mcp" if asset_id.startswith("mcp.") else "other"
-        evidence = {"scan": [scan_id]}
+        evidence = {"scan": list(scan_refs)}
         if key in findings:
             evidence["detection"] = [out.artifact(f"finding:{len(instances)}", "detection", findings[key], str(scan_path.resolve()))]
         instances.append(dict(id=key, domain="risk", asset_type=asset_id.split(".")[0], risk_kind=kind, predicted=key in findings, evidence=evidence))
@@ -195,7 +204,13 @@ def export_static(scan_path: Path, truth_path: Path) -> dict:
     dataset = evaluated.get("arena_sha256", "")
     if not dataset:
         raise ValueError("static-eval.json is required to bind this historical scan to its dataset")
-    return dict(name=f"静态资产 / {scan_path.parent.name}", mode="action", platform="local_frozen_fixture", code_version="", config_hash="", image_digest="", dataset_hash=dataset, static_dataset_hash=dataset, comparison_group="", static_truth=dict(artifact_id=truth_id, dataset_hash=truth["arena_sha256"]), runtime_truth={}, started_at=scan.get("generated_at", ""), finished_at=scan.get("generated_at", ""), status="completed", evidence_directory=str(scan_path.parent.resolve()), notes=["独立冻结的本地静态真值集；仅代表该数据集的资产与风险覆盖，不代表所有 Agent 平台。"], instances=instances, artifacts=out.artifacts, series=[])
+    if manifest and manifest.get("dataset_hash") != dataset:
+        raise ValueError("static dataset differs from execution manifest")
+    notes = ["独立冻结的本地静态真值集；仅代表该数据集的资产与风险覆盖，不代表所有 Agent 平台。"]
+    if manifest:
+        notes.extend(["本批次在当前靶场源文件上实际执行静态扫描，未启动容器或执行工具调用。", "真值包含独立 MCP 工具资产；未发现的工具按漏报计入。插件无样本，保持未评测。"])
+    return dict(name=f"静态资产 / {scan_path.parent.name}", mode=manifest.get("mode", "action"), platform=manifest.get("platform", "local_frozen_fixture"), code_version=manifest.get("code_version", ""), config_hash=manifest.get("config_hash", ""), image_digest=manifest.get("image_digest", ""), dataset_hash=dataset, static_dataset_hash=dataset, comparison_group="", static_truth=dict(artifact_id=truth_id, dataset_hash=truth["arena_sha256"]), runtime_truth={}, started_at=manifest.get("started_at", scan.get("generated_at", "")), finished_at=manifest.get("finished_at", scan.get("generated_at", "")), status="completed", evidence_directory=str(scan_path.parent.resolve()), notes=notes, instances=instances, artifacts=out.artifacts, series=[])
+
 
 
 def main() -> int:

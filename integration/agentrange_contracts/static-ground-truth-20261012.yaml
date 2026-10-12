@@ -1,0 +1,264 @@
+version: 2
+description: Source-reviewed current AgentRange fixture. Labels fixed before scanner
+  execution; includes callable MCP tools as independent assets.
+reviewed_at: '2026-10-12T09:26:18.810388+00:00'
+review_basis: Compose declarations, Skill documents, MCP Tool declarations and manually
+  reviewed risk source; no scanner output used.
+arena_sha256: 9414b66e8ba7deef52f0ff1461ad7e1ed816f1fe22300fdef32843f62b242f35
+asset_ids:
+- agent.opspilot
+- model.opspilot-stub
+- framework.langflow
+- database.customer
+- mcp.customer-db
+- mcp.shell-runner
+- mcp.notes-sync
+- mcp.threat-intel
+- mcp.gitlab
+- mcp.monitoring
+- mcp.knowledge
+- mcp.sandbox-exec
+- skill.code-review
+- skill.incident-runbook
+- skill.meeting-summary
+- skill.password-policy-check
+- skill.pdf-export
+- skill.pii-redaction
+- skill.sql-report
+- network.opspilot
+- network.egress
+- port.opspilot
+- port.langflow
+- port.llm-stub
+- port.postgres
+- port.c2-sink
+- port.mock-internet
+- tool.customer-db.query
+- tool.shell-runner.run
+- tool.shell-runner.read_file
+- tool.notes-sync.sync_note
+- tool.notes-sync.debug_exec
+- tool.threat-intel.lookup
+- tool.gitlab.get_pr
+- tool.monitoring.query_metric
+- tool.knowledge.search
+- tool.sandbox-exec.run_test
+risk_pairs:
+- - AR-STATIC-HIDDEN-INSTRUCTION
+  - skill.meeting-summary
+- - AR-STATIC-HIDDEN-INSTRUCTION
+  - mcp.notes-sync
+- - AR-STATIC-HIDDEN-TOOL
+  - mcp.notes-sync
+- - AR-STATIC-STARTUP-BEACON
+  - mcp.notes-sync
+- - AR-STATIC-SHELL-TRUE
+  - mcp.notes-sync
+- - AR-STATIC-SHELL-TRUE
+  - mcp.shell-runner
+- - AR-STATIC-ARBITRARY-FILE
+  - mcp.shell-runner
+- - AR-CONFIG-WEAK-JWT
+  - agent.opspilot
+- - AR-CONFIG-WEAK-JWT
+  - mcp.notes-sync
+- - AR-CONFIG-SERVICE-ACCOUNT
+  - agent.opspilot
+- - AR-CONFIG-PLAINTEXT-PASSWORD
+  - agent.opspilot
+- - AR-CONFIG-PLAINTEXT-PASSWORD
+  - framework.langflow
+- - AR-CONFIG-LANGFLOW-AUTOLOGIN
+  - framework.langflow
+asset_evidence:
+  agent.opspilot:
+    type: agent
+    source: opspilot-app/api/app.py
+    sha256: 284cf3b92fc530e1d4267795eae46100e80561350352dbe672cbe9797c7374fa
+  model.opspilot-stub:
+    type: model
+    source: llm-stub/llm_stub/app.py
+    sha256: d1f0d2a6a0c1805602906560c77aba25e8883257e1bb863c7e1ee85ec4e31f3d
+  framework.langflow:
+    type: supply_chain_framework
+    source: langflow/Dockerfile
+    sha256: bb421f4e813c21c934c7157933f11e17909fd9eb9a954b7b7ca93fd19f3120ff
+  database.customer:
+    type: database
+    source: backends/customer-db/schema.sql
+    sha256: 3b849c6f5fa1d9a38b5cecd56760a81e2a1c2078758c6f9123158faa61120f53
+  mcp.customer-db:
+    type: mcp_server
+    source: mcp/customer_db/server.py
+    sha256: 09ab3f167be307c11a6beb8fb29b3d2ae15624453d060900af587fde9ad2944e
+  mcp.shell-runner:
+    type: mcp_server
+    source: mcp/shell_runner/server.py
+    sha256: ffd864b5a698bd15e6c0bb30cf57d89ef4a89c68611e46189d804682ed4e1751
+  mcp.notes-sync:
+    type: mcp_server
+    source: mcp/notes_sync/server.py
+    sha256: 44a1c5d2efbd5311f9f9da47f9879f29145137c18c05f6e46fa0079ee4fa5adb
+  mcp.threat-intel:
+    type: mcp_server
+    source: mcp/threat_intel/server.py
+    sha256: 1c76acf00f41fc1f352fd1e69c09d5a002cfc234f9187e873333367b1bebdde9
+  mcp.gitlab:
+    type: mcp_server
+    source: mcp/gitlab/server.py
+    sha256: 2d92231405fc5765fa0d0069d888b73fa1bc5b834be2ae2369f8a4c7e4d2bb2a
+  mcp.monitoring:
+    type: mcp_server
+    source: mcp/monitoring/server.py
+    sha256: 7e8350d96f53c5c48e2109af78b6af904c8a4f08fcaff7e1c6b04d986a1a455d
+  mcp.knowledge:
+    type: mcp_server
+    source: mcp/knowledge/server.py
+    sha256: 046ec6947de8c0a782ac4ffa4c117153d162e0e80a669b0c2c328e123a001744
+  mcp.sandbox-exec:
+    type: mcp_server
+    source: mcp/sandbox_exec/server.py
+    sha256: ec646329d706bad2a2d28c353f07f72c4c8665e0a616f05f80b05a2d6b2800e7
+  skill.code-review:
+    type: skill
+    source: skills/code-review/SKILL.md
+    sha256: 47b20504dea3bec1b8e3c64049fd1756af8effc794e6ff12377834b6c8a56cbe
+  skill.incident-runbook:
+    type: skill
+    source: skills/incident-runbook/SKILL.md
+    sha256: 574d5d87d4cab409ad5bc1da2dd7af10a4add85d0e592c57b4caf95732fbd9be
+  skill.meeting-summary:
+    type: skill
+    source: skills/meeting-summary/SKILL.md
+    sha256: 3ae962d4d02c5f2496d921ea68ee36f678988a70aa80471753f53cd4d0b595ed
+  skill.password-policy-check:
+    type: skill
+    source: skills/password-policy-check/SKILL.md
+    sha256: b618f309f1b68479191aabc5fb6220139fd1a179a7abb45fbace5a542c28affc
+  skill.pdf-export:
+    type: skill
+    source: skills/pdf-export/SKILL.md
+    sha256: c27ac787f352510895a303156d87f3f288d978d8696f467e15170b8192c820a1
+  skill.pii-redaction:
+    type: skill
+    source: skills/pii-redaction/SKILL.md
+    sha256: c5ac62ff878b542121d0953e29387ab7e0a882ffd98d3f837e4fd0cc42c67c2f
+  skill.sql-report:
+    type: skill
+    source: skills/sql-report/SKILL.md
+    sha256: 24234ac6a4674ecdbcbf612c205514cc9a8c3f4b01bc064bf1246b5393ebf2d5
+  network.opspilot:
+    type: network
+    source: docker-compose.yml
+    sha256: f7e351a73daf55d415fd4a6c0452e09ca0b3ed69e11cf05e999b20b5953af262
+  network.egress:
+    type: network
+    source: docker-compose.yml
+    sha256: f7e351a73daf55d415fd4a6c0452e09ca0b3ed69e11cf05e999b20b5953af262
+  port.opspilot:
+    type: host_port
+    source: docker-compose.yml
+    sha256: f7e351a73daf55d415fd4a6c0452e09ca0b3ed69e11cf05e999b20b5953af262
+  port.langflow:
+    type: host_port
+    source: docker-compose.yml
+    sha256: f7e351a73daf55d415fd4a6c0452e09ca0b3ed69e11cf05e999b20b5953af262
+  port.llm-stub:
+    type: host_port
+    source: docker-compose.yml
+    sha256: f7e351a73daf55d415fd4a6c0452e09ca0b3ed69e11cf05e999b20b5953af262
+  port.postgres:
+    type: host_port
+    source: docker-compose.yml
+    sha256: f7e351a73daf55d415fd4a6c0452e09ca0b3ed69e11cf05e999b20b5953af262
+  port.c2-sink:
+    type: host_port
+    source: docker-compose.yml
+    sha256: f7e351a73daf55d415fd4a6c0452e09ca0b3ed69e11cf05e999b20b5953af262
+  port.mock-internet:
+    type: host_port
+    source: docker-compose.yml
+    sha256: f7e351a73daf55d415fd4a6c0452e09ca0b3ed69e11cf05e999b20b5953af262
+  tool.customer-db.query:
+    type: tool
+    source: mcp/customer_db/server.py
+    line: 22
+    symbol: query
+    hidden: false
+    sha256: 09ab3f167be307c11a6beb8fb29b3d2ae15624453d060900af587fde9ad2944e
+  tool.shell-runner.run:
+    type: tool
+    source: mcp/shell_runner/server.py
+    line: 22
+    symbol: run
+    hidden: false
+    sha256: ffd864b5a698bd15e6c0bb30cf57d89ef4a89c68611e46189d804682ed4e1751
+  tool.shell-runner.read_file:
+    type: tool
+    source: mcp/shell_runner/server.py
+    line: 28
+    symbol: read_file
+    hidden: false
+    sha256: ffd864b5a698bd15e6c0bb30cf57d89ef4a89c68611e46189d804682ed4e1751
+  tool.notes-sync.sync_note:
+    type: tool
+    source: mcp/notes_sync/server.py
+    line: 45
+    symbol: sync_note
+    hidden: false
+    sha256: 44a1c5d2efbd5311f9f9da47f9879f29145137c18c05f6e46fa0079ee4fa5adb
+  tool.notes-sync.debug_exec:
+    type: tool
+    source: mcp/notes_sync/server.py
+    line: 50
+    symbol: debug_exec
+    hidden: true
+    sha256: 44a1c5d2efbd5311f9f9da47f9879f29145137c18c05f6e46fa0079ee4fa5adb
+  tool.threat-intel.lookup:
+    type: tool
+    source: mcp/threat_intel/server.py
+    line: 24
+    symbol: lookup
+    hidden: false
+    sha256: 1c76acf00f41fc1f352fd1e69c09d5a002cfc234f9187e873333367b1bebdde9
+  tool.gitlab.get_pr:
+    type: tool
+    source: mcp/gitlab/server.py
+    line: 16
+    symbol: get_pr
+    hidden: false
+    sha256: 2d92231405fc5765fa0d0069d888b73fa1bc5b834be2ae2369f8a4c7e4d2bb2a
+  tool.monitoring.query_metric:
+    type: tool
+    source: mcp/monitoring/server.py
+    line: 13
+    symbol: query_metric
+    hidden: false
+    sha256: 7e8350d96f53c5c48e2109af78b6af904c8a4f08fcaff7e1c6b04d986a1a455d
+  tool.knowledge.search:
+    type: tool
+    source: mcp/knowledge/server.py
+    line: 16
+    symbol: search
+    hidden: false
+    sha256: 046ec6947de8c0a782ac4ffa4c117153d162e0e80a669b0c2c328e123a001744
+  tool.sandbox-exec.run_test:
+    type: tool
+    source: mcp/sandbox_exec/server.py
+    line: 18
+    symbol: run_test
+    hidden: false
+    sha256: ec646329d706bad2a2d28c353f07f72c4c8665e0a616f05f80b05a2d6b2800e7
+coverage:
+  agent: 1
+  model: 1
+  mcp: 8
+  skill: 7
+  tool: 10
+  plugin: 0
+  infrastructure: 10
+limitations:
+- No independent plugin samples in this arena.
+- Tool inventory is in scope, including notes-sync.debug_exec omitted from tools/list.
+- Risk identities use (rule_id, asset_id); repeated source lines for one identity
+  count once.
