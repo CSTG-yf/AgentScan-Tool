@@ -16,12 +16,12 @@ import statistics
 
 
 def read_json(path: Path) -> dict:
-    return json.loads(path.read_text()) if path.exists() else {}
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
 def jsonl(path: Path):
     if path.exists():
-        with path.open() as handle:
+        with path.open(encoding="utf-8") as handle:
             for line_number, line in enumerate(handle, 1):
                 if line.strip():
                     yield line_number, json.loads(line)
@@ -171,7 +171,7 @@ def export_runtime(directory: Path, *, config_hash="", image_digest="", platform
 def export_static(scan_path: Path, truth_path: Path) -> dict:
     import yaml
     scan = read_json(scan_path)
-    truth = yaml.safe_load(truth_path.read_text())
+    truth = yaml.safe_load(truth_path.read_text(encoding="utf-8"))
     out = Exporter()
     labels = {"asset": {key: True for key in truth["asset_ids"]}, "risk": {f"{rule}:{asset}": True for rule, asset in truth["risk_pairs"]}}
     truth_id = out.artifact("static-truth", "ground_truth", labels, str(truth_path.resolve()))
@@ -242,7 +242,7 @@ def main() -> int:
     if len(raw.encode()) > 32 * 1024 * 1024:
         raise ValueError("export exceeds the 32 MB import limit")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(raw + "\n")
+    args.output.write_text(raw + "\n", encoding="utf-8")
     print(f"exported {len(result['instances'])} instances and {len(result['artifacts'])} artifacts to {args.output}")
     return 0
 

@@ -24,8 +24,8 @@ subprocess.run([str(binary), "--help"], check=True)
 with tempfile.TemporaryDirectory() as directory:
     output = Path(directory) / "scan.json"
     subprocess.run([str(binary), "--range-root", str(root / "task/AgentRange-player-full"), "--output", str(output)], check=True)
-    measured = json.loads(output.read_text())
-    truth = yaml.safe_load((root / "integration/agentrange_contracts/static-ground-truth-20261012.yaml").read_text())
+    measured = json.loads(output.read_text(encoding="utf-8"))
+    truth = yaml.safe_load((root / "integration/agentrange_contracts/static-ground-truth-20261012.yaml").read_text(encoding="utf-8"))
     if {a["id"] for a in measured["assets"]} != set(truth["asset_ids"]):
         raise RuntimeError("packaged scanner asset smoke test failed")
     if {(f["rule_id"], f["asset_id"]) for f in measured["findings"]} != {tuple(p) for p in truth["risk_pairs"]}:

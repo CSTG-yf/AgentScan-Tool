@@ -27,14 +27,14 @@ def arena_hash(root: Path) -> str:
 
 
 def write_json(path: Path, value: dict) -> None:
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def run_static_evaluation(arena_root: Path, truth_path: Path, output: Path, taxonomy_path: Path = DEFAULT_TAXONOMY) -> dict:
     arena_root, truth_path, output, taxonomy_path = [p.resolve() for p in (arena_root, truth_path, output, taxonomy_path)]
     if output == arena_root or arena_root in output.parents:
         raise ValueError("evaluation output must be outside the scanned arena")
-    truth = yaml.safe_load(truth_path.read_text())
+    truth = yaml.safe_load(truth_path.read_text(encoding="utf-8"))
     before = arena_hash(arena_root)
     if before != truth["arena_sha256"]:
         raise ValueError("arena differs from independently frozen ground truth")
