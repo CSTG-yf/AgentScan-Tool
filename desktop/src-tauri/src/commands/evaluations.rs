@@ -49,3 +49,44 @@ mod tests {
         }
     }
 }
+
+fn evaluation_resource(app: &tauri::AppHandle, name: &str) -> Result<std::path::PathBuf, String> {
+    use tauri::Manager;
+    let directory = app.path().resource_dir().map_err(|e| e.to_string())?;
+    [directory.join("resources").join(name), directory.join(name),
+     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources").join(name)]
+        .into_iter().find(|p| p.is_file()).ok_or_else(|| format!("缺少内置资源：{name}"))
+}
+
+#[tauri::command]
+pub async fn import_bundled_static_evaluation(app: tauri::AppHandle) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let marker = crate::commands::lifecycle::desktop_defenseclaw_home(&app)?.join("evaluation-seed-v0.2.3.json");
+        if let Ok(id) = std::fs::read_to_string(&marker) {
+            if let Ok(saved) = crate::commands::gateway_api::get_json::<Value>(&app, &format!("/api/v1/evaluations/{}", id.trim())) {
+                return Ok(saved);
+            }
+        }
+        let source = evaluation_resource(&app, "evaluation-static-v0.2.3.json")?;
+        let report: Value = serde_json::from_slice(&std::fs::read(source).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        let saved = crate::commands::gateway_api::post_json::<Value, _>(&app, "/api/v1/evaluations", &report)?;
+        let id = saved.get("id").and_then(Value::as_str).ok_or("评测记录缺少 ID")?;
+        std::fs::write(marker, id).map_err(|e| e.to_string())?;
+        Ok(saved)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn scan_range_assets(app: tauri::AppHandle) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = crate::commands::range::configured_root(&app).ok_or("请先设置靶场文件夹")?;
+        let folder = crate::commands::lifecycle::desktop_defenseclaw_home(&app)?.join("arena-scans").join(chrono::Utc::now().format("%Y%m%d-%H%M%S-%f").to_string());
+        std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+        let output = folder.join("static-scan.json");
+        let binary = evaluation_resource(&app, if cfg!(windows) {"tracebastion-arena-scan.exe"} else {"tracebastion-arena-scan"})?;
+        let result = std::process::Command::new(binary).arg("--range-root").arg(root).arg("--output").arg(&output).output().map_err(|e| e.to_string())?;
+        if !result.status.success() {return Err(String::from_utf8_lossy(&result.stderr).into_owned());}
+        let report: Value = serde_json::from_slice(&std::fs::read(&output).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        Ok(serde_json::json!({"path":output.to_string_lossy(),"report":report}))
+    }).await.map_err(|e| e.to_string())?
+}

@@ -84,6 +84,9 @@ try {
     & $sandboxBinary --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "bundled sandbox sidecar failed to launch" }
 
+    & python (Join-Path $desktopRoot "scripts\prepare-arena-scan.py")
+    if ($LASTEXITCODE -ne 0) { throw "arena scanner packaging failed" }
+
     pnpm tauri build --bundles nsis
     if ($LASTEXITCODE -ne 0) { throw "Tauri build failed with exit code $LASTEXITCODE" }
 

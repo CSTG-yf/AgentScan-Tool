@@ -83,6 +83,89 @@ def _mcp_module(path: Path) -> bool:
     return "FastMCP" in calls or (mcp_import and "create_server" in calls)
 
 
+def discover_mcp_tools(path: Path) -> list[dict]:
+    """Read registered tools through AST only; never import or execute the server."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeError):
+        return []
+    symbols, modules = {}, set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and "mcp" in (node.module or "").casefold():
+            for alias in node.names:
+                symbols[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if "mcp" in alias.name.casefold():
+                    modules.add(alias.asname or alias.name.split(".")[0])
+    def call_name(node):
+        if isinstance(node, ast.Name):
+            return symbols.get(node.id, "")
+        if isinstance(node, ast.Attribute):
+            root = node.value
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            if isinstance(root, ast.Name) and root.id in modules:
+                return node.attr
+        return ""
+    assignments = {target.id: node.value for node in tree.body if isinstance(node, ast.Assign)
+                   for target in node.targets if isinstance(target, ast.Name)}
+    def resolve(node, seen=frozenset()):
+        if isinstance(node, ast.Name) and node.id in assignments and node.id not in seen:
+            return resolve(assignments[node.id], seen | {node.id})
+        return node
+    registered = []
+    fast_servers = set()
+    for node in tree.body:
+        value = node.value if isinstance(node, (ast.Assign, ast.Expr, ast.AnnAssign)) else None
+        if not isinstance(value, ast.Call):
+            continue
+        name = call_name(value.func)
+        if name == "FastMCP" and isinstance(node, ast.Assign):
+            fast_servers.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        if name != "create_server":
+            continue
+        tools = next((kw.value for kw in value.keywords if kw.arg == "tools"), value.args[1] if len(value.args) > 1 else None)
+        tools = resolve(tools)
+        if isinstance(tools, (ast.List, ast.Tuple)):
+            for item in tools.elts:
+                item = resolve(item)
+                if isinstance(item, ast.Call) and call_name(item.func) == "Tool":
+                    registered.append(item)
+    result = {}
+    for node in registered:
+        args = {kw.arg: resolve(kw.value) for kw in node.keywords if kw.arg}
+        name = args.get("name", resolve(node.args[0]) if node.args else None)
+        if not isinstance(name, ast.Constant) or not isinstance(name.value, str) or not name.value.strip():
+            continue
+        hidden = args.get("hidden", resolve(node.args[4]) if len(node.args) > 4 else None)
+        handler = args.get("handler", node.args[3] if len(node.args) > 3 else None)
+        result[name.value] = {"name": name.value, "line": node.lineno,
+                              "hidden": isinstance(hidden, ast.Constant) and hidden.value is True,
+                              "handler": handler.id if isinstance(handler, ast.Name) else "",
+                              "discovery_method": "registered_tool_ast"}
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            call = decorator if isinstance(decorator, ast.Call) else None
+            func = call.func if call else decorator
+            if not (isinstance(func, ast.Attribute) and func.attr == "tool"
+                    and isinstance(func.value, ast.Name) and func.value.id in fast_servers):
+                continue
+            explicit = next((kw.value for kw in call.keywords if kw.arg == "name"), None) if call else None
+            if explicit is not None:
+                explicit = resolve(explicit)
+                if not isinstance(explicit, ast.Constant) or not isinstance(explicit.value, str):
+                    continue
+                name = explicit.value
+            else:
+                name = node.name
+            result[name] = {"name": name, "line": node.lineno, "hidden": False,
+                            "handler": node.name, "discovery_method": "fastmcp_decorator_ast"}
+    return [result[name] for name in sorted(result)]
+
+
 def _hostname(value: str) -> str:
     try:
         return urlsplit(value).hostname or ""
@@ -100,7 +183,7 @@ def iter_sources(root: Path, discovered: dict[str, dict[str, str]]):
         target = root / relative
         candidates = target.rglob("*") if target.is_dir() else [target]
         for path in candidates:
-            if not path.is_file() or "__pycache__" in path.parts:
+            if not path.is_file() or "__pycache__" in path.parts or root.resolve() not in path.resolve().parents:
                 continue
             if path.suffix.lower() in TEXT_SUFFIXES or path.name in {"Dockerfile", ".env.example", "SKILL.md"}:
                 yield path
@@ -254,6 +337,16 @@ def discover_assets(root: Path) -> dict[str, dict[str, str]]:
         skill_path = skill_file.parent.relative_to(root / "skills")
         name = skill_file.parent.name
         add(f"skill.{'.'.join(skill_path.parts)}", "skill", name, skill_file.relative_to(root).as_posix())
+    for parent in list(discovered.values()):
+        if parent["type"] != "mcp_server":
+            continue
+        source = (root / parent["source"]).resolve()
+        if root.resolve() not in source.parents or source.suffix != ".py":
+            continue
+        for tool in discover_mcp_tools(source):
+            identifier = f"tool.{parent['name']}.{tool['name']}"
+            discovered[identifier] = {"id": identifier, "type": "tool", "source": parent["source"],
+                                      "parent_id": parent["id"], "mcp_server": parent["name"], **tool}
     return discovered
 
 
@@ -284,6 +377,9 @@ def discover_asset_edges(root: Path, discovered: dict[str, dict[str, str]]) -> l
         if source in discovered and target in discovered and source != target:
             edges.add((source, relation, target, evidence))
 
+    for asset in discovered.values():
+        if asset["type"] == "tool":
+            add(asset["parent_id"], "exposes", asset["id"], f"{asset['source']}:{asset['line']}")
     for service_name, service in services.items():
         if not isinstance(service, dict):
             continue

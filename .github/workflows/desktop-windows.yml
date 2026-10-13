@@ -54,7 +54,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install sandbox packager
-        run: python -m pip install pyinstaller==6.16.0
+        run: python -m pip install pyinstaller==6.16.0 PyYAML==6.0.3
 
       - name: Install desktop dependencies
         working-directory: desktop
@@ -86,6 +86,12 @@ jobs:
         shell: powershell
         run: .\desktop\scripts\test-installer.ps1 -InstallDir "$env:SystemDrive\TraceBastionDesktop-Custom-CI"
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows-installer
+          path: dist/windows/*
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/tracebastion-desktop-v')
     needs: build
@@ -111,7 +117,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install sandbox packager
-        run: python -m pip install pyinstaller==6.16.0
+        run: python -m pip install pyinstaller==6.16.0 PyYAML==6.0.3
       - name: Build Windows setup package for release
         shell: powershell
         run: .\desktop\scripts\build.ps1

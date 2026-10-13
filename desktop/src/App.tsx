@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { EyeInvisibleOutlined, EyeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, ReloadOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { Badge, Button, Layout, Menu, message, Modal, Result, Segmented, Space, Tag, Tooltip, Typography } from "antd";
@@ -233,6 +234,10 @@ export default function App() {
           // 18970; the desktop then serves from 18971+ and says so once, instead
           // of failing or silently showing the other home's data.
           if (result.notice) message.info({ key: "gateway-bootstrap", content: result.notice, duration: 8 });
+        }
+        if ("__TAURI_INTERNALS__" in window) {
+          try { await invoke("import_bundled_static_evaluation"); }
+          catch (error) { message.warning(`内置评测导入失败：${String(error)}`); }
         }
         setGatewayBootState("ready");
       } catch (error) {

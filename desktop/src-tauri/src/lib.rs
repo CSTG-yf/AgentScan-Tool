@@ -57,6 +57,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::evaluations::evaluation_request,
+            commands::evaluations::scan_range_assets,
+            commands::evaluations::import_bundled_static_evaluation,
             commands::environment::get_environment_snapshot,
             commands::agents::get_agents,
             commands::agents::get_connector_profiles,

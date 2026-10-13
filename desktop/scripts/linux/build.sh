@@ -20,6 +20,7 @@ cd "$REPO_ROOT"
 go build -buildvcs=false -trimpath -ldflags '-s -w' -o "$RESOURCE_DIR/defenseclaw-gateway" ./cmd/defenseclaw
 chmod 0755 "$RESOURCE_DIR/defenseclaw-gateway"
 bash "$SCRIPT_DIR/prepare-sandbox.sh"
+python3 "$DESKTOP_ROOT/scripts/prepare-arena-scan.py"
 
 cd "$DESKTOP_ROOT"
 if [ "${SKIP_INSTALL:-0}" != 1 ]; then

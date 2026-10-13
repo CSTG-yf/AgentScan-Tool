@@ -8,7 +8,7 @@ from integration.static_run import arena_hash, run_static_evaluation
 from integration.evaluation_export import export_static
 
 
-def test_source_scan_counts_known_tool_miss_and_keeps_provenance(tmp_path):
+def test_source_scan_discovers_registered_tool_and_keeps_provenance(tmp_path):
     arena = tmp_path / "arena"
     (arena / "mcp" / "example").mkdir(parents=True)
     (arena / "docker-compose.yml").write_text("services:\n  mcp-example:\n    build: ./mcp\n    environment: {SERVER: example.server}\n")
@@ -19,13 +19,13 @@ def test_source_scan_counts_known_tool_miss_and_keeps_provenance(tmp_path):
     truth.write_text(yaml.safe_dump(dict(arena_sha256=arena_hash(arena), asset_ids=["mcp.example", "tool.example.ping"], risk_pairs=[])))
     output = tmp_path / "output"
     result = run_static_evaluation(arena, truth, output, taxonomy)
-    assert result["evaluation"]["asset"]["tp"] == 1
-    assert result["evaluation"]["asset"]["fn"] == 1
+    assert result["evaluation"]["asset"]["tp"] == 2
+    assert result["evaluation"]["asset"]["fn"] == 0
     dashboard = result["dashboard"]
     assert dashboard["code_version"] and dashboard["config_hash"]
     assert dashboard["image_digest"] == "not_applicable:static_source_scan"
     missed = next(row for row in dashboard["instances"] if row["id"] == "tool.example.ping")
-    assert missed["predicted"] is False and missed["asset_type"] == "tool"
+    assert missed["predicted"] is True and missed["asset_type"] == "tool"
     scan = json.loads((output / "static-scan.json").read_text())
     scan["assets"] = []
     (output / "static-scan.json").write_text(json.dumps(scan))

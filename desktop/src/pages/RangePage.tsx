@@ -1,6 +1,7 @@
 import { CaretRightOutlined, ExperimentOutlined, StopOutlined } from "@ant-design/icons";
+import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
-import { Button, Card, Input, Progress, Space, Tag, Typography } from "antd";
+import { Button, Card, Input, Modal, Progress, Space, Tag, Typography, message } from "antd";
 import { defenseModeColors, defenseModeLabels } from "../app/display";
 import { rangeAttackEvents } from "../data/range";
 import type { RangeMode, RangeReplayStatus, RangeStatus } from "../types";
@@ -48,6 +49,7 @@ export function RangePage({
   onStartReplay,
   onStopReplay,
 }: RangePageProps) {
+  const [scanning, setScanning] = useState(false);
   const [root, setRoot] = useState(displayFolderPath(rangeStatus?.root ?? ""));
   useEffect(() => { setRoot(displayFolderPath(rangeStatus?.root ?? "")); }, [rangeStatus?.root]);
   const rootBusy = loading || replayBusy || Boolean(replayStatus?.running);
@@ -85,6 +87,17 @@ export function RangePage({
         <div className="service-list">
           {rangeStatus?.runningServices.length ? rangeStatus.runningServices.map((service) => <Tag key={service} color="cyan">{service}</Tag>) : <Text type="secondary">当前没有运行中的 Compose 服务</Text>}
         </div>
+      </Card>
+      <Card bordered={false} title="靶场资产与独立 MCP 工具扫描">
+        <Space wrap><Button loading={scanning} disabled={!rangeStatus?.configured} onClick={async () => {
+          setScanning(true);
+          try {
+            const data = await invoke<{ path: string; report: { assets: Array<{ type: string; hidden?: boolean }>; findings: unknown[] } }>("scan_range_assets");
+            const tools = data.report.assets.filter(a => a.type === "tool");
+            Modal.info({ title: "静态扫描完成", content: <><p>资产 {data.report.assets.length} 项，独立 MCP 工具 {tools.length} 项，其中隐藏工具 {tools.filter(t => t.hidden).length} 项，风险命中 {data.report.findings.length} 条。</p><p>结果文件：{data.path}</p><p>准确率与漏报率需要与独立真值集核对，可在能力评测页查看已验证批次。</p></> });
+          } catch (error) { message.error(`扫描失败：${String(error)}`); }
+          finally { setScanning(false); }
+        }}>扫描资产与 MCP 工具</Button><Text type="secondary">静态读取源码与配置，记录工具所属 MCP、名称、源码位置及隐藏状态。</Text></Space>
       </Card>
       <Card bordered={false} className="range-attack-card" title="攻击事件快捷执行">
         <div className="range-attack-grid">

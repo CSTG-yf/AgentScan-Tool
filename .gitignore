@@ -152,3 +152,5 @@ security_report/
 # Manual run artifacts (manual-*/, plan outputs) from local harness runs.
 # Scratch only, not project source.
 outputs/
+
+desktop/.arena-build/
