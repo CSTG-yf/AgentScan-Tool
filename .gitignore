@@ -154,3 +154,6 @@ security_report/
 outputs/
 
 desktop/.arena-build/
+desktop/src-tauri/resources/tracebastion-arena-scan
+desktop/src-tauri/resources/tracebastion-arena-scan.exe
+desktop/src-tauri/resources/evaluation-static-v*.json

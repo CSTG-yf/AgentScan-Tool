@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "scope": "current_source_snapshot",
+  "mode": "observe",
+  "platform": "darwin-arm64",
+  "code_version": "f7fa3e84759b39dee25773db0293aefb8b30c6ea",
+  "config_hash": "ab95896b4e3bdd6d74ba84ca1c9c717c229cdb0eb95682481ae6f74feab59271",
+  "config_sources": {
+    "taxonomy": "f0c504751ec6744a22daa2b2cfe3f39f9b94d06417eb0a92fb976a13d505615c",
+    "compose": "f7e351a73daf55d415fd4a6c0452e09ca0b3ed69e11cf05e999b20b5953af262",
+    "environment": "af0cc1b9d8c3aa2ac3d4f94bc5355196184039f2ee1d821de97e738ff977c35b"
+  },
+  "image_digest": "not_applicable:static_source_scan",
+  "image_scope": "No running image used: static source files only",
+  "dataset_hash": "9414b66e8ba7deef52f0ff1461ad7e1ed816f1fe22300fdef32843f62b242f35",
+  "started_at": "2026-10-13T01:10:39.179462+00:00",
+  "finished_at": "2026-10-13T01:10:39.218330+00:00",
+  "truth_sha256": "e0611aaa05ea7bc2502976601bd81f2e54c2d6d173e1c461b09f914ecf55e34a",
+  "scanner_sha256": "b63eea924c0fba61e401271d9c580aca94f1f5f0d724d71c41f8ec2cca3d47e2",
+  "taxonomy_sha256": "f0c504751ec6744a22daa2b2cfe3f39f9b94d06417eb0a92fb976a13d505615c",
+  "scan_sha256": "c6d9508de2135cc03ff53405ddb96f6b0ec6096322382e9a0f153e93f3cd5380",
+  "evaluation_sha256": "a4322088cfaf602b6ebe413b0a6d43a444e9d25fca6a9a666e225b1c9220c8e0"
+}
