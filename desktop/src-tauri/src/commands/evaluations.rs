@@ -61,19 +61,76 @@ fn evaluation_resource(app: &tauri::AppHandle, name: &str) -> Result<std::path::
 #[tauri::command]
 pub async fn import_bundled_static_evaluation(app: tauri::AppHandle) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let marker = crate::commands::lifecycle::desktop_defenseclaw_home(&app)?.join("evaluation-seed-v0.2.3.json");
-        if let Ok(id) = std::fs::read_to_string(&marker) {
-            if let Ok(saved) = crate::commands::gateway_api::get_json::<Value>(&app, &format!("/api/v1/evaluations/{}", id.trim())) {
-                return Ok(saved);
+        let home = crate::commands::lifecycle::desktop_defenseclaw_home(&app)?;
+        for marker_name in [
+            "evaluation-seed-static-v0.2.4.json",
+            "evaluation-seed-v0.2.3.json",
+        ] {
+            if let Ok(id) = std::fs::read_to_string(home.join(marker_name)) {
+                let path = format!("/api/v1/evaluations/{}", id.trim());
+                if let Ok(saved) =
+                    crate::commands::gateway_api::get_json::<Value>(&app, &path)
+                {
+                    return Ok(saved);
+                }
             }
         }
-        let source = evaluation_resource(&app, "evaluation-static-v0.2.3.json")?;
-        let report: Value = serde_json::from_slice(&std::fs::read(source).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-        let saved = crate::commands::gateway_api::post_json::<Value, _>(&app, "/api/v1/evaluations", &report)?;
-        let id = saved.get("id").and_then(Value::as_str).ok_or("评测记录缺少 ID")?;
-        std::fs::write(marker, id).map_err(|e| e.to_string())?;
+        let source = evaluation_resource(&app, "evaluation-static-v0.2.4.json")?;
+        let report: Value = serde_json::from_slice(
+            &std::fs::read(source).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        let saved = crate::commands::gateway_api::post_json::<Value, _>(
+            &app,
+            "/api/v1/evaluations",
+            &report,
+        )?;
+        let id = saved
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or("评测记录缺少 ID")?;
+        std::fs::write(home.join("evaluation-seed-static-v0.2.4.json"), id)
+            .map_err(|e| e.to_string())?;
         Ok(saved)
     }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn import_bundled_runtime_evaluations(app: tauri::AppHandle) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = crate::commands::lifecycle::desktop_defenseclaw_home(&app)?;
+        let mut imported = Vec::new();
+        let marker = home.join("evaluation-seed-runtime-action-20261009.json");
+        if let Ok(id) = std::fs::read_to_string(&marker) {
+            if crate::commands::gateway_api::get_json::<Value>(
+                &app,
+                &format!("/api/v1/evaluations/{}", id.trim()),
+            )
+            .is_ok()
+            {
+                return Ok(serde_json::json!({"imported": []}));
+            }
+        }
+        let source = evaluation_resource(&app, "evaluation-runtime-action-v0.2.4.json")?;
+        let report: Value = serde_json::from_slice(
+            &std::fs::read(source).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        let saved = crate::commands::gateway_api::post_json::<Value, _>(
+            &app,
+            "/api/v1/evaluations",
+            &report,
+        )?;
+        let id = saved
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or("评测记录缺少 ID")?;
+        std::fs::write(marker, id).map_err(|e| e.to_string())?;
+        imported.push(serde_json::json!({"mode": "action", "id": id}));
+        Ok(serde_json::json!({"imported": imported}))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

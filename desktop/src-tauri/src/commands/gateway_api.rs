@@ -92,13 +92,22 @@ fn request_bytes(
     body: Option<&[u8]>,
 ) -> Result<Vec<u8>, String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let payload = body.unwrap_or_default();
+    let large_evaluation_import = method == "POST"
+        && path.split('?').next().unwrap_or("") == "/api/v1/evaluations"
+        && payload.len() >= (1 << 20);
+    let (read_timeout, write_timeout) = if large_evaluation_import {
+        (Duration::from_secs(60), Duration::from_secs(30))
+    } else {
+        (Duration::from_secs(3), Duration::from_secs(2))
+    };
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(900))
         .map_err(|error| format!("connect gateway 127.0.0.1:{port}: {error}"))?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(3)))
+        .set_read_timeout(Some(read_timeout))
         .map_err(|error| format!("configure gateway read timeout: {error}"))?;
     stream
-        .set_write_timeout(Some(Duration::from_secs(2)))
+        .set_write_timeout(Some(write_timeout))
         .map_err(|error| format!("configure gateway write timeout: {error}"))?;
 
     let normalized_path = if path.starts_with('/') {
@@ -106,7 +115,6 @@ fn request_bytes(
     } else {
         format!("/{path}")
     };
-    let payload = body.unwrap_or_default();
     let mut request = format!(
         "{method} {normalized_path} HTTP/1.1\r\n\
          Host: 127.0.0.1:{port}\r\n\

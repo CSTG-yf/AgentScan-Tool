@@ -59,6 +59,7 @@ pub fn run() {
             commands::evaluations::evaluation_request,
             commands::evaluations::scan_range_assets,
             commands::evaluations::import_bundled_static_evaluation,
+            commands::evaluations::import_bundled_runtime_evaluations,
             commands::environment::get_environment_snapshot,
             commands::agents::get_agents,
             commands::agents::get_connector_profiles,

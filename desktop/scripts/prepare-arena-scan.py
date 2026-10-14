@@ -1,5 +1,6 @@
 """Package the arena scanner and its rule file for the desktop installer."""
 from pathlib import Path
+from hashlib import sha256
 import json
 import tempfile
 import yaml
@@ -32,6 +33,26 @@ with tempfile.TemporaryDirectory() as directory:
         raise RuntimeError("packaged scanner risk smoke test failed")
 seed = root / "docs/evidence/20261013-static-mcp-tools/evaluation.json"
 if seed.exists():
-    shutil.copyfile(seed, resources / "evaluation-static-v0.2.3.json")
+    shutil.copyfile(seed, resources / "evaluation-static-v0.2.4.json")
 else:
     raise FileNotFoundError(f"verified static evaluation seed missing: {seed}")
+seed = root / "docs/evidence/20261009-mac-full-pair/evaluation-action.json"
+if not seed.exists():
+    raise FileNotFoundError(f"verified runtime evaluation seed missing: {seed}")
+runtime_report = json.loads(seed.read_text(encoding="utf-8"))
+runtime_instances = runtime_report.get("instances", [])
+runtime_artifacts = {artifact["id"]: artifact for artifact in runtime_report.get("artifacts", [])}
+blocked = [row for row in runtime_instances if row.get("actually_blocked") is True]
+if runtime_report.get("mode") != "action" or len(runtime_instances) != 5200 or len(blocked) != 80:
+    raise RuntimeError("packaged runtime evaluation evidence is incomplete")
+for artifact in runtime_artifacts.values():
+    content = artifact.get("content", "")
+    if sha256(content.encode("utf-8")).hexdigest() != artifact.get("sha256"):
+        raise RuntimeError(f"packaged runtime evaluation evidence hash mismatch: {artifact['id']}")
+    json.loads(content)
+    if any(private_key in content for private_key in ('"request_body"', '"response_body"', '"prompt"')):
+        raise RuntimeError("packaged runtime evaluation contains free-text request data")
+for instance in runtime_instances:
+    if any(ref not in runtime_artifacts for refs in instance.get("evidence", {}).values() for ref in refs):
+        raise RuntimeError(f"packaged runtime evaluation has a missing artifact: {instance['id']}")
+shutil.copyfile(seed, resources / "evaluation-runtime-action-v0.2.4.json")

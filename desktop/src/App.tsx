@@ -238,6 +238,8 @@ export default function App() {
         if ("__TAURI_INTERNALS__" in window) {
           try { await invoke("import_bundled_static_evaluation"); }
           catch (error) { message.warning(`内置评测导入失败：${String(error)}`); }
+          try { await invoke("import_bundled_runtime_evaluations"); }
+          catch (error) { message.warning(`内置运行时评测导入失败：${String(error)}`); }
         }
         setGatewayBootState("ready");
       } catch (error) {
