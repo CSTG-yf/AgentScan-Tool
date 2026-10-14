@@ -3,12 +3,16 @@ import { AlertOutlined, ApartmentOutlined, ArrowRightOutlined, CheckCircleFilled
 import { Alert, Button, Card, Empty, Segmented, Skeleton, Tag, Tooltip, Typography } from "antd";
 import ReactECharts from "echarts-for-react";
 import { getAttackChains, getRuntimeDetections, getRuntimeEnforcements, getRuntimeSecurityAgents, getRuntimeSecurityMode } from "../bridge";
+import { evaluationRequest, type EvaluationRun } from "../evaluations";
 import type { PageKey } from "../app/navigation";
 import type { AttackChain, EnvironmentSnapshot, GuardPolicy, RuntimeDetection, RuntimeEnforcementRecord, RuntimeSecurityAgent, RuntimeSecurityMode } from "../types";
 
 const { Text, Title } = Typography;
 type RangeKey = "24h" | "today" | "7d";
 type OverviewData = { detections: RuntimeDetection[]; chains: AttackChain[]; agents: RuntimeSecurityAgent[]; enforcements: RuntimeEnforcementRecord[]; mode?: RuntimeSecurityMode; capturedAt: Date };
+type PublicBenchmarks = { assets: EvaluationRun; runtime: EvaluationRun };
+const publicRuntimeDataset = "7c48a410b1d503d4e8c00e70c4642eaee3876675980b8caf145d15d0ea416b25";
+const publicStaticDataset = "9414b66e8ba7deef52f0ff1461ad7e1ed816f1fe22300fdef32843f62b242f35";
 const severityRank: Record<string, number> = { critical: 5, high: 4, medium: 3, low: 2, info: 1 };
 const openStatuses = new Set(["open", "active", "pending", "unresolved", "new"]);
 const successStatuses = new Set(["success", "succeeded", "executed", "completed", "applied", "blocked", "contained"]);
@@ -38,6 +42,8 @@ export function OverviewPage({ environment, policy, refreshNonce = 0, onNavigate
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [benchmarks, setBenchmarks] = useState<PublicBenchmarks>();
+  const [benchmarkError, setBenchmarkError] = useState("");
   const [revision, setRevision] = useState(0);
 
   const load = useCallback(async () => {
@@ -49,8 +55,18 @@ export function OverviewPage({ environment, policy, refreshNonce = 0, onNavigate
       getRuntimeSecurityAgents(1000),
       getRuntimeEnforcements(),
       getRuntimeSecurityMode(),
+      evaluationRequest<{ runs: EvaluationRun[] }>("?limit=100&offset=0"),
     ]);
-    setErrors(results.flatMap((result, index) => result.status === "rejected" ? [`${["风险事件", "攻击链", "Agent 风险", "响应动作", "运行模式"][index]}：${String(result.reason)}`] : []));
+    setErrors(results.slice(0, 5).flatMap((result, index) => result.status === "rejected" ? [`${["风险事件", "攻击链", "Agent 风险", "响应动作", "运行模式"][index]}：${String(result.reason)}`] : []));
+    const publicRuns = results[5];
+    if (publicRuns.status === "fulfilled") {
+      const assets = publicRuns.value.runs.find(run => run.status === "completed" && run.static_truth?.dataset_hash === publicStaticDataset);
+      const runtime = publicRuns.value.runs.find(run => run.status === "completed" && run.mode === "action" && run.runtime_truth?.dataset_hash === publicRuntimeDataset);
+      setBenchmarks(assets && runtime ? { assets, runtime } : undefined);
+      setBenchmarkError(assets && runtime ? "" : "公开靶场实测记录尚未导入");
+    } else {
+      setBenchmarkError("公开靶场实测记录暂时无法读取");
+    }
     setData(previous => ({
       detections: results[0].status === "fulfilled" ? results[0].value.items : previous?.detections ?? [],
       chains: results[1].status === "fulfilled" ? results[1].value.chains : previous?.chains ?? [],
@@ -115,6 +131,7 @@ export function OverviewPage({ environment, policy, refreshNonce = 0, onNavigate
       <Button type={view.openHigh.length ? "primary" : "default"} danger={view.openHigh.length > 0} onClick={() => onNavigate(errors.length ? "settings" : "events")}>{errors.length ? "检查服务" : "立即查看"}<ArrowRightOutlined /></Button>
     </div>
     {errors.length > 0 && <Alert className="overview-source-error" type="error" showIcon message="部分模块保留上次成功数据" description={errors.join("；")} />}
+    <PublicBenchmarkPanel benchmarks={benchmarks} error={benchmarkError} onOpen={() => onNavigate("evaluations")} />
     <div className="overview-metrics">
       {[
         { label: "未处置高危", value: view.openHigh.length, note: "Critical / High 且状态未关闭", icon: <AlertOutlined />, tone: "danger", page: "events" as PageKey },
@@ -129,11 +146,11 @@ export function OverviewPage({ environment, policy, refreshNonce = 0, onNavigate
       <Card className="overview-panel trend-panel" title="风险趋势" extra={<div className="chart-legend"><span className="blue">异常事件</span><span className="red">攻击事件</span><span className="green">实际阻断</span></div>}>
         <ReactECharts className="overview-chart" option={{ tooltip: { trigger: "axis" }, grid: { left: 34, right: 18, top: 20, bottom: 34 }, xAxis: { type: "category", data: buckets.map(item => item.label), axisLabel: { color: "#64748b", interval: range === "7d" ? 0 : 3 } }, yAxis: { type: "value", minInterval: 1, axisLabel: { color: "#64748b" }, splitLine: { lineStyle: { color: "#e9eef5" } } }, series: [{ name: "异常事件", type: "line", smooth: true, symbol: "circle", data: buckets.map(item => item.detections), lineStyle: { color: "#1677ff" }, itemStyle: { color: "#1677ff" } }, { name: "攻击事件", type: "line", smooth: true, symbol: "diamond", data: buckets.map(item => item.attacks), lineStyle: { color: "#ef4444", type: "dashed" }, itemStyle: { color: "#ef4444" } }, { name: "实际阻断", type: "line", smooth: true, symbol: "triangle", data: buckets.map(item => item.blocks), lineStyle: { color: "#16a36a" }, itemStyle: { color: "#16a36a" }, areaStyle: { color: "rgba(22,163,106,.08)" } }] }} />
       </Card>
-      <OverviewList title="待处置事项" action={() => onNavigate("events")} empty="暂无待处置事项" rows={workItems.map(item => ({ id: item.detectionId, badge: severityTag(item.severity), title: item.agentName || item.agentId || "未知 Agent", detail: item.title, status: statusLabel(item.status), time: formatTime(item.lastSeenAt || item.createdAt) }))} />
+      <OverviewList title="待处置事项" action={() => onNavigate("events")} empty={benchmarks ? "暂无实时待处置事项；历史靶场实测见上方" : "暂无待处置事项"} rows={workItems.map(item => ({ id: item.detectionId, badge: severityTag(item.severity), title: item.agentName || item.agentId || "未知 Agent", detail: item.title, status: statusLabel(item.status), time: formatTime(item.lastSeenAt || item.createdAt) }))} />
     </div>
     <div className="overview-bottom-grid">
-      <OverviewList title="最近高危告警" action={() => onNavigate("events")} empty="当前范围无高危告警" rows={topDetections.filter(item => severityRank[item.severity?.toLowerCase()] >= 4).map(item => ({ id: item.detectionId, badge: severityTag(item.severity), title: item.agentName || "未知 Agent", detail: item.title, status: statusLabel(item.status), time: formatTime(item.lastSeenAt || item.createdAt) }))} />
-      <OverviewList title="最近攻击链" action={() => onNavigate("chain")} empty="当前范围无攻击链" rows={topChains.map(item => ({ id: item.id, badge: severityTag(item.risk), title: item.agent, detail: item.summary, status: statusLabel(item.rawStatus || item.status), time: formatTime(item.startedAt) }))} />
+      <OverviewList title="最近高危告警" action={() => onNavigate("events")} empty={benchmarks ? "当前范围无实时高危告警；历史检测与阻断成绩见上方" : "当前范围无高危告警"} rows={topDetections.filter(item => severityRank[item.severity?.toLowerCase()] >= 4).map(item => ({ id: item.detectionId, badge: severityTag(item.severity), title: item.agentName || "未知 Agent", detail: item.title, status: statusLabel(item.status), time: formatTime(item.lastSeenAt || item.createdAt) }))} />
+      <OverviewList title="最近攻击链" action={() => onNavigate("chain")} empty={benchmarks ? "当前范围无实时攻击链；公开回放保留在能力评测证据中" : "当前范围无攻击链"} rows={topChains.map(item => ({ id: item.id, badge: severityTag(item.risk), title: item.agent, detail: item.summary, status: statusLabel(item.rawStatus || item.status), time: formatTime(item.startedAt) }))} />
       <Card className="overview-panel protection-panel" title="防护状态" extra={<Button type="link" onClick={() => onNavigate("settings")}>服务设置 <ArrowRightOutlined /></Button>}>
         <ProtectionRow label="运行模式" value={data?.mode === "action" ? "强制防护" : data?.mode === "observe" ? "观察模式" : "未知"} ok={Boolean(data?.mode)} />
         <ProtectionRow label="网关" value={gateway?.state === "ready" ? "在线" : gateway?.detail || "未检测"} ok={gateway?.state === "ready"} />
@@ -142,6 +159,43 @@ export function OverviewPage({ environment, policy, refreshNonce = 0, onNavigate
         <ProtectionRow label="数据采集" value={errors.length ? "部分异常" : "正常"} ok={!errors.length} />
       </Card>
     </div>
+  </section>;
+}
+
+function PublicBenchmarkPanel({ benchmarks, error, onOpen }: { benchmarks?: PublicBenchmarks; error: string; onOpen: () => void }) {
+  if (!benchmarks) return error ? <Alert className="overview-benchmark-error" type="info" showIcon message="公开靶场结果暂不可用" description={`${error}。可在“能力评测”中刷新或导入报告。`} /> : null;
+  const getMetric = (run: EvaluationRun, key: string) => run.report.metrics.find(item => item.key === key);
+  const formatCount = (metric?: EvaluationRun["report"]["metrics"][number]) => metric?.numerator !== null && metric?.numerator !== undefined && metric?.denominator !== null && metric?.denominator !== undefined
+    ? `${metric.numerator.toLocaleString()} / ${metric.denominator.toLocaleString()}`
+    : metric?.value === null || metric?.value === undefined ? "未评测" : metric.unit === "ratio" ? `${(metric.value * 100).toFixed(1)}%` : `${metric.value}${metric.unit === "ms" ? " ms" : ""}`;
+  const formatValue = (metric?: EvaluationRun["report"]["metrics"][number]) => metric?.value === null || metric?.value === undefined ? "未评测" : metric.unit === "ratio" ? `${(metric.value * 100).toFixed(1)}%` : `${metric.value}${metric.unit === "ms" ? " ms" : ""}`;
+  const assetMetrics = [
+    { label: "资产识别", metric: getMetric(benchmarks.assets, "asset_precision"), display: formatCount(getMetric(benchmarks.assets, "asset_precision")) },
+    { label: "资产漏报", metric: getMetric(benchmarks.assets, "asset_fnr"), display: formatValue(getMetric(benchmarks.assets, "asset_fnr")) },
+    { label: "风险识别", metric: getMetric(benchmarks.assets, "risk_recall"), display: formatCount(getMetric(benchmarks.assets, "risk_recall")) },
+    { label: "风险漏报", metric: getMetric(benchmarks.assets, "risk_fnr"), display: formatValue(getMetric(benchmarks.assets, "risk_fnr")) },
+  ];
+  const runtimeMetrics = [
+    { label: "攻击检出", metric: getMetric(benchmarks.runtime, "runtime_recall"), display: formatCount(getMetric(benchmarks.runtime, "runtime_recall")) },
+    { label: "实际阻断", metric: getMetric(benchmarks.runtime, "effective_block_rate"), display: formatCount(getMetric(benchmarks.runtime, "effective_block_rate")) },
+    { label: "误报", metric: getMetric(benchmarks.runtime, "runtime_fpr"), display: formatValue(getMetric(benchmarks.runtime, "runtime_fpr")) },
+    { label: "正常请求成功", metric: getMetric(benchmarks.runtime, "business_success_rate"), display: formatCount(getMetric(benchmarks.runtime, "business_success_rate")) },
+    { label: "检查 P95", metric: getMetric(benchmarks.runtime, "inspect_p95"), display: formatValue(getMetric(benchmarks.runtime, "inspect_p95")) },
+  ];
+  return <Card className="overview-panel benchmark-panel" title={<span>公开靶场实测 <Tag color="blue">历史结果 · 非实时告警</Tag></span>} extra={<Button type="link" onClick={onOpen}>查看逐项证据 <ArrowRightOutlined /></Button>}>
+    <div className="benchmark-groups">
+      <BenchmarkGroup title="Agent 资产与风险识别" run={benchmarks.assets} metrics={assetMetrics} />
+      <BenchmarkGroup title="Agent 风险监控与阻断" run={benchmarks.runtime} metrics={runtimeMetrics} />
+    </div>
+  </Card>;
+}
+
+function BenchmarkGroup({ title, run, metrics }: { title: string; run: EvaluationRun; metrics: Array<{ label: string; display: string; metric?: EvaluationRun["report"]["metrics"][number] }> }) {
+  return <section className="benchmark-group">
+    <div className="benchmark-group-heading"><strong>{title}</strong><Text type="secondary">实测于 {formatTime(run.finished_at || run.started_at)}</Text></div>
+    <div className="benchmark-values">{metrics.map(item => <div className="benchmark-value" key={item.label}>
+      <Text type="secondary">{item.label}</Text><strong>{item.display}</strong><small>{item.metric?.target ? `目标 ${item.metric.target}` : "评测报告"}</small>
+    </div>)}</div>
   </section>;
 }
 
